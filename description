@@ -1,0 +1,51 @@
+I would like to build a "task / todo manager" program.  I like the general idea of
+TaskWarrior ( https://taskwarrior.org/ ), in particular I like that it can operate well at
+the CLI/TUI, but in actual use I found it did't really help to keep me on task.  Part of
+this is that I have tasks coming in all the time, so it's easy to get buried in work.
+I'd like this all written in go.  It probably should also have an MCP interface.
+
+Background: Right now I use just a text file to track my work, I have a list of "What I've
+done" by date, usually a sentence per thing I've done, though work on a task might not
+complete it.  Then below that dated log of what I've done, there's lines indicating "what
+I need to do.  The file grows both ways from my "active" point, things I've done are added
+as lines above where I'm at now, and things to do are added below that.  FYI: I don't need
+the new system to mimic this, I'm just telling you so you can get an idea of my current
+workflow.  It works ok, but I feel like there's opportunity for improving it.
+
+For example, I might have something in my "todo" section like "Set up keycloak postgres
+cluster", but then today I might add items like "Added Ansible role for postgres cluster",
+"Created pgk cluster in dev", etc, and this might take several days.
+
+Here are some of the features I'd like:  I think I'd like it to have multiple interfaces:
+CLI, a TUI, and a web interface; that probably means we need a server that is where the
+sqlite database exists, and the TUI and CLI and web frontends use an API to interface with
+it.  I'd like the "done" items to have a date on them (it probably doesn't need time
+resolution; maybe store date+time but typically only show date unless you look at detailed
+view; sometimes I add a work note well after the work was done, like at night doing a
+recap).  It would be nice for the "done" items to be associated with the "todo" item they
+are a part of.  Sometimes items are "one-and-done", like "Run ansible against dev qt
+cluster", I might just close that once I've done it without adding multiple "done
+sub-records", I may want to edit the "todo" name at the point I close it ("Run ansible
+against dev qt" -> "Add svc-cluster weencrypt name to certs"). In other words:
+In some cases "todo" items might transition directly to a "done" item, but in other cases
+I might want to add a "done" (or maybe we should call them "work"?) record when I've done
+partial work on the item but am not done with it (maybe you can come up with a better name
+for the "worked" records).
+
+I may also want to add "notes" to "work" records; the "todo" or "done" record would have
+a title that is a brief description, but I might want to add extra notes about that work.
+
+I also need the ability to triage upcoming work, to order them.  In some cases I might
+want to mark an task as "upcoming" with a date (or even date+time), in which case that
+item should present itself on the day it's due in the triage list, or maybe in an
+"upcoming" section.  I also would like a triage ability to mark a time slot throughout
+today that I'd like to try to get something done; blocking out my day, but those time
+blocks would be different than due dates, and any time blocked things I miss should go
+back into the top of "todo" the next day for me to re-triage.  It's probably worthwhile
+tracking when things get "blocked out", and when they slip.
+
+I could imagine a singe mega "work" database record that has a description and a note and
+a status and due and timeblock, and priority, and "related work" and "notes" section.
+
+I'd also like it to be able to render a "work report" like my current work text file that
+lists by day what items I have done.
