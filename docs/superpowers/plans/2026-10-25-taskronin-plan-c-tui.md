@@ -362,7 +362,7 @@ func TestTodayMsgStoresAggregate(t *testing.T) {
 type sendFunc func(ctx context.Context, c API, key string) (*api.OpResponse, error)
 type formRetry struct {      // immutable snapshot kept after an outcome-unknown reply
 	value, key, gen string   // input text, the client's Idempotency-Key, Generation() at send time
-	at   time.Time           // a.clock.Now at the FIRST attempt; kept unchanged across later outcome-unknown replies
+	at   time.Time           // a.clock.Now read in Update when the FIRST attempt is submitted (before the cmd runs); never updated later
 	send sendFunc            // the same resolved request
 }
 type form struct {           // implements screen; stored in App.form
@@ -390,7 +390,7 @@ func (l link) label() string // "→ #42 (focus)", "→ #2 (current block)", "�
 func (a *App) openLog(date civil.Date, l link) tea.Cmd // AddEntry form; WorkDate set only when date ≠ clock.Today
 func (a *App) openAdd() tea.Cmd
 ```
-`enter` in a form (AIDEV-NOTE: retry snapshot): if `retry != nil` and the input equals `retry.value` → run one `mutate` whose call first reads fresh server time with `c.Clock(ctx)` (`Now − retry.at > 7 × 24h` → return `errRetryStale`, the idempotency window has passed), then compares `c.Generation(ctx)` with `retry.gen` (different → `errRetryStale`), and only then calls `retry.send(ctx, c, retry.key)`. Stale (either way) → `retry = nil`, banner `the database may have changed since the first attempt (restore or 7-day limit) — check, then enter sends a new request`. Otherwise (no snapshot, or the text changed) → `retry = nil`, `submit`, and `mutate` whose call records `gen := c.Generation(ctx)` before `send(ctx, c, "")`. Success → `a.form = nil` (untyped nil), then `after`. Error → `waiting = false`, text kept; on `*client.OutcomeUnknownError` store `retry = &formRetry{value, err.Key, gen, a.clock.Now.Time, send}` for a first attempt, but leave an existing snapshot untouched when a resend of it ends outcome-unknown again and banner `outcome unknown — enter resends the same request`. (`gen` is written inside the cmd and read in `onErr` after the `opMsg` arrives; the program's message channel orders the two.)
+`enter` in a form (AIDEV-NOTE: retry snapshot): if `retry != nil` and the input equals `retry.value` → run one `mutate` whose call first reads fresh server time with `c.Clock(ctx)` (`Now − retry.at > 7 × 24h` → return `errRetryStale`, the idempotency window has passed), then compares `c.Generation(ctx)` with `retry.gen` (different → `errRetryStale`), and only then calls `retry.send(ctx, c, retry.key)`. Stale (either way) → `retry = nil`, banner `the database may have changed since the first attempt (restore or 7-day limit) — check, then enter sends a new request`. Otherwise (no snapshot, or the text changed) → `retry = nil`, `submit`, `at := a.clock.Now.Time` taken right here in `Update` (the last server time, never later than the real send, so the window can only end early), and `mutate` whose call records `gen := c.Generation(ctx)` before `send(ctx, c, "")`. Success → `a.form = nil` (untyped nil), then `after`. Error → `waiting = false`, text kept; on `*client.OutcomeUnknownError` store `retry = &formRetry{value, err.Key, gen, at, send}` (the `at` captured before sending, not the time the failure arrived) for a first attempt, but leave an existing snapshot untouched when a resend of it ends outcome-unknown again and banner `outcome unknown — enter resends the same request`. (`gen` is written inside the cmd and read in `onErr` after the `opMsg` arrives; the program's message channel orders the two.)
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -421,7 +421,8 @@ func TestFormRetrySendsSnapshot(t *testing.T) { // midnight between attempts
 func TestFormRetryRefusedWhenStale(t *testing.T) {
 	// as above up to the outcome-unknown reply; f.gen = "fedcba9876543210" (restore); enter → no DeferTask call, banner contains
 	// "may have changed since the first attempt"; enter again → DeferTask with Mut.Key "" (new request, body re-resolved).
-	// Window: first attempt at T0 → outcome unknown; f.clock.Now = T0 + 6 d, resend → outcome unknown again (snapshot keeps at = T0);
+	// Window: submit at T0 (a.clock.Now); before the outcome-unknown opMsg is delivered, a todayMsg moves a.clock.Now to T0 + 5 s → snapshot at == T0;
+	// f.clock.Now = T0 + 6 d, resend → outcome unknown again (snapshot keeps at = T0);
 	// f.clock.Now = T0 + 7 d + 1 s (only the fake's /clock moves; no todayMsg) → enter → a Clock call, no DeferTask, same refusal banner.
 }
 func TestLogImplicitLink(t *testing.T) { // FOC-04, FOC-05, FOC-06 (TUI side)

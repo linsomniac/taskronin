@@ -553,7 +553,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Modify: `internal/web/h_views.go` (real `today` + four handlers), `internal/web/templates/today.html`, `internal/web/routes.go`, `internal/web/templates/partials.html` (`taskrow`, `entryrow`, `blockrow`, `addtask`, `logentry`), `internal/web/helpers_test.go` (seeding helpers)
 
 **Interfaces:**
-- Consumes: Plan A Task 32 Interfaces: `Today(ctx, a) (service.TodayView, error)`, `Upcoming(ctx, a) (service.UpcomingView, error)`, `ListTasks(ctx, a, service.ListTasksIn) (service.Page[domain.TaskView], error)`, `ListEntries(ctx, a, service.ListEntriesIn) (service.Page[domain.EntryView], error)`, `service.Page[T]{Items []T; NextCursor string}` (`""` = last page), `TodayView`/`Banner`/`BackupHealth` fields. Plan A Task 5 Interfaces / A§2.6: `domain.TaskView` (`Reasons []TriageRow`, `Tags`, `View`, `Deferred`, `DuePhase`, `DueSoon`, `SlipsLifetime`, `SlipsSinceTriage`; optional fields are `sql.Null[T]` — templates test `.DueDate.Valid` and print `.DueDate.V`), `domain.EntryView` (`TaskTitle`), `domain.BlockView` (`Span.Start`, `Span.End`, `Current`, `Started`, `Ended`, `NeedsReblock`, `TaskTitle`, `TaskVersion`), `domain.Interruption`. Plan A Task 33: `ListOps(ctx, a, service.ListOpsIn) (service.Page[service.OpSummary], error)` (newest first; tests). Seeding (each signature in that Plan A task's Interfaces): `AddTask` (16b), `Place` (19), `SetDue` (20), `AddEntry` (21), `Block` (22), `DeleteEntry` (25), `SetFocus` (26), `Defer` (27), `Complete` (28). Plan A Task 16a: `testutil.Meta(a domain.Actor, gen domain.Generation) service.Meta`, `testutil.Owner()`, `testutil.AI()`, `testutil.Local`. Tasks 3–4 helpers.
+- Consumes: Plan A Task 32 Interfaces: `Today(ctx, a) (service.TodayView, error)`, `Upcoming(ctx, a) (service.UpcomingView, error)`, `ListTasks(ctx, a, service.ListTasksIn) (service.Page[domain.TaskView], error)`, `ListEntries(ctx, a, service.ListEntriesIn) (service.Page[domain.EntryView], error)`, `service.Page[T]{Items []T; NextCursor string}` (`""` = last page; Plan A fetches limit+1 rows, so a page of exactly `limit` items with nothing after it has `NextCursor == ""`), `TodayView`/`Banner`/`BackupHealth` fields. Plan A Task 5 Interfaces / A§2.6: `domain.TaskView` (`Reasons []TriageRow`, `Tags`, `View`, `Deferred`, `DuePhase`, `DueSoon`, `SlipsLifetime`, `SlipsSinceTriage`; optional fields are `sql.Null[T]` — templates test `.DueDate.Valid` and print `.DueDate.V`), `domain.EntryView` (`TaskTitle`), `domain.BlockView` (`Span.Start`, `Span.End`, `Current`, `Started`, `Ended`, `NeedsReblock`, `TaskTitle`, `TaskVersion`), `domain.Interruption`. Plan A Task 33: `ListOps(ctx, a, service.ListOpsIn) (service.Page[service.OpSummary], error)` (newest first; tests). Seeding (each signature in that Plan A task's Interfaces): `AddTask` (16b), `Place` (19), `SetDue` (20), `AddEntry` (21), `Block` (22), `DeleteEntry` (25), `SetFocus` (26), `Defer` (27), `Complete` (28). Plan A Task 16a: `testutil.Meta(a domain.Actor, gen domain.Generation) service.Meta`, `testutil.Owner()`, `testutil.AI()`, `testutil.Local`. Tasks 3–4 helpers.
 - Produces: routes `GET /ui/{$}` (replacing the stub), `GET /ui/triage`, `GET /ui/backlog`, `GET /ui/upcoming`, `GET /ui/log`; partials `taskrow` (title link `/ui/tasks/{id}`, `#id`, reasons, slips `L/S`, due/defer, tags, project, priority, `data-task="{id}"`), `entryrow` (`data-entry="{id}"`; C14–C16 forms), `blockrow` (`data-block="{id}"`; C17/C18 forms), `addtask` (C1), `logentry` (C13); harness `func (ta *testApp) meta() service.Meta` (`testutil.Meta(testutil.Owner(), ta.Svc.Generation())`), `addTask(in service.AddTaskIn) domain.TaskID`, `task(id domain.TaskID) domain.TaskDetail`, `opKinds() []string` (all ops oldest first: pages through `ListOps` and reverses).
 - Page content (D§5.4, arch §11.2); each list with `NextCursor != ""` renders a "More" link `moreURL(r.URL, NextCursor)` (Limit 100; filters survive); the `cursor` query value goes to the service unchanged (the service validates it; a hostile value → `malformed`):
   - **Today** (`Today`): each `Banners` entry as `<div class="banner" data-banner="{{.Kind}}">`; an `ai_changes` banner linking `/ui/ai-changes` (synthesized when `AIChanges > 0` and `Banners` has none); backup warning when unhealthy; focus task (C9 complete, C20 clear); current block highlighted; today's blocks (`blockrow`; `NeedsReblock` shows "reblock?"); triage count + top 5 linking `/ui/triage`; overdue and due-soon only when non-empty; today's entries; interruptions; `addtask` (C1), `logentry` (C13, `task_id` prefilled), C20 set-focus form.
@@ -591,7 +591,8 @@ func TestLogPage(t *testing.T)
 // forms "/ui/entries/1/edit", "/ui/entries/1/relink", "/ui/entries/1/delete", "/ui/entries"
 func TestListPaging(t *testing.T) // pagination keeps filters: 101 entries dated 10-20 on #1, one more on 10-20 then DeleteEntry'd, one on 10-28;
 // /ui/log?from=2026-10-20&to=2026-10-20&include_deleted=1 → 100 entry rows; its More link has from, to, include_deleted unchanged + cursor;
-// following it → the remaining 2 rows (one with an "undelete" form); no page shows the 10-28 entry;
+// following it → the remaining 2 rows (one with an "undelete" form) and no More link; no page shows the 10-28 entry;
+// end of list: DeleteEntry one more 10-20 entry, then /ui/log?from=2026-10-20&to=2026-10-20 (live only: exactly 100) → 100 rows and no More link;
 // /ui/log?cursor=garbage → 400 `data-code="malformed"` (cursor passed through unchanged)
 func TestViewsEscapeHostileTitle(t *testing.T) // Review Focus 4
 // title `<script>alert(1)</script>"' onmouseover=x` on a triage task, a backlog task, a deferred task, and as an entry title:
@@ -748,8 +749,8 @@ func TestSearchPage(t *testing.T) // #1 "Set up keycloak" → /ui/search?q=keycl
 func TestAIChangesPage(t *testing.T) // testutil.AI() AddEntry(#1) → lists "token:ai", a revert form for it, scrapeForm("/ui/ai-changes/review")
 // through == that op's seq; ?all=1 lists it with no review form; after MarkAIReviewed via the service: no review form, ?all=1 still lists the op
 func TestAIReviewNeverCoversUnseen(t *testing.T) // 101 AddEntry(standalone) by testutil.TokenActor("bot", domain.MCPDefaultScopes) (no rate cap):
-// /ui/ai-changes → 100 rows (seqs s2…s101), a More link, NO "/ui/ai-changes/review" form; following More → 1 row (s1) and a review form
-// with through == s1 (never a seq of an op not on that page)
+// /ui/ai-changes → 100 rows (seqs s2…s101), a More link, NO "/ui/ai-changes/review" form; following More → 1 row (s1), no More link, and a review form
+// with through == s1 (never a seq of an op not on that page). Exactly 100 unreviewed (seed 100) → one page, no More link, review through the newest seq
 ```
 
 - [ ] **Step 2: Run to verify failure**
@@ -986,8 +987,8 @@ func TestRevertFromAIChanges(t *testing.T) // testutil.AI() AddEntry(#1) → the
 func TestMarkAIReviewed(t *testing.T) // review form → ListAIChanges.Unreviewed == 0; /ui/ no longer contains `data-banner="ai_changes"`;
 // through overridden to the latest seq + 10 → 422
 func TestMarkAIReviewedMultiPage(t *testing.T) // 101 unreviewed changes as in Task 6c TestAIReviewNeverCoversUnseen: submit the review form
-// from the second (oldest) page → Unreviewed == 100 and every newer change is still listed as unreviewed; /ui/ai-changes now fits one page and
-// offers review through the newest seq; submitting it → Unreviewed == 0
+// from the second (oldest) page → Unreviewed == 100 and every newer change is still listed as unreviewed; /ui/ai-changes now shows exactly 100 rows
+// with no More link (end-of-list semantics) and offers review through the newest seq; submitting it → Unreviewed == 0
 func TestSCP07_NoAdminRoutes(t *testing.T) // catalog SCP-07, web half (`forbidden` for ChanWeb token ops: Plan A Task 35a):
 // logged in, valid CSRF: GET and POST /ui/tokens, /ui/tokens/1/revoke, /ui/settings, /ui/password, /ui/backups, /ui/export → 404 or 405, never 2xx/3xx;
 // no rendered page (/ui/, /ui/tasks/1, /ui/ai-changes) links or posts to /ui/tokens or /ui/settings
