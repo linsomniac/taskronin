@@ -858,5 +858,8 @@ sets; explicit undo/redo stacks; owner token socket-only under
 14. Platforms: Linux (implied by 6).
 15. Git: commit on a local branch.
 
-## 19. Open questions (round 2)
-Collected during detailed design/planning; see the plan document.
+## 19. Question round 2 — Sean's answers (2026-10-26)
+1. Go module path: keep `taskronin` (private, local).
+2. Install: `make install` to ~/.local/bin + systemd `--user` units written by `tkr init` (no Nix packaging).
+3. Checkpoint: pause after Plans A + B (core, server, CLI, MCP) for Sean to try it before the TUI and web are built.
+4. Design, architecture, behavior catalog and plans approved; implementation may start.
