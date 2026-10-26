@@ -269,7 +269,7 @@ func TestHelpToggle(t *testing.T) { /* "?" → viewText contains "ctrl+r redo"; 
 func TestGlobalsInModes(t *testing.T) {
 	f := newFake(); a := newTestApp(t, f); m := &recScreen{}
 	drain(t, a, a.enterMode(ModeTriage, m))
-	press(t, a, "u"); eq(t, f.count("Undo"), 1)     // global fallback when the mode does not consume the key
+	press(t, a, "?"); if !strings.Contains(viewText(a), "ctrl+r redo") { t.Fatal("help") } // global fallback when the mode does not consume the key (u/ctrl+r/"/" are tested in Task 11)
 	press(t, a, "2"); eq(t, a.mode, ModeTriage)     // tab keys only in ModeTabs
 	press(t, a, "q"); eq(t, a.mode, ModeTabs)       // mode entered from tabs: q returns to tabs
 }
@@ -334,7 +334,7 @@ func TestTodayMsgStoresAggregate(t *testing.T) {
   - `todayMsg` (AIDEV-NOTE: request-sequence staleness guard): drop when `!latest("today", req)`; error → `handleErr`; `notModified` → nothing; else store `*today`, `todayETag`, `clock = today.Clock`.
   - Key routing in `Update`, in order: `ctrl+c` quits; an open `form` gets every key; the top overlay (`esc` → `closeOverlay`); the mode screen (`q`/`esc` → `exitMode`); in `ModeTabs` the tab screen's `handle`. Keys nobody consumed fall back to globals: `a`, `l`, `/`, `u`, `ctrl+r`, `?`, `esc` (clears banner) everywhere; `1`–`5`, `tab`/`shift+tab`, `A` (AI overlay) and `q` (quit) only in `ModeTabs` with no overlay. `up`/`down` alias `k`/`j` in every list. Globals whose task has not landed yet are no-ops.
   - `View()`: header line; `current().view(a, w, h-reserved)`; when `a.form != nil`, `a.form.view(a, w, 3)` in the lines just above the bottom line; bottom line = banner, else short help. Everything goes through `clip(…, width, height)`.
-  - `mutate` (AIDEV-NOTE: in-flight guard): if `a.inflight` → banner `busy…`, return nil; else set `inflight` and return a cmd running `call(a.ctx, a.api)` → `opMsg`. On `opMsg`: clear `inflight`; error → `handleErr`, then `onErr` if set; success → banner `label` + `" · " + effectsLine` (when non-empty) + `" · ⚠ " + SanitizeLine(w)` per warning, then `tea.Batch(after(a, resp), a.refresh())`.
+  - `mutate` (AIDEV-NOTE: in-flight guard): if `a.inflight` → banner `busy…`, return nil; else set `inflight` and return a cmd running `call(a.ctx, a.api)` → `opMsg`. On `opMsg`: clear `inflight`; error → `handleErr`, then `onErr` if set; success → banner `label` + `" · " + effectsLine` (when non-empty) + `" · ⚠ " + SanitizeLine(w)` per warning, then `a.refresh()`, batched with `after(a, resp)` only when `after != nil`.
   - `handleErr` (`banner.go`, AIDEV-NOTE: error policy) implements the test table: `errors.As` `*client.ProblemError` → by `Problem.Code`; `errors.Is(err, client.ErrNotSent)`; `errors.As` `*client.OutcomeUnknownError`; 412, `generation_mismatch` and outcome-unknown return `a.refresh()`; any other problem → sanitized `Detail` + ` (field: message; …)` when `Errors` is set; anything else → sanitized `err.Error()`. Never re-sends.
   - `effectsLine` (others omitted; joined ` · `): `slipped`→`b<B> slipped`, `unslipped`→`b<B> unslipped`, `reason_added`→`#<T> +<reason>`, `interrupted`→`interrupted #<T>`, `focus_set`→`focus #<T>`, `focus_cleared`→`focus cleared`, `block_cancelled`→`b<B> cancelled`, `block_resolved`→`b<B> <To, or "resolved">`, `completed`→`#<T> completed`, `entry_logged`→`e<E> logged`, `reverted`→`reverted`.
   - `styles.go`: `type Styles struct{ Header, TabOn, TabOff, Selected, Dim, Warn, Err, Info, Current lipgloss.Style }`; `newStyles(color bool)`: when `!color` every field is a bare `lipgloss.NewStyle()` and help uses `help.Styles{}`, so plain mode emits no escape codes. Selected rows start with `› ` (others `  `) in both modes.
@@ -362,7 +362,7 @@ func TestTodayMsgStoresAggregate(t *testing.T) {
 type sendFunc func(ctx context.Context, c API, key string) (*api.OpResponse, error)
 type formRetry struct {      // immutable snapshot kept after an outcome-unknown reply
 	value, key, gen string   // input text, the client's Idempotency-Key, Generation() at send time
-	at   time.Time           // a.clock.Now at send time
+	at   time.Time           // a.clock.Now at the FIRST attempt; kept unchanged across later outcome-unknown replies
 	send sendFunc            // the same resolved request
 }
 type form struct {           // implements screen; stored in App.form
@@ -390,7 +390,7 @@ func (l link) label() string // "→ #42 (focus)", "→ #2 (current block)", "�
 func (a *App) openLog(date civil.Date, l link) tea.Cmd // AddEntry form; WorkDate set only when date ≠ clock.Today
 func (a *App) openAdd() tea.Cmd
 ```
-`enter` in a form (AIDEV-NOTE: retry snapshot): if `retry != nil` and the input equals `retry.value` → when `a.clock.Now − retry.at > 7 × 24h` the snapshot is stale; else run one `mutate` whose call first compares `c.Generation(ctx)` with `retry.gen` (different → return `errRetryStale`) and then calls `retry.send(ctx, c, retry.key)`. Stale (either way) → `retry = nil`, banner `the database may have changed since the first attempt (restore or 7-day limit) — check, then enter sends a new request`. Otherwise (no snapshot, or the text changed) → `retry = nil`, `submit`, and `mutate` whose call records `gen := c.Generation(ctx)` before `send(ctx, c, "")`. Success → `a.form = nil` (untyped nil), then `after`. Error → `waiting = false`, text kept; on `*client.OutcomeUnknownError` store `retry = &formRetry{value, err.Key, gen, a.clock.Now.Time, send}` and banner `outcome unknown — enter resends the same request`. (`gen` is written inside the cmd and read in `onErr` after the `opMsg` arrives; the program's message channel orders the two.)
+`enter` in a form (AIDEV-NOTE: retry snapshot): if `retry != nil` and the input equals `retry.value` → run one `mutate` whose call first reads fresh server time with `c.Clock(ctx)` (`Now − retry.at > 7 × 24h` → return `errRetryStale`, the idempotency window has passed), then compares `c.Generation(ctx)` with `retry.gen` (different → `errRetryStale`), and only then calls `retry.send(ctx, c, retry.key)`. Stale (either way) → `retry = nil`, banner `the database may have changed since the first attempt (restore or 7-day limit) — check, then enter sends a new request`. Otherwise (no snapshot, or the text changed) → `retry = nil`, `submit`, and `mutate` whose call records `gen := c.Generation(ctx)` before `send(ctx, c, "")`. Success → `a.form = nil` (untyped nil), then `after`. Error → `waiting = false`, text kept; on `*client.OutcomeUnknownError` store `retry = &formRetry{value, err.Key, gen, a.clock.Now.Time, send}` for a first attempt, but leave an existing snapshot untouched when a resend of it ends outcome-unknown again and banner `outcome unknown — enter resends the same request`. (`gen` is written inside the cmd and read in `onErr` after the `opMsg` arrives; the program's message channel orders the two.)
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -421,7 +421,8 @@ func TestFormRetrySendsSnapshot(t *testing.T) { // midnight between attempts
 func TestFormRetryRefusedWhenStale(t *testing.T) {
 	// as above up to the outcome-unknown reply; f.gen = "fedcba9876543210" (restore); enter → no DeferTask call, banner contains
 	// "may have changed since the first attempt"; enter again → DeferTask with Mut.Key "" (new request, body re-resolved).
-	// Same refusal when a later todayMsg moves Clock.Now 7 days + 1 s past the first attempt.
+	// Window: first attempt at T0 → outcome unknown; f.clock.Now = T0 + 6 d, resend → outcome unknown again (snapshot keeps at = T0);
+	// f.clock.Now = T0 + 7 d + 1 s (only the fake's /clock moves; no todayMsg) → enter → a Clock call, no DeferTask, same refusal banner.
 }
 func TestLogImplicitLink(t *testing.T) { // FOC-04, FOC-05, FOC-06 (TUI side)
 	cases := []struct{ focus *api.Task; cur *api.Block; want api.Opt[int64]; label string }{
@@ -825,7 +826,7 @@ func TestRecapBackdatedLogNeedsChoice(t *testing.T) { // FOC-07 (TUI side)
 	// cursor on e6: "l" → picker; "-" enter → log form; "x" enter → AddEntry{TaskID {Set, Null: true}, Title "x", WorkDate &10-27};
 	// picker "2" → TaskID {Set, V: 2}; cursor on b1: "l" → log form titled "→ #1 (selected)", WorkDate &10-27
 }
-func TestRecapGlobals(t *testing.T) { /* in recap, "u" → Undo (global fallback); "1" → still in recap */ }
+func TestRecapGlobals(t *testing.T) { /* in recap, "?" → help shown (global fallback); "1" → still in recap (undo in modes is tested in Task 11) */ }
 func TestRecapShowsInterruptions(t *testing.T) { /* the view contains interruptionLine for the day's interruption */ }
 func TestRecapDateHeader(t *testing.T) { /* zero RecapDate → "Recap Wed 2026-10-28"; 10-27 → "Recap Tue 2026-10-27" */ }
 ```
@@ -902,7 +903,8 @@ func TestAIReviewNeverCoversUnseen(t *testing.T) { // 51 unreviewed
 }
 func TestUndoRedo(t *testing.T) { // UND-18 (TUI side)
 	// "u" → one Undo, banner starts "undone"; errs["Undo"] = problem("nothing_to_undo", 409, "") → "nothing to undo";
-	// "ctrl+r" → Redo; nothing_to_redo → "nothing to redo"; each success refetches /today
+	// "ctrl+r" → Redo; nothing_to_redo → "nothing to redo"; each success refetches /today;
+	// globals inside modes: after enterMode(ModeTriage, &recScreen{}) and in recap mode, "u" → Undo and "ctrl+r" → Redo
 }
 ```
 
@@ -995,7 +997,7 @@ Plan C owns **TRI-17** (Plan A Task 38 `notPlanA`): `TestTRI17_CardSkipSendsNoth
 - **P1** teatest pin `v2.0.0-20260311145557-c83711a11ffa`: the newest commit touching `exp/teatest/v2` (2026-03-11, ≥ 14 days old). Every later pseudo-version through 2026-10-25 has identical module content, so this meets A§1.1's "newest pseudo-version ≥ 14 days old" without pinning an unrelated repo commit. Verified in a scratch module: compiles and runs with the A§1.1 pins, no version bumps, key strings as asserted. Modules are added in the task that first imports them (charm in Task 2, teatest in Task 4) so `go mod tidy` keeps them.
 - **P2** `tui.API` is an exact subset of `*client.Client` (A§6.7) with a compile-time assertion, so tests use an in-package fake and errors are the client's own types — no adapter layer.
 - **P3** The task buffer uses Plan B's `editor.FormatTaskBuffer`/`ParseTaskBuffer` (the same format as `tkr edit`; agreed with planner-b); notes-only buffers for `complete` entries bypass `ParseTaskBuffer`. The editor runs through `tea.ExecProcess`, not `editor.Edit` (which blocks); the G204 exec and G304 draft read carry the two exact `//nolint:gosec` directives in Task 5.
-- **P4** Outcome-unknown: the TUI has no pending store (A§6.7). A form keeps the text and an immutable snapshot (resolved request, Idempotency-Key, generation, time); `enter` with unchanged text resends exactly that snapshot, but refuses (and drops it) when the generation changed or 7 days passed, after which `enter` sends a fresh request. Key-press ops refresh and say "check before repeating".
+- **P4** Outcome-unknown: the TUI has no pending store (A§6.7). A form keeps the text and an immutable snapshot (resolved request, Idempotency-Key, generation, time); `enter` with unchanged text resends exactly that snapshot, but refuses (and drops it) when the generation changed or 7 days passed since the first attempt (checked against fresh `GET /clock`; the timestamp never resets on repeated outcome-unknown replies), after which `enter` sends a fresh request. Key-press ops refresh and say "check before repeating".
 - **P5** Files beyond A§1.2's list for `tui`: `doc.go`, `api.go`, `screen.go`, `banner.go`, `render.go`, `dates.go`, `link.go`, `editor.go`, `list.go`, `mode_card.go`, `overlay_*.go`, `run.go`.
 - **P6** Upcoming-tab "keep" is `K`, not `k`: A§11.1 gives Upcoming `k` keep while `j/k` navigate every list — the collision A§14 issue 12 resolved for triage keys. `K` matches the capital-letter convention for mutating keys; the service op is unchanged (catalog TRI-26 mentions "TUI Upcoming `k`" informally). **This is the one visible key-binding change; the user may prefer another key.**
 - **P7** `A` outside card modes opens the AI-changes overlay (A§14 issue 15 "TUI `A`"); in card modes it stays accept-all-new; inside the overlay it marks reviewed only after every unreviewed change has been loaded into the list (the watermark covers all ops ≤ it).

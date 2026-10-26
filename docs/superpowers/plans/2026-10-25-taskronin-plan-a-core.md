@@ -82,8 +82,8 @@ Every in-scope scenario is owned by exactly one task (its `Test<PFX><NN>` lives 
 | 27 | TRI-05, 13, 26, 27, 28, BLK-09, 29, SLP-07, DUE-04, 05, 06, 07, 08, 09, 12, 17, 21, DAT-05, REC-02, LIF-11 |
 | 28 | TRI-15, BLK-22, SLP-09, 16, LIF-01–06, 12–15, 17–20, IDM-07, REC-11 |
 | 29 | TRI-16, 21, 23, 29, BLK-08, 34, SLP-10, 11, LIF-07, 08, 09, 10, 16, IDM-01, FOC-03, REC-05 |
-| 30 | SLP-05, UND-06, 07, 09, 10, 11, 12, 14, 21, 23, 24 |
-| 31 | UND-01–05, 08, 15–20, 22, 25, 27, RCP-05, REC-10, INT-09, SCP-09 |
+| 30 | SLP-05, UND-06, 09, 10, 11, 12, 14, 21, 23, 24 |
+| 31 | UND-01–05, 07, 08, 15–20, 22, 25, 27, RCP-05, REC-10, INT-09, SCP-09 |
 | 32 | TRI-20, DUE-18, 19, REC-06, 12, DAT-14, INT-08 |
 | 33 | TRI-25, SCP-11 |
 | 34 | RPT-01, 02, 05, 06, 08, 09, 10 |
@@ -1520,6 +1520,7 @@ git commit -m "feat(service): invariants I1-I8 per op and over the whole store" 
 const (IdemTTL = 7 * 24 * time.Hour; OpBudget = 15 * time.Second)
 func (s *Service) BeginShutdown()                                    // later ops, writeTx and Reconcile → busy; cancels s.stopCtx
 func (s *Service) stopCtx() context.Context                           // canceled by BeginShutdown; long operations (Task 36) observe it
+func (s *Service) Stopping() <-chan struct{}                         // closed by BeginShutdown; lets callers interrupt their own blocking I/O (Task 36)
 func (s *Service) Drain(ctx context.Context) error                    // waits for every in-flight op/job, or ctx
 func (s *Service) ExpireIdempotency(ctx context.Context) (int, error) // deletes rows older than IdemTTL (writeTx, no events)
 func (s *Service) enter() (leave func(), err error)                   // in-flight registration; busy after BeginShutdown
@@ -2246,7 +2247,7 @@ func (s *Scenario) StateDigest() string // live user state: tasks (backlog order
 
 Runner changes (A§4.3): for `classRevert`/`classUndo`/`classRedo` step 1 checks only `ownerOnly`/`notWeb`; **step 7** (after the idempotency lookup): `Revert` loads the op (`not_found`); then `Actor.Scopes.Has(target.Scopes)` and a non-owner actor must be the target's actor → `forbidden`; the ops row carries `via` and `reverts_op_id` in the same INSERT and `scopes = target.Scopes`; step 14 pushes a successful `Revert` on the actor's undo stack and clears its redo stack like a forward op; a revert/undo/redo with no domain events still commits with its ops row (R2-4). `revertTx` = A§4.6 steps 1–7 exactly, plus at step 6: R4-6 — for each task whose block the revert restored out of `slipped = 1` or out of `worked`, call `afterUnslip`/`afterUnwork`; P-2 — when the triage delta removed a `slipped`/`continue` row the target had added, re-evaluate it from the post-revert state and re-add it (`since` = now, `seq` = this op) if another block still justifies it (`slipped`: a block with `slipped = 1 AND slipped_seq > COALESCE(last_placed_seq, 0)`; `continue`: task open and a `worked` block with `resolved_seq > COALESCE(last_placed_seq, 0)` and no planned block on a later date) — helper `func (o *op) reasonJustified(task domain.TaskID, r domain.TriageReason) (bool, error)`. Apply map (step 4): insert → `ApplyColumns(deleted_at = now)` with a `*:tombstone` event (block via `setBlock{Restore}`), triage add → `store.RemoveReason`, triage remove → `store.AddReason` with the original `since`/`seq`, update → `ApplyColumns(Before)` with a `*:update` event, tombstone ↔ untombstone, `task_tags:set` → `SetTaskTags(Before.tags)`, move → rank right after `Before.after_id` (top when null), block events → `setBlock{Restore: true, Image: Before}`; every applied event is recorded for `o` (non-derived) and marks its entity dirty.
 
-- [ ] **Step 1: Write the failing tests** — catalog rows `TestSLP05`, `TestUND06`, `TestUND07`, `TestUND09`, `TestUND10`, `TestUND11`, `TestUND12`, `TestUND14`, `TestUND21`, `TestUND23`, `TestUND24`; `TestRevertAlreadyReverted` (second `Revert` → `revert_conflict` "already reverted by owner"); `TestRevertRunsRemovalChecks` (R4-6: B1 10-28 13:00–14:00 and B2 10-27 13:00–14:00 both created 10-27 08:00; reconcile at 10-28 00:00 slips B2 (`#1{slipped}`); at 10:00 X = `Unblock(B1)` slips B1 without a triage event; Y = `AddEntry(#1, 10-27)` unslips B2 (reason kept for B1, `continue` added); `Revert(X)` → B1 `{planned, –, 0, –}` and `slipped` removed, `continue` kept); `TestRevertKeepsJustifiedReason` (P-2: B1, B2 today 13:00–14:00 and 15:00–16:00 created 09:00; at 10:00 U1 = `Unblock(B1)` adds `slipped`, U2 = `Unblock(B2)` slips B2 without a triage event; `Revert(U1)` → B1 `{planned, –, 0, –}`, `#1{slipped}` kept for B2, L/S 1/1); and:
+- [ ] **Step 1: Write the failing tests** — catalog rows `TestSLP05`, `TestUND06`, `TestUND09`, `TestUND10`, `TestUND11`, `TestUND12`, `TestUND14`, `TestUND21`, `TestUND23`, `TestUND24`; `TestRevertConflictsWithSystemEvent` (UND-07's shape through `Revert`: `Block(#1, Mon)` on Mon, the Tue 00:00 reconcile resolves it, `Revert(block op)` → `revert_conflict` naming the `system` op; UND-07 itself calls `Undo` and is Task 31's), `TestRevertAlreadyReverted` (second `Revert` → `revert_conflict` "already reverted by owner"); `TestRevertRunsRemovalChecks` (R4-6: B1 10-28 13:00–14:00 and B2 10-27 13:00–14:00 both created 10-27 08:00; reconcile at 10-28 00:00 slips B2 (`#1{slipped}`); at 10:00 X = `Unblock(B1)` slips B1 without a triage event; Y = `AddEntry(#1, 10-27)` unslips B2 (reason kept for B1, `continue` added); `Revert(X)` → B1 `{planned, –, 0, –}` and `slipped` removed, `continue` kept); `TestRevertKeepsJustifiedReason` (P-2: B1, B2 today 13:00–14:00 and 15:00–16:00 created 09:00; at 10:00 U1 = `Unblock(B1)` adds `slipped`, U2 = `Unblock(B2)` slips B2 without a triage event; `Revert(U1)` → B1 `{planned, –, 0, –}`, `#1{slipped}` kept for B2, L/S 1/1); and:
 
 ```go
 func TestRevertEveryOpKind(t *testing.T) {
@@ -2273,7 +2274,7 @@ func TestRevertEveryOpKind(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run to verify failure** — `go test ./internal/service -run 'SLP05|UND(0[679]|1[0124]|2[134])|Revert' -race -count=1` → FAIL.
+- [ ] **Step 2: Run to verify failure** — `go test ./internal/service -run 'SLP05|UND(0[69]|1[0124]|2[134])|Revert' -race -count=1` → FAIL.
 
 - [ ] **Step 3: Implement** per A§4.6 and the rules above.
 
@@ -2309,7 +2310,7 @@ func (s *Scenario) Stack(actor string, which store.Stack) []domain.OpID
 
 Rules (A§4.6, A§4.3 steps 7, 14, 17): the top of the actor's stack is selected in step 7 (empty → `nothing_to_undo`/`nothing_to_redo`, rolled back, nothing stored). `Undo`: top T not revertible → `committedError{not_revertible}`; `T.state = reverted` → `committedError{revert_conflict "already reverted by <actor of the active reversal>"}`; else `revertTx(T)` with `via = "undo"`; success moves T to the redo stack. `Redo`: T must be reverted with an active reversal R, else `committedError{revert_conflict}`; T or R not revertible → `committedError{not_revertible}`; else `revertTx(R)` with `via = "redo"`; success moves T back to the undo stack. A `revert_conflict`/`conflict` from `revertTx` leaves both stacks unchanged. `committedError` path: roll back the savepoint, delete the named stack row, store the idempotency row (status 409, `error_json` = code, detail, conflicts), `COMMIT`, return the error — no ops row, no event; a retry with the same key replays the 409 (Task 18 replay) without touching the next entry. Owner channels share the `owner` stacks.
 
-- [ ] **Step 1: Write the failing tests** — catalog rows `TestUND01` … `TestUND05`, `TestUND08`, `TestUND15` … `TestUND20`, `TestUND22`, `TestUND25`, `TestUND27`, `TestRCP05`, `TestREC10`, `TestINT09`, `TestSCP09`; `TestUndoStaleGeneration` (R3-3: `Undo` with another `Gen` → `generation_mismatch`, stacks unchanged); `TestUndoDepthTrim` (`UndoDepth` 3 via `SvcOpt` → newest three). Example:
+- [ ] **Step 1: Write the failing tests** — catalog rows `TestUND01` … `TestUND05`, `TestUND07`, `TestUND08`, `TestUND15` … `TestUND20`, `TestUND22`, `TestUND25`, `TestUND27`, `TestRCP05`, `TestREC10`, `TestINT09`, `TestSCP09`; `TestUndoStaleGeneration` (R3-3: `Undo` with another `Gen` → `generation_mismatch`, stacks unchanged); `TestUndoDepthTrim` (`UndoDepth` 3 via `SvcOpt` → newest three). Example:
 
 ```go
 func TestUND20(t *testing.T) {
@@ -2400,9 +2401,9 @@ func (s *Service) SyncTimezone(ctx context.Context, name string) (previous strin
 func (s *Service) aiUnreviewed(ctx context.Context, q store.Q) (int, error) // store.CountAIOps after ai_reviewed_through
 ```
 
-Rules: A§3.7 (scopes, reconcile-first column, orders, `From`/`To` required with span ≤ 366 days unless a task is given). Paging: `Limit` 0 → 100; < 0 or > 500 → `validation`. Every cursor is validated against its list's complete schema **before** any query, else `malformed`: keyset lists need exactly the Task 9/10 key tuple with the right types and ranges — triage `[rank 1–8, seq ≥ 1]` (encoded from `int(tv.Reasons[0].Reason.Rank())`, `tv.Reasons[0].Seq`), backlog `[int64]`, upcoming `[ISO date, minute 0–1439, int64]`, done/dropped/deleted `[ms ≥ 0]`, all `[]`, entries `[ISO date, 0|1, minute 0–1439, ms ≥ 0]` — plus `id ≥ 1` and no offset; offset lists (search) need `o ≥ 0` and no keys; `json.Number` keys must parse as integers in range (no floats, no objects, no strings where integers belong). `NextCursor` = encoded keys of the last item when a full page was returned. `Unlinked` = standalone entries of the day. Backup health: `Healthy` = `last_backup_at` within 48 h and `last_backup_error` empty; never backed up → unhealthy. Banners: `backup_failed` (error set), `backup_stale` (unhealthy without an error), `ai_changes` (unreviewed > 0), `purge_incomplete` (ledger `Pending` non-empty), `purge_ledger_damaged` (`Health().Damaged`), `tz_changed`. `Status.Due` = open tasks whose due phase is `due` or `overdue`; `PurgeWarning` = either purge banner.
+Rules: A§3.7 (scopes, reconcile-first column, orders, `From`/`To` required with span ≤ 366 days unless a task is given). Paging: `Limit` 0 → 100; < 0 or > 500 → `validation`. Every cursor is validated against its list's complete schema **before** any query, else `malformed`: keyset lists need exactly the Task 9/10 key tuple with the right types and ranges — triage `[rank 1–8, seq ≥ 1]` (encoded from `int(tv.Reasons[0].Reason.Rank())`, `tv.Reasons[0].Seq`), backlog `[int64]` (signed — top placement goes below zero), upcoming `[ISO date, minute 0–1439, int64]`, done/dropped/deleted `[ms ≥ 0]`, all `[]`, entries `[ISO date, 0|1, minute 0–1439, ms ≥ 0]` — plus `id ≥ 1` and no offset; offset lists (search) need `o ≥ 0` and no keys; `json.Number` keys must parse as integers in range (no floats, no objects, no strings where integers belong). `NextCursor` = encoded keys of the last item when a full page was returned. `Unlinked` = standalone entries of the day. Backup health: `Healthy` = `last_backup_at` within 48 h and `last_backup_error` empty; never backed up → unhealthy. Banners: `backup_failed` (error set), `backup_stale` (unhealthy without an error), `ai_changes` (unreviewed > 0), `purge_incomplete` (ledger `Pending` non-empty), `purge_ledger_damaged` (`Health().Damaged`), `tz_changed`. `Status.Due` = open tasks whose due phase is `due` or `overdue`; `PurgeWarning` = either purge banner.
 
-- [ ] **Step 1: Write the failing tests** — catalog rows `TestTRI20` (reason rows inserted with chosen seqs through `Exec` — the one place this plan allows SQL fixtures for reasons), `TestDUE18`, `TestDUE19`, `TestREC06` (two `Today` calls at one instant: equal results, no ops row), `TestREC12` (`ListTasks{triage}` at 10-29 00:00 writes the midnight reconcile as `system`, then returns the post-reconcile view), `TestDAT14` (service half: `Clock` → now 2026-10-28T16:00Z, today 10-28, zone `America/Denver`, Monday, 3, the generation), `TestINT08` (`Day(10-28).Interruptions` and `Today.Interruptions` list INT-01's row; tombstoned rows hidden), `TestTodayView`, `TestStatusView`, `TestBanners` (each kind), `TestListTasksFilters` (Review Focus 5 through the service), `TestTriagePaging` (five triage tasks across three reasons, `Limit 2` → three pages in TRI-20 order with no duplicates or gaps), `TestListBlocks`, `TestListTags`, `TestSettingsView`, `TestSyncTimezone`, and Review Focus 4:
+- [ ] **Step 1: Write the failing tests** — catalog rows `TestTRI20` (reason rows inserted with chosen seqs through `Exec` — the one place this plan allows SQL fixtures for reasons), `TestDUE18`, `TestDUE19`, `TestREC06` (two `Today` calls at one instant: equal results, no ops row), `TestREC12` (`ListTasks{triage}` at 10-29 00:00 writes the midnight reconcile as `system`, then returns the post-reconcile view), `TestDAT14` (service half: `Clock` → now 2026-10-28T16:00Z, today 10-28, zone `America/Denver`, Monday, 3, the generation), `TestINT08` (`Day(10-28).Interruptions` and `Today.Interruptions` list INT-01's row; tombstoned rows hidden), `TestTodayView`, `TestStatusView`, `TestBanners` (each kind), `TestListTasksFilters` (Review Focus 5 through the service), `TestTriagePaging` (five triage tasks across three reasons, `Limit 2` → three pages in TRI-20 order with no duplicates or gaps), `TestBacklogPagingNegativeRanks` (ranks are signed: three `Add(…, Top())` tasks get ranks 0, −65536, −131072; `Limit 1` pages through them and the older positive-rank tasks in backlog order), `TestListBlocks`, `TestListTags`, `TestSettingsView`, `TestSyncTimezone`, and Review Focus 4:
 
 ```go
 func TestPagingInputs(t *testing.T) {
@@ -2420,7 +2421,7 @@ func TestPagingInputs(t *testing.T) {
 	p2, _ := list(service.ListTasksIn{View: domain.ViewBacklog, Limit: 2, Cursor: p.NextCursor})
 	/* p2 has the third task and NextCursor ""; Limit -1 and 501 → validation; Cursor "garbage" → malformed;
 	   the backlog cursor reused for view triage (key count differs) → malformed; hostile cursors built with
-	   domain.EncodeCursor — keys [{}], [1.5], ["x"], [-1] for backlog, triage rank 9, an offset cursor on a keyset list,
+	   domain.EncodeCursor — keys [{}], [1.5], ["x"], [9223372036854775808] (int64 overflow) for backlog, triage rank 9, an offset cursor on a keyset list,
 	   id 0 — all → malformed, never internal; ListEntries without From/To → validation; From > To → validation;
 	   a 367-day span → validation */
 	_ = p2
@@ -2733,6 +2734,9 @@ func (s *Service) Export(ctx context.Context, a domain.Actor, w io.Writer) error
 func (s *Service) RecordSystemOp(ctx context.Context, kind domain.OpKind, after json.RawMessage) (*OpResult, error)
 	// system.restore | system.import only (else validation): one system op (noReconcile) with one content-free setting:update event (after = the JSON object)
 const LongOpBudget = 10 * time.Minute // A§4.11: RunBackup and Export
+// Export output contract: Export checks its context between rows, but cannot interrupt a Write already blocked in w.
+// A caller whose writer can block must make Write return once shutdown begins (Stopping() closes, or the caller's
+// own signal — Plan B's handler cancels its ctx and sets an immediate write deadline); a Write error is returned as is.
 // export_test.go: func SetBackupHook(s *Service, fn func(ctx context.Context) error) // runs after the attempt is recorded, before Snapshot
 ```
 
@@ -2770,7 +2774,7 @@ func TestExport(t *testing.T) {
 	}
 }
 ```
-plus `TestRecordSystemOp` (ops row `system.restore`, actor `system`, not revertible, one event; `task.add` → `validation`), `TestExportStopsOnShutdown` (`Export` into a writer that blocks on its first `Write`; `BeginShutdown` → `Export` returns a cancellation error, `Drain` returns, a new `Export` → `busy`), `TestRunBackupStopsOnShutdown` (`SetBackupHook` blocks until its ctx is done; `BeginShutdown` → `RunBackup` returns an error, no `.tkr-tmp-*` left in the backup dir, `last_backup_error` set, `Drain` returns).
+plus `TestRecordSystemOp` (ops row `system.restore`, actor `system`, not revertible, one event; `task.add` → `validation`), `TestExportStopsOnShutdown` (`Export` into a test writer that honours the output contract: its first `Write` blocks until `Stopping()` closes, then returns an error; `BeginShutdown` → `Export` returns an error and `Drain` returns, each awaited with a 5 s test timeout so a regression fails instead of hanging; a new `Export` → `busy`), `TestRunBackupStopsOnShutdown` (`SetBackupHook` blocks until its ctx is done; `BeginShutdown` → `RunBackup` returns an error, no `.tkr-tmp-*` left in the backup dir, `last_backup_error` set, `Drain` returns).
 
 - [ ] **Step 2: Run to verify failure** — `go test ./internal/service -run 'IDM04|Backup|Export|RecordSystemOp|StopsOnShutdown' -race -count=1` → FAIL.
 

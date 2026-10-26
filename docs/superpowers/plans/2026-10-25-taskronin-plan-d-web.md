@@ -8,19 +8,19 @@
 
 **Tech Stack:** Go 1.26 stdlib `net/http`, `html/template`, `embed`; `github.com/yuin/goldmark v1.8.6`; `github.com/microcosm-cc/bluemonday v1.0.27`; htmx 2.0.11; tests parse HTML with `golang.org/x/net/html`.
 
-**Spec:** `docs/superpowers/specs/2026-10-25-taskronin-architecture.md` (primary: §1.3, §2.5, §2.6 incl. `BlockView.TaskVersion` (R4-7), §2.8, §3, §6.1–6.2, §6.7 (`textsafe` names), §7.4–7.5, §11.2, §13, §14.6 R3-3), `docs/superpowers/specs/2026-10-25-taskronin-design.md` (D§9.3, D§10.2–10.4), `docs/superpowers/specs/2026-10-25-taskronin-behavior-catalog.md` (web halves of SCP-04, SCP-05, SCP-07, PRG-18, IDM-04; UND-19).
+**Spec:** `docs/superpowers/specs/2026-10-25-taskronin-architecture.md` (primary: §1.3, §2.5, §2.6 incl. `BlockView.TaskVersion` (R4-7), §2.8, §3, §6.1–6.2, §6.7 (`textsafe` names), §7.4–7.5, §11.2, §13, §14.6 R3-3), `docs/superpowers/specs/2026-10-25-taskronin-design.md` (D§9.3, D§10.2–10.4), `docs/superpowers/specs/2026-10-25-taskronin-behavior-catalog.md` (web halves of SCP-04, SCP-05, SCP-07, PRG-18, IDM-04, UND-19).
 
 **Prerequisites:** Plan A (core library; types cited as "Plan A Task N") and Plan B (server, `server.Run` with the `newWebHandler` hook, `testutil.StartServer`/`WithWeb`/`WebURL`) are merged. Plan D is the last delivery step (D§16).
 
 ## Global Constraints
 
-- **Execution context:** each implementer receives its task text, these Global Constraints and the "Form contract" section below, with read access to the three specs and every plan file. A citation such as "Plan A Task 32 Interfaces: `service.TodayView`" is binding: open that block for the exact fields. Web handlers and templates use Plan A's `domain`/`service` types (Plan A Tasks 5, 16–35), never the `api` wire types of arch §6.5.
+- **Execution context:** each implementer receives its task text, these Global Constraints and the "Form contract" section below, with read access to the three specs and every plan file. A citation such as "Plan A Task 32 Interfaces: `service.TodayView`" is binding: open that block for the exact fields. Web handlers and templates use Plan A's `domain`/`service` types (Plan A Tasks 5, 16a–35b), never the `api` wire types of arch §6.5.
 - Go `1.26.0`, toolchain `go1.26.8`, module `taskronin`, Linux only.
 - New direct dependencies: `github.com/yuin/goldmark v1.8.6`, `github.com/microcosm-cc/bluemonday v1.0.27`; `golang.org/x/net` at `v0.61.0` (bluemonday requires v0.26.0, which govulncheck flags; v0.61.0 matches the pinned x/crypto v0.58.0 / x/sys v0.49.0 / x/term v0.47.0; tests import `golang.org/x/net/html`). No other dependency changes.
 - Allowed imports (arch §1.3; `internal/archtest` checks non-test imports, Plan A Task 1): `markdown` → no internal packages, third-party goldmark + bluemonday. `web` → `service`, `domain`, `civil`, `datespec`, `auth`, `markdown`, `textsafe`, `clock`, `buildinfo` only; never `store`, `api`, `server`, `client`.
 - **Test packages (P6):** every `internal/web` test is in package `web_test` and may import `testutil`; internals are reached only through `internal/web/export_test.go` (package `web`, never imports `testutil`). This keeps `web[test] → testutil → server → web` from becoming an import cycle once Task 11 makes `server` import `web`.
 - **HTML assertions** parse the response with `golang.org/x/net/html` (test-only import): security properties are checked on parsed elements and attributes (element names, `on*` attribute names, `href`/`src` schemes), never by substring search for words such as `javascript:` that may legitimately appear as escaped text.
-- R1: each web handler decodes the request, makes **at most one** service call, then renders or redirects. All rules and authorization stay in `service`. `(*service.Service).Generation()` (cached, no DB, no authz; Plan A Task 16) is not counted.
+- R1: each web handler decodes the request, makes **at most one** service call, then renders or redirects. All rules and authorization stay in `service`. `(*service.Service).Generation()` (cached, no DB, no authz; Plan A Task 16a) is not counted.
 - R4: no `time.Now`/`time.Local`; use `Options.Clock` and `Options.Zone`. Tests use `httptest.NewRequestWithContext(t.Context(), …)` (noctx).
 - `make check` (gofmt, `go vet`, golangci-lint v2.14 incl. gosec — off for `_test.go` per arch §13.4 —, `go test -race -count=1 ./...`, govulncheck v1.9.0, `go mod verify`, `assets-verify`) is green before every commit. The only `//nolint` in Plan D production code is `//nolint:gosec // G203: bluemonday-sanitized output` in `markdown/render.go`; `web` reads no files from variable paths and execs nothing.
 - htmx asset: `internal/web/static/htmx-2.0.11.min.js` = npm `htmx.org@2.0.11` `dist/htmx.min.js`, 52 182 bytes, SHA-256 `d6fdc75f204e6bdefa99b69bf1e6d4ac69b8a364f77929f45c13476b4000f717`, recorded in `internal/web/static/SHA256SUMS`.
@@ -28,7 +28,7 @@
 - Templates: no inline `<script>` bodies, no `<style>`, no `style=` attributes, no `on*=` attributes, no `hx-on`; the only script is `<script src="/static/htmx-2.0.11.min.js"></script>`; confirmations via `hx-confirm`; move buttons, no drag-and-drop.
 - Every response from the web handler carries exactly: `Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `Cross-Origin-Opener-Policy: same-origin`, `Permissions-Policy: camera=(), geolocation=(), microphone=()`.
 - Session cookie (plain loopback, v1): `tr_session=<base64url>; Path=/; HttpOnly; SameSite=Lax` (+ `Expires` = session absolute expiry). Idle 7 d / absolute 30 d are enforced by `service`.
-- CSRF token = base64url(HMAC-SHA256(csrf_secret, "tkr-csrf-v1")) — `service.Authenticate` returns it ready-made (`WebAuth.CSRFToken`, Plan A Task 35); every POST except `POST /ui/login` needs a matching token (form `_csrf`, else header `X-CSRF-Token`; `subtle.ConstantTimeCompare`) **and** the Origin rule: `Origin` ∈ {`http://` + Host-allowlist entry} or `Sec-Fetch-Site: same-origin`; reject when both headers are absent or either mismatches. `POST /ui/login` gets the Origin rule only.
+- CSRF token = base64url(HMAC-SHA256(csrf_secret, "tkr-csrf-v1")) — `service.Authenticate` returns it ready-made (`WebAuth.CSRFToken`, Plan A Task 35b); every POST except `POST /ui/login` needs a matching token (form `_csrf`, else header `X-CSRF-Token`; `subtle.ConstantTimeCompare`) **and** the Origin rule: `Origin` ∈ {`http://` + Host-allowlist entry} or `Sec-Fetch-Site: same-origin`; reject when both headers are absent or either mismatches. `POST /ui/login` gets the Origin rule only.
 - Host allowlist from `web.listen`: the literal `host:port`, plus `localhost:<port>` when the host is `127.0.0.1` or `::1`; anything else → 400.
 - Forms follow the Form contract below; every mutating form — including the undo, redo and revert buttons (R3-3) — carries hidden `_csrf`, `_nonce` (fresh 128-bit lowercase hex per render), `_gen` (generation the page was rendered with), `_return`, plus the target's full ETag `domain.FormatETag(gen, version)` as `etag` where the contract says so.
 - Web idempotency: `service.Idem{Key: _nonce, Method: "POST", Route: "POST " + r.URL.Path, Body: []byte(form-minus-_csrf-and-_nonce .Encode())}` (`url.Values.Encode` sorts keys); `Meta.Gen = _gen`. `Login` is idempotency-exempt.
@@ -78,13 +78,13 @@ Templates (Tasks 4–6c) render these forms; handlers (Tasks 7–10) decode them
 
 | # | Route | Rendered on | Fields (besides hidden) → service call (Plan A signature) |
 |---|---|---|---|
-| C1 | `POST /ui/tasks` | today, triage | `title`, `notes` (textarea), `due` (F, optional), `tags` (`splitTags`), `project`, `priority` (select `""`/`H`/`M`/`L`; else validation), `place` (select): `""` → `Place nil` (triage); `top`/`bottom`/`now` → `{How}`; `before`/`after` → `{How, Ref: formInt("ref")}`; `defer` → `{How, Defer: formMoment("defer", F)}` (empty → validation `defer`); `block` → `{How, Block: formSpan("span")}`; other → validation `place` → `AddTask(ctx, m, AddTaskIn)` (Plan A Task 16) |
+| C1 | `POST /ui/tasks` | today, triage | `title`, `notes` (textarea), `due` (F, optional), `tags` (`splitTags`), `project`, `priority` (select `""`/`H`/`M`/`L`; else validation), `place` (select): `""` → `Place nil` (triage); `top`/`bottom`/`now` → `{How}`; `before`/`after` → `{How, Ref: formInt("ref")}`; `defer` → `{How, Defer: formMoment("defer", F)}` (empty → validation `defer`); `block` → `{How, Block: formSpan("span")}`; other → validation `place` → `AddTask(ctx, m, AddTaskIn)` (Plan A Task 16b) |
 | C2 | `POST /ui/tasks/{id}/edit` | task | `etag`; each of `title`, `notes` (textarea), `project`, `priority` (select) set **only if present** (`form.Has`) → `UpdateTask(ctx, m, UpdateTaskIn)` (Plan A Task 29) |
 | C3 | `POST /ui/tasks/{id}/tags` | task | add form: `etag`, `add` (`splitTags`); one remove form per tag: `etag`, hidden `remove` → `UpdateTask{TagsAdd, TagsRemove}` |
 | C4 | `POST /ui/tasks/{id}/due` | task, upcoming | `etag`, `due`: `none` → `Due nil`; empty → validation `due`; else F → `SetDue(ctx, m, SetDueIn)` (Plan A Task 20) |
 | C5 | `POST /ui/tasks/{id}/place` | triage, backlog, task | one form each for hidden `how` = `keep`/`top`/`bottom`; `before`/`after` forms: hidden `how` + `ref` input (backlog up/down: hidden `ref` = neighbour); `etag` → `Place(ctx, m, PlaceIn)` (Plan A Task 19); bad `how` → validation |
 | C6 | `POST /ui/tasks/{id}/defer` | triage, backlog, upcoming, task | `etag`, `until`: `none` → `Until nil` (upcoming "keep" = hidden `until=none`); empty → validation `until`; else F → `Defer(ctx, m, DeferIn)` (Plan A Task 27) |
-| C7 | `POST /ui/tasks/{id}/triage` | backlog, task | `etag` → `MarkManual(ctx, m, MarkManualIn)` (Plan A Task 16) |
+| C7 | `POST /ui/tasks/{id}/triage` | backlog, task | `etag` → `MarkManual(ctx, m, MarkManualIn)` (Plan A Task 16b) |
 | C8 | `POST /ui/tasks/{id}/block` | triage, backlog, task | `etag`, `span` (`formSpan`, F) → `Block(ctx, m, BlockIn)` (Plan A Task 22) |
 | C9 | `POST /ui/tasks/{id}/complete` | today (focus), triage, backlog, task | `etag`; on task also `as` (non-empty → `As`), `date` (`formDate` P; empty → zero = today), `log`, `notes` (textarea) → `Complete(ctx, m, CompleteIn{…, LogTitle: log, LogNotes: notes})` (Plan A Task 28) |
 | C10 | `POST /ui/tasks/{id}/reopen` | task (done/dropped) | `etag`, checkbox `remove_entry` value `1` (`hx-confirm`) → `Reopen(ctx, m, ReopenIn)` (Plan A Task 28) |
@@ -100,9 +100,9 @@ Templates (Tasks 4–6c) render these forms; handlers (Tasks 7–10) decode them
 | C20 | `POST /ui/focus` | today (set: `task_id` input + checkbox `interrupt` value `1`; clear: hidden `task_id=""`), backlog, task (hidden `task_id`) | → `SetFocus(ctx, m, SetFocusIn)` (Plan A Task 26) |
 | C21 | `POST /ui/undo`, `POST /ui/redo` | layout nav | — → `Undo(ctx, m)` / `Redo(ctx, m)` (Plan A Task 31) |
 | C22 | `POST /ui/ops/{op}/revert` | history, aichanges (`hx-confirm`) | path `op` (`domain.ParseOpID`; bad → 404) → `Revert(ctx, m, RevertIn)` (Plan A Task 30) |
-| C23 | `POST /ui/ai-changes/review` | aichanges | hidden `through` (`formInt`) → `MarkAIReviewed(ctx, m, MarkAIReviewedIn)` (Plan A Task 33) |
-| C24 | `POST /ui/logout` | layout nav (`hx-boost="false"`) | — → `Logout(ctx, cookie)` (Plan A Task 35) |
-| C25 | `POST /ui/login` | login (`hx-boost="false"`, no hidden fields) | `password` → `Login(ctx, LoginIn)` (Plan A Task 35) |
+| C23 | `POST /ui/ai-changes/review` | aichanges (only where Task 6c's review rule allows it) | hidden `through` (`formInt`) → `MarkAIReviewed(ctx, m, MarkAIReviewedIn)` (Plan A Task 33) |
+| C24 | `POST /ui/logout` | layout nav (`hx-boost="false"`) | — → `Logout(ctx, cookie)` (Plan A Task 35b) |
+| C25 | `POST /ui/login` | login (`hx-boost="false"`, no hidden fields) | `password` → `Login(ctx, LoginIn)` (Plan A Task 35b) |
 
 ---
 
@@ -201,7 +201,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Create: `internal/web/web.go`, `internal/web/headers.go`, `internal/web/routes.go`, `internal/web/export_test.go`, `internal/web/static/htmx-2.0.11.min.js`, `internal/web/static/SHA256SUMS`, `internal/web/static/app.css`, `internal/web/headers_test.go`, `internal/web/static_test.go`
 
 **Interfaces:**
-- Consumes: `*service.Service` (stored only); `clock.Clock`; `civil.Zone`; Plan A Task 16 Interfaces: `testutil.Service(t, opts ...SvcOpt) (*service.Service, *clock.Fake)` (clock at `testutil.DefaultNow` = Wed 2026-10-28 10:00 Denver), `testutil.Zone`.
+- Consumes: `*service.Service` (stored only); `clock.Clock`; `civil.Zone`; Plan A Task 16a Interfaces: `testutil.Service(t, opts ...SvcOpt) (*service.Service, *clock.Fake)` (clock at `testutil.DefaultNow` = Wed 2026-10-28 10:00 Denver), `testutil.Zone`.
 - Produces (Plan B's `server.Run` reaches `New` through the Task 11 hook and wraps it with recoverer/requestID/accessLog, arch §6.2 step 1):
   ```go
   type Options struct {
@@ -314,7 +314,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Modify: `internal/web/web.go` (`//go:embed templates` → `templateFS`; `newApp` parses templates), `internal/web/export_test.go`
 
 **Interfaces:**
-- Consumes: Plan A Task 5 Interfaces: `domain.Error{Code; Detail; Fields; Conflicts; Current; RetryAfter; Err}`, `domain.AsError`, `domain.Errorf`, `domain.FieldError`, `domain.RevertConflict`, `domain.Expect`, `domain.Generation`, `domain.Version`, `domain.Actor`, `domain.Moment`, `domain.BlockSpan`, `domain.OpID`, `domain.FormatETag(g, v) string`, `domain.ParseETag(s) (domain.Expect, error)` (strict; else `*Error` `CodeMalformed`), and the 24 `domain.Code` identifiers of A§2.8: `CodeMalformed`, `CodeUnauthenticated`, `CodeForbidden`, `CodePeerRejected`, `CodePasswordRequired`, `CodePasswordInvalid`, `CodeNotFound`, `CodeDeleted`, `CodeConflict`, `CodeRevertConflict`, `CodeNotRevertible`, `CodePrecondition`, `CodeTooLarge`, `CodeUnsupportedMedia`, `CodeValidation`, `CodeIdemMismatch`, `CodeNothingToUndo`, `CodeNothingToRedo`, `CodePreconditionReq`, `CodeIdemRequired`, `CodeGenerationMismatch`, `CodeRateLimited`, `CodeInternal`, `CodeBusy`. Plan A Task 16: `service.Meta{Actor; Idem; Gen}`, `service.Idem{Key, Method, Route string; Body []byte}`, `(*service.Service).Generation() domain.Generation`, `testutil.Service`, `testutil.Owner()`. Plan A Task 6: `datespec.Parse`, `ParseSpan`, `ParseClock`, `Ref{Today; WeekStart}`, `Past`, `Future`. Task 1 `markdown.Render`; `buildinfo.Version`; `textsafe.SanitizeLine`.
+- Consumes: Plan A Task 5 Interfaces: `domain.Error{Code; Detail; Fields; Conflicts; Current; RetryAfter; Err}`, `domain.AsError`, `domain.Errorf`, `domain.FieldError`, `domain.RevertConflict`, `domain.Expect`, `domain.Generation`, `domain.Version`, `domain.Actor`, `domain.Moment`, `domain.BlockSpan`, `domain.OpID`, `domain.FormatETag(g, v) string`, `domain.ParseETag(s) (domain.Expect, error)` (strict; else `*Error` `CodeMalformed`), and the 24 `domain.Code` identifiers of A§2.8: `CodeMalformed`, `CodeUnauthenticated`, `CodeForbidden`, `CodePeerRejected`, `CodePasswordRequired`, `CodePasswordInvalid`, `CodeNotFound`, `CodeDeleted`, `CodeConflict`, `CodeRevertConflict`, `CodeNotRevertible`, `CodePrecondition`, `CodeTooLarge`, `CodeUnsupportedMedia`, `CodeValidation`, `CodeIdemMismatch`, `CodeNothingToUndo`, `CodeNothingToRedo`, `CodePreconditionReq`, `CodeIdemRequired`, `CodeGenerationMismatch`, `CodeRateLimited`, `CodeInternal`, `CodeBusy`. Plan A Task 16a: `service.Meta{Actor; Idem; Gen}`, `service.Idem{Key, Method, Route string; Body []byte}`, `(*service.Service).Generation() domain.Generation`, `testutil.Service`, `testutil.Owner()`. Plan A Task 6: `datespec.Parse`, `ParseSpan`, `ParseClock`, `Ref{Today; WeekStart}`, `Past`, `Future`. Task 1 `markdown.Render`; `buildinfo.Version`; `textsafe.SanitizeLine`.
 - Produces (used by Tasks 4–10):
   ```go
   type sessionInfo struct{ Actor domain.Actor; CSRF, Cookie string }
@@ -466,7 +466,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Modify: `internal/web/web.go` (chain gains `session` → `csrf`), `internal/web/routes.go`, `internal/web/helpers_test.go` (add `login`, `submit`)
 
 **Interfaces:**
-- Consumes: Plan A Task 35 Interfaces: `(*service.Service).Login(ctx, in service.LoginIn) (service.Session, error)` with `LoginIn{RemoteKey, Password, OldCookie string}` (deletes the `OldCookie` session itself: regeneration) and `Session{CookieValue, CSRFToken string; ExpiresAt time.Time}`; `Authenticate(ctx, cookie string) (service.WebAuth, error)` with `WebAuth{Actor domain.Actor; CSRFToken string}` (idle 7 d / absolute 30 d → `CodeUnauthenticated`); `Logout(ctx, cookie string) error`. Plan A Task 16: `testutil.Password`. Task 3: `withSession`, `renderPage`, `renderError`, harness.
+- Consumes: Plan A Task 35b Interfaces: `(*service.Service).Login(ctx, in service.LoginIn) (service.Session, error)` with `LoginIn{RemoteKey, Password, OldCookie string}` (deletes the `OldCookie` session itself: regeneration) and `Session{CookieValue, CSRFToken string; ExpiresAt time.Time}`; `Authenticate(ctx, cookie string) (service.WebAuth, error)` with `WebAuth{Actor domain.Actor; CSRFToken string}` (idle 7 d / absolute 30 d → `CodeUnauthenticated`); `Logout(ctx, cookie string) error`. Plan A Task 16a: `testutil.Password`. Task 3: `withSession`, `renderPage`, `renderError`, harness.
 - Produces:
   ```go
   func (a *app) session(next http.Handler) http.Handler // all /ui/* except GET/POST /ui/login
@@ -553,9 +553,9 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Modify: `internal/web/h_views.go` (real `today` + four handlers), `internal/web/templates/today.html`, `internal/web/routes.go`, `internal/web/templates/partials.html` (`taskrow`, `entryrow`, `blockrow`, `addtask`, `logentry`), `internal/web/helpers_test.go` (seeding helpers)
 
 **Interfaces:**
-- Consumes: Plan A Task 32 Interfaces: `Today(ctx, a) (service.TodayView, error)`, `Upcoming(ctx, a) (service.UpcomingView, error)`, `ListTasks(ctx, a, service.ListTasksIn) (service.Page[domain.TaskView], error)`, `ListEntries(ctx, a, service.ListEntriesIn) (service.Page[domain.EntryView], error)`, `service.Page[T]{Items []T; NextCursor string}` (`""` = last page), `TodayView`/`Banner`/`BackupHealth` fields. Plan A Task 5 Interfaces / A§2.6: `domain.TaskView` (`Reasons []TriageRow`, `Tags`, `View`, `Deferred`, `DuePhase`, `DueSoon`, `SlipsLifetime`, `SlipsSinceTriage`; optional fields are `sql.Null[T]` — templates test `.DueDate.Valid` and print `.DueDate.V`), `domain.EntryView` (`TaskTitle`), `domain.BlockView` (`Span.Start`, `Span.End`, `Current`, `Started`, `Ended`, `NeedsReblock`, `TaskTitle`, `TaskVersion`), `domain.Interruption`. Plan A Task 33: `ListOps(ctx, a, service.ListOpsIn) (service.Page[service.OpSummary], error)` (newest first; tests). Seeding (each signature in that Plan A task's Interfaces): `AddTask` (16), `Place` (19), `SetDue` (20), `AddEntry` (21), `Block` (22), `DeleteEntry` (25), `SetFocus` (26), `Defer` (27), `Complete` (28). Plan A Task 16: `testutil.Meta(a domain.Actor, gen domain.Generation) service.Meta`, `testutil.Owner()`, `testutil.AI()`, `testutil.Local`. Tasks 3–4 helpers.
+- Consumes: Plan A Task 32 Interfaces: `Today(ctx, a) (service.TodayView, error)`, `Upcoming(ctx, a) (service.UpcomingView, error)`, `ListTasks(ctx, a, service.ListTasksIn) (service.Page[domain.TaskView], error)`, `ListEntries(ctx, a, service.ListEntriesIn) (service.Page[domain.EntryView], error)`, `service.Page[T]{Items []T; NextCursor string}` (`""` = last page), `TodayView`/`Banner`/`BackupHealth` fields. Plan A Task 5 Interfaces / A§2.6: `domain.TaskView` (`Reasons []TriageRow`, `Tags`, `View`, `Deferred`, `DuePhase`, `DueSoon`, `SlipsLifetime`, `SlipsSinceTriage`; optional fields are `sql.Null[T]` — templates test `.DueDate.Valid` and print `.DueDate.V`), `domain.EntryView` (`TaskTitle`), `domain.BlockView` (`Span.Start`, `Span.End`, `Current`, `Started`, `Ended`, `NeedsReblock`, `TaskTitle`, `TaskVersion`), `domain.Interruption`. Plan A Task 33: `ListOps(ctx, a, service.ListOpsIn) (service.Page[service.OpSummary], error)` (newest first; tests). Seeding (each signature in that Plan A task's Interfaces): `AddTask` (16b), `Place` (19), `SetDue` (20), `AddEntry` (21), `Block` (22), `DeleteEntry` (25), `SetFocus` (26), `Defer` (27), `Complete` (28). Plan A Task 16a: `testutil.Meta(a domain.Actor, gen domain.Generation) service.Meta`, `testutil.Owner()`, `testutil.AI()`, `testutil.Local`. Tasks 3–4 helpers.
 - Produces: routes `GET /ui/{$}` (replacing the stub), `GET /ui/triage`, `GET /ui/backlog`, `GET /ui/upcoming`, `GET /ui/log`; partials `taskrow` (title link `/ui/tasks/{id}`, `#id`, reasons, slips `L/S`, due/defer, tags, project, priority, `data-task="{id}"`), `entryrow` (`data-entry="{id}"`; C14–C16 forms), `blockrow` (`data-block="{id}"`; C17/C18 forms), `addtask` (C1), `logentry` (C13); harness `func (ta *testApp) meta() service.Meta` (`testutil.Meta(testutil.Owner(), ta.Svc.Generation())`), `addTask(in service.AddTaskIn) domain.TaskID`, `task(id domain.TaskID) domain.TaskDetail`, `opKinds() []string` (all ops oldest first: pages through `ListOps` and reverses).
-- Page content (D§5.4, arch §11.2); each list with `NextCursor != ""` renders a "More" link `moreURL(r.URL, NextCursor)` (Limit 100; filters survive):
+- Page content (D§5.4, arch §11.2); each list with `NextCursor != ""` renders a "More" link `moreURL(r.URL, NextCursor)` (Limit 100; filters survive); the `cursor` query value goes to the service unchanged (the service validates it; a hostile value → `malformed`):
   - **Today** (`Today`): each `Banners` entry as `<div class="banner" data-banner="{{.Kind}}">`; an `ai_changes` banner linking `/ui/ai-changes` (synthesized when `AIChanges > 0` and `Banners` has none); backup warning when unhealthy; focus task (C9 complete, C20 clear); current block highlighted; today's blocks (`blockrow`; `NeedsReblock` shows "reblock?"); triage count + top 5 linking `/ui/triage`; overdue and due-soon only when non-empty; today's entries; interruptions; `addtask` (C1), `logentry` (C13, `task_id` prefilled), C20 set-focus form.
   - **Triage** (`ListTasks{View: triage}`): `addtask` (C1); per task C5 (keep/top/bottom/before/after), C6, C8, C9, C11 drop (`hx-confirm`), detail link; C12 accept-new form (only if ≥ 1 `{new}`-only task).
   - **Backlog** (`ListTasks{View: backlog}`): rank order; "up" = C5 `before` the previous row, "down" = C5 `after` the next row (absent on the first/last row of the page), top, bottom, C7, C9, C6, C8, C20 (hidden `task_id`), C11 drop (`hx-confirm`).
@@ -591,7 +591,8 @@ func TestLogPage(t *testing.T)
 // forms "/ui/entries/1/edit", "/ui/entries/1/relink", "/ui/entries/1/delete", "/ui/entries"
 func TestListPaging(t *testing.T) // pagination keeps filters: 101 entries dated 10-20 on #1, one more on 10-20 then DeleteEntry'd, one on 10-28;
 // /ui/log?from=2026-10-20&to=2026-10-20&include_deleted=1 → 100 entry rows; its More link has from, to, include_deleted unchanged + cursor;
-// following it → the remaining 2 rows (one with an "undelete" form); no page shows the 10-28 entry
+// following it → the remaining 2 rows (one with an "undelete" form); no page shows the 10-28 entry;
+// /ui/log?cursor=garbage → 400 `data-code="malformed"` (cursor passed through unchanged)
 func TestViewsEscapeHostileTitle(t *testing.T) // Review Focus 4
 // title `<script>alert(1)</script>"' onmouseover=x` on a triage task, a backlog task, a deferred task, and as an entry title:
 // each of /ui/, /ui/triage, /ui/backlog, /ui/upcoming, /ui/log passes assertInert and its text content contains the literal title
@@ -630,7 +631,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Modify: `internal/web/routes.go`
 
 **Interfaces:**
-- Consumes: Plan A Task 16: `GetTask(ctx, a, id domain.TaskID) (domain.TaskDetail, error)` (`TaskDetail{TaskView; Entries []EntryView; Blocks []BlockView; Interruptions []Interruption}`; tombstoned tasks come back with `View == domain.ViewDeleted`). Plan A Task 33: `History(ctx, a, service.HistoryIn{TaskID; Limit; Cursor}) (service.Page[service.EventView], error)` (newest first) with `EventView{ID; Op OpSummary; Entity; EntityID; Action; Before, After json.RawMessage}`. Seeding: Plan A Tasks 16, 22, 28, 29 (`UpdateTask`, `Delete`). Tasks 3–5 helpers and partials.
+- Consumes: Plan A Task 16b: `GetTask(ctx, a, id domain.TaskID) (domain.TaskDetail, error)` (`TaskDetail{TaskView; Entries []EntryView; Blocks []BlockView; Interruptions []Interruption}`; tombstoned tasks come back with `View == domain.ViewDeleted`). Plan A Task 33: `History(ctx, a, service.HistoryIn{TaskID; Limit; Cursor}) (service.Page[service.EventView], error)` (newest first) with `EventView{ID; Op OpSummary; Entity; EntityID; Action; Before, After json.RawMessage}`. Seeding: Plan A Tasks 16b, 22, 28, 29 (`UpdateTask`, `Delete`). Tasks 3–5 helpers and partials.
 - Produces: routes `GET /ui/tasks/{id}`, `GET /ui/tasks/{id}/history`.
   - **Task detail**: fields, reasons, slips, due/defer, project, priority, notes via `md`, tags with C3 forms; C2 edit form (title, notes textarea, project, priority select), C4, C6, C5, C8, C7, C9 (with `as`, `date`, `log`, `notes`) when open, C10 when done/dropped, C11 drop/delete when not deleted, C11 undelete when deleted (then no other mutating forms), C20; blocks (`blockrow`), entries (`entryrow`), interruptions, history link.
   - **History**: events newest first: `wall` time, op kind, actor, channel, entity/action, `Before`/`After` printed with `jsontext` inside `<pre>`; a C22 revert form (`hx-confirm`) on each op that is revertible and active.
@@ -684,7 +685,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Modify: `internal/web/routes.go`
 
 **Interfaces:**
-- Consumes: Plan A Task 32: `Day(ctx, a, d civil.Date) (service.DayView, error)` (`DayView{Date; Blocks []domain.BlockView; Entries, Unlinked []domain.EntryView; Interruptions}`). Plan A Task 34: `Report(ctx, a, service.ReportIn{From, To civil.Date; Tag, Project string; Todo, Upcoming bool}) (service.Report, error)` with `Report{From, To; Tag, Project; Days []ReportDay{Date; Lines []ReportLine}; Tasks map[domain.TaskID]ReportTask{Title; Status; Deleted}; Todo *ReportTodo{Triage, Backlog []domain.TaskView}; Upcoming []domain.TaskView}` and `ReportLine{EntryID; Kind; Title; Notes; TaskID sql.Null[domain.TaskID]; Time sql.Null[civil.Minute]; Reopened}`; `From > To` → validation. Seeding: Plan A Tasks 16, 21, 22, 28. Tasks 3–5 helpers and partials.
+- Consumes: Plan A Task 32: `Day(ctx, a, d civil.Date) (service.DayView, error)` (`DayView{Date; Blocks []domain.BlockView; Entries, Unlinked []domain.EntryView; Interruptions}`). Plan A Task 34: `Report(ctx, a, service.ReportIn{From, To civil.Date; Tag, Project string; Todo, Upcoming bool}) (service.Report, error)` with `Report{From, To; Tag, Project; Days []ReportDay{Date; Lines []ReportLine}; Tasks map[domain.TaskID]ReportTask{Title; Status; Deleted}; Todo *ReportTodo{Triage, Backlog []domain.TaskView}; Upcoming []domain.TaskView}` and `ReportLine{EntryID; Kind; Title; Notes; TaskID sql.Null[domain.TaskID]; Time sql.Null[civil.Minute]; Reopened}`; `From > To` → validation. Seeding: Plan A Tasks 16b, 21, 22, 28. Tasks 3–5 helpers and partials.
 - Produces: routes `GET /ui/recap`, `GET /ui/report`.
   - **Recap** (`date` P datespec, default today): `blockrow` with C19 outcome forms, C17/C18 for planned blocks; entries; unlinked entries each with C15; interruptions; `logentry` (C13) with `date` prefilled to the recap date.
   - **Report** (query `from`, `to` P datespecs, `tag`, `project`, `todo=1`, `upcoming=1`; default = the full current week from `Options.WeekStart`): a GET filter form; days ascending with `day` headings; `✓` for `complete` lines, " (reopened)" suffix; a task's first appearance `#ID Title`, later `#ID`; line notes via `md`; Triage/Backlog sections with `todo`, Upcoming with `upcoming`.
@@ -734,10 +735,10 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Modify: `internal/web/routes.go`
 
 **Interfaces:**
-- Consumes: Plan A Task 34: `Search(ctx, a, service.SearchIn{Query, Kind string; Limit int; Cursor string}) (service.Page[service.SearchHit], error)` (`Kind` `""` = all; no terms → validation) with `SearchHit{Kind string; ID int64; TaskID sql.Null[domain.TaskID]; Title, Snippet string; Status domain.TaskStatus; WorkDate sql.Null[civil.Date]}`. Plan A Task 33: `ListAIChanges(ctx, a, service.ListAIChangesIn{IncludeReviewed bool; Limit int; Cursor string}) (service.AIChanges, error)` with `AIChanges{ReviewedThrough domain.OpSeq; Unreviewed int; Ops []OpSummary; NextCursor string}`, `OpSummary{Seq; OpID; Kind; Actor; Channel; At; State; Revertible; Via; TaskIDs; Effects}`; `MarkAIReviewed` (seeding). Plan A Task 16: `testutil.AI()`. Tasks 3–5 helpers.
+- Consumes: Plan A Task 34: `Search(ctx, a, service.SearchIn{Query, Kind string; Limit int; Cursor string}) (service.Page[service.SearchHit], error)` (`Kind` `""` = all; no terms → validation) with `SearchHit{Kind string; ID int64; TaskID sql.Null[domain.TaskID]; Title, Snippet string; Status domain.TaskStatus; WorkDate sql.Null[civil.Date]}`. Plan A Task 33: `ListAIChanges(ctx, a, service.ListAIChangesIn{IncludeReviewed bool; Limit int; Cursor string}) (service.AIChanges, error)` with `AIChanges{ReviewedThrough domain.OpSeq; Unreviewed int; Ops []OpSummary; NextCursor string}`, `OpSummary{Seq; OpID; Kind; Actor; Channel; At; State; Revertible; Via; TaskIDs; Effects}`; `MarkAIReviewed` (seeding). Plan A Task 16a: `testutil.AI()`. Tasks 3–5 helpers.
 - Produces: routes `GET /ui/search`, `GET /ui/ai-changes`.
   - **Search** (`q`, `kind` ∈ task|entry|all, default all): empty `q` → form only, **no service call**; hits link to `/ui/tasks/{id}` (entries: their task, or `/ui/log?from=D&to=D` when standalone); snippets as escaped text; More link via `moreURL`.
-  - **AI changes** (`all=1` → `IncludeReviewed`): ops (seq, `wall` time, kind, actor, state, effects, task links), C22 per revertible active op, More link via `moreURL`, and when `Unreviewed > 0` the C23 form with `through` = the highest seq on this page.
+  - **AI changes** (`all=1` → `IncludeReviewed`): ops newest first (seq, `wall` time, kind, actor, state, effects, task links), C22 per revertible active op, More link via `moreURL`. Review rule (AIDEV-NOTE: never acknowledge an unseen change): the C23 form is rendered only on the default unreviewed-only view (`all` unset) **and** only when `NextCursor == ""` — i.e. this page holds the oldest unreviewed changes, so every unreviewed change with seq ≤ `through` is on screen — with `through` = the highest seq on this page. When unreviewed changes span several pages the form appears on the last (oldest) page first; after that review the remainder fits fewer pages and the next review covers it. Pages that cannot offer review say "older unreviewed changes continue on the next page". (planner decision: keeps R1's one `ListAIChanges` call per request instead of loading every page.)
 
 - [ ] **Step 1: Write the failing tests** in `search_ai_test.go`
 
@@ -745,12 +746,15 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 func TestSearchPage(t *testing.T) // #1 "Set up keycloak" → /ui/search?q=keycloak links "/ui/tasks/1"; q="" → 200 with the search form and no results list;
 // q="*" → 422 (no search terms); a task titled `<b onclick=x>keycloak</b>` → page passes assertInert
 func TestAIChangesPage(t *testing.T) // testutil.AI() AddEntry(#1) → lists "token:ai", a revert form for it, scrapeForm("/ui/ai-changes/review")
-// through == that op's seq; after MarkAIReviewed via the service: no review form; ?all=1 still lists the op
+// through == that op's seq; ?all=1 lists it with no review form; after MarkAIReviewed via the service: no review form, ?all=1 still lists the op
+func TestAIReviewNeverCoversUnseen(t *testing.T) // 101 AddEntry(standalone) by testutil.TokenActor("bot", domain.MCPDefaultScopes) (no rate cap):
+// /ui/ai-changes → 100 rows (seqs s2…s101), a More link, NO "/ui/ai-changes/review" form; following More → 1 row (s1) and a review form
+// with through == s1 (never a seq of an op not on that page)
 ```
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `go test ./internal/web -race -run 'SearchPage|AIChangesPage'`
+Run: `go test ./internal/web -race -run 'SearchPage|AIChangesPage|AIReviewNeverCoversUnseen'`
 Expected: FAIL (404).
 
 - [ ] **Step 3: Implement** both handlers in `h_search.go` (search with empty `q` makes no call; otherwise one) and the templates.
@@ -779,7 +783,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Modify: `internal/web/routes.go`, `internal/web/render.go` (`page.Flash []string`), `internal/web/templates/layout.html` (flash box), `internal/web/helpers_test.go` (keep `tr_flash` with the session cookie)
 
 **Interfaces:**
-- Consumes: Form contract rows C1–C4 and the service calls they name (Plan A Tasks 16, 20, 29); Plan A Task 16: `service.OpResult{OpID; Created; Replayed; NoChange; …; Effects []Effect; Warnings []string}`, `service.Effect{Kind EffectKind; TaskID; BlockID; EntryID; Reason; From, To string}`; Task 3 decoders, `meta`, `renderError`; Task 4 `submit`; Task 5 `addTask`, `task`, `opKinds`, `meta`.
+- Consumes: Form contract rows C1–C4 and the service calls they name (Plan A Tasks 16b, 20, 29); Plan A Task 16a: `service.OpResult{OpID; Created; Replayed; NoChange; …; Effects []Effect; Warnings []string}`, `service.Effect{Kind EffectKind; TaskID; BlockID; EntryID; Reason; From, To string}`; Task 3 decoders, `meta`, `renderError`; Task 4 `submit`; Task 5 `addTask`, `task`, `opKinds`, `meta`.
 - Produces:
   ```go
   // mutate: a.meta(r) → res, err := fn(m, r.PostForm) → on success setFlash(w, r, flashLines(res)) and 303 to safeReturn(_return)
@@ -852,7 +856,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Modify: `internal/web/h_tasks.go`, `internal/web/routes.go`
 
 **Interfaces:**
-- Consumes: Form contract rows C5–C12 and the service calls they name (Plan A Tasks 16, 19, 22, 27, 28, 29: `PlaceIn`, `DeferIn`, `MarkManualIn`, `BlockIn`, `CompleteIn`, `ReopenIn`, `TaskRef`, `AcceptNewIn{Items []AcceptItem}`); Task 7 `mutate`; seeding as in Task 5 plus `UpdateTask` (Plan A Task 29).
+- Consumes: Form contract rows C5–C12 and the service calls they name (Plan A Tasks 16b, 19, 22, 27, 28, 29: `PlaceIn`, `DeferIn`, `MarkManualIn`, `BlockIn`, `CompleteIn`, `ReopenIn`, `TaskRef`, `AcceptNewIn{Items []AcceptItem}`); Task 7 `mutate`; seeding as in Task 5 plus `UpdateTask` (Plan A Task 29).
 - Produces: routes C5–C12.
 
 - [ ] **Step 1: Write the failing tests** in `tasks_lifecycle_test.go`
@@ -971,7 +975,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```go
 func TestFocusSetAndClear(t *testing.T) // the /ui/backlog focus form for #1 → Today focus #1; Today's clear form → no focus;
 // focus #2 with interrupt "1" while #1 is focused → one interruption from #1 to #2
-func TestUND19_WebUndoRevertsCLIOp(t *testing.T) // catalog UND-19: AddTask with ta.meta() (testutil.Owner(), channel cli);
+func TestUND19_WebUndoRevertsCLIOp(t *testing.T) // catalog UND-19, web half (service half: Plan A Task 31): AddTask with ta.meta() (testutil.Owner(), channel cli);
 // submit("/ui/", "/ui/undo", nil) → 303; the task is tombstoned; the newest op has via "undo" and channel "web";
 // submit("/ui/", "/ui/redo", nil) → the task is restored
 func TestUndoEmptyStack(t *testing.T) // fresh DB → undo → 409 `data-code="nothing_to_undo"`; redo → `nothing_to_redo`
@@ -981,7 +985,10 @@ func TestRevertFromAIChanges(t *testing.T) // testutil.AI() AddEntry(#1) → the
 // re-posting that scraped form with a fresh _nonce → 409 `data-code="revert_conflict"` ("already reverted")
 func TestMarkAIReviewed(t *testing.T) // review form → ListAIChanges.Unreviewed == 0; /ui/ no longer contains `data-banner="ai_changes"`;
 // through overridden to the latest seq + 10 → 422
-func TestSCP07_NoAdminRoutes(t *testing.T) // catalog SCP-07, web half (`forbidden` for ChanWeb token ops: Plan A):
+func TestMarkAIReviewedMultiPage(t *testing.T) // 101 unreviewed changes as in Task 6c TestAIReviewNeverCoversUnseen: submit the review form
+// from the second (oldest) page → Unreviewed == 100 and every newer change is still listed as unreviewed; /ui/ai-changes now fits one page and
+// offers review through the newest seq; submitting it → Unreviewed == 0
+func TestSCP07_NoAdminRoutes(t *testing.T) // catalog SCP-07, web half (`forbidden` for ChanWeb token ops: Plan A Task 35a):
 // logged in, valid CSRF: GET and POST /ui/tokens, /ui/tokens/1/revoke, /ui/settings, /ui/password, /ui/backups, /ui/export → 404 or 405, never 2xx/3xx;
 // no rendered page (/ui/, /ui/tasks/1, /ui/ai-changes) links or posts to /ui/tokens or /ui/settings
 func TestPRG18_NoWebPurge(t *testing.T) // catalog PRG-18, web half (API half: Plan B Task 15): POST /ui/tasks/1/purge, /ui/entries/1/purge, /ui/purge → 404/405;
@@ -1019,7 +1026,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Modify: `README.md` (short "Web UI" section: `web.enabled`, `http://127.0.0.1:7878/ui/`, password login, single-user plain-loopback opt-in, no remote access in v1)
 
 **Interfaces:**
-- Consumes: Plan B Task 13 Interfaces: `var newWebHandler func(svc *service.Service, clk clock.Clock, zone civil.Zone, weekStart time.Weekday, listen string, log *slog.Logger) (http.Handler, error)` in `internal/server/lifecycle.go` (nil → no web listener; `Run` passes the bound address `ln.Addr().String()`, wraps the handler in recoverer/requestID/accessLog, serves it with the D§10.2 timeouts and `ConnContext`; the `allow_plain_loopback` gate and `TestWebListenerGate` are Plan B's), `testutil.StartServer`, `testutil.WithWeb()` (web enabled, `allow_plain_loopback = true`, listen `127.0.0.1:0`), `Server.WebURL` (= `"http://" + Startup.WebAddr`, the bound address reported through `server.Deps.Started func(Startup)`; `""` when no web listener runs), `Server.Client`. Plan A Task 16 `testutil.Password`. Task 2 `web.New`, `web.Options`.
+- Consumes: Plan B Task 13 Interfaces: `var newWebHandler func(svc *service.Service, clk clock.Clock, zone civil.Zone, weekStart time.Weekday, listen string, log *slog.Logger) (http.Handler, error)` in `internal/server/lifecycle.go` (nil → no web listener; `Run` passes the bound address `ln.Addr().String()`, wraps the handler in recoverer/requestID/accessLog, serves it with the D§10.2 timeouts and `ConnContext`; the `allow_plain_loopback` gate and `TestWebListenerGate` are Plan B's), `testutil.StartServer`, `testutil.WithWeb()` (web enabled, `allow_plain_loopback = true`, listen `127.0.0.1:0`), `Server.WebURL` (= `"http://" + Startup.WebAddr`, the bound address reported through `server.Deps.Started func(Startup)`; `""` when no web listener runs), `Server.Client`. Plan A Task 16a `testutil.Password`. Task 2 `web.New`, `web.Options`.
 - Produces: `internal/server/web.go` (AIDEV-NOTE: the only place `server` learns about `web`): `func init() { newWebHandler = func(svc *service.Service, clk clock.Clock, zone civil.Zone, weekStart time.Weekday, listen string, log *slog.Logger) (http.Handler, error) { return web.New(web.Options{Svc: svc, Clock: clk, Zone: zone, WeekStart: weekStart, Listen: listen, Logger: log}) } }`.
 - Cross-plan contract (confirmed by planner-b): Plan B's `TestWebListenerGate` installs `nil` explicitly through `server.SetWebHandler(nil)` (+ restore) for its "no handler wired" case, so this `init` does not disturb it.
 
@@ -1075,7 +1082,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 9. Web inputs are datespec text resolved with the injected clock and `Options.WeekStart` (Future: add/defer/due/block/reblock; Past: complete/log dates, recap, report); `formInt` accepts `#42` (Task 3).
 10. `app.css?v=<buildinfo.Version>` cache-buster, since `/static/app.css` is served `immutable` (Task 3).
 11. Error pages for POSTs carry a "Your input" resubmit form with every submitted value except `_csrf`, `_nonce`, `password`; the original `_gen`/`etag` stay hidden so staleness is still detected (Task 3).
-12. Pagination: "More" links are built by `moreURL`, which keeps every current query parameter and replaces only `cursor`; lists page at 100 (Tasks 3, 5, 6c).
+12. Pagination: "More" links are built by `moreURL`, which keeps every current query parameter and replaces only `cursor`; lists page at 100 (Tasks 3, 5, 6c). The AI-review form appears only on the oldest page of the unreviewed-only view, so `through` never covers an unseen change (round-2 fix; one `ListAIChanges` call per request instead of Plan C's load-all-pages, to keep R1) (Tasks 6c, 10).
 13. Form contract section: one table shared by templates and handlers; every fixed action is its own form with a hidden value, so scraped forms are complete (Tasks 5–10).
 14. Tests are package `web_test` with `export_test.go` seams (P6); HTML security assertions parse the DOM with `x/net/html` (Tasks 1–11).
 15. Task 4 adds an authenticated `GET /ui/` stub so logout/CSRF tests have a real page to scrape before Task 5 replaces it (P2).
@@ -1092,7 +1099,8 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Confirmed against the final architecture: `domain.BlockView.TaskVersion` (R4-7, reblock `task_etag`), `Meta.Gen` / `_gen` on every mutation incl. undo/redo/revert (R3-3), `textsafe.SanitizeLine` (§6.7), gosec off in `_test.go` (§13.4).
 - Confirmed against Plan A (planner-a's reply and `2026-10-25-taskronin-plan-a-core.md`): every service signature cited in the Form contract and Interfaces blocks; `Authenticate` → `WebAuth{Actor, CSRFToken}`; `Login` deletes the old session; `Generation()`; `domain.FormatETag`/`ParseETag`; `testutil.Service` seeding `auth_state` with `testutil.Password` plus `db_generation`; `testutil.Meta(a, gen)`, `testutil.AI()`, `testutil.DefaultNow`.
 - Confirmed with planner-b: `newWebHandler` exactly as in Task 11 (nil → no web listener, bound address passed); Plan B owns the `allow_plain_loopback` gate and its test and provides `testutil.WithWeb()` and `Server.WebURL`. Plan B's `TestWebListenerGate` "no handler wired" case sets `server.SetWebHandler(nil)` explicitly (confirmed), because Task 11's `init` assigns the hook. `Server.WebURL` comes from Plan B's `Startup.WebAddr` callback; Plan D reads only `WebURL`.
-- Catalog split: Plan D owns the web halves of SCP-04, SCP-05, SCP-07, PRG-18 and IDM-04, and UND-19; Plan B owns the API/socket halves (SCP-04/05 in its Task 11, PRG-18 in Task 15, IDM-04 end to end in Task 35); SCP-07's service-level `forbidden` is Plan A's.
+- Catalog split (each scenario's tests named `Test<PFX><NN>_<suffix>`; Plan D needs no `notPlanA` change in Plan A Task 38's guard: each ID already has a non-web test in Plan A or Plan B, and Plan B removes SCP-05 and PRG-18 from `notPlanA`): Plan D owns the web halves of SCP-04, SCP-05, SCP-07, PRG-18, IDM-04 and UND-19. Service halves: Plan A (SCP-04/07 in Task 35a, IDM-04 in Task 36, UND-19 in Task 31). API/socket halves: Plan B (SCP-04/05 in Task 11, PRG-18 in Task 15, IDM-04 end to end in Task 35).
+- Plan A round-1 changes absorbed: citations use Plan A Tasks 16a/16b and 35b; session activity renews the 7-day idle window up to the 30-day cap (Plan A Task 35b; no web change — `TestSessionIdleExpiry` covers a session with no activity); reports exclude tombstoned entries (no web change); cursors pass through unchanged and the service rejects hostile ones (`TestListPaging`).
 
 ### Needs the user
 

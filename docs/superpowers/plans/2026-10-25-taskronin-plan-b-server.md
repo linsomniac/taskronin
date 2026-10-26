@@ -508,8 +508,8 @@ var ErrNoJournal, ErrNoRollback, ErrRollbackInProgress error
 // Test seam usable from other packages' tests (planner decision; A§13.2 asks for crash hooks):
 func WithStepHook(ctx context.Context, h func(point string) error) context.Context
 ```
-Hook points, in order: `prepared`, `moved-old:done`, `moved-old`, `installed:done`, `installed`, `on-installed`, `aside-deleted:done`, `aside-deleted` (`X:done` = action finished, journal not yet updated; `X` = journal updated). Rollback points: `rollback:started`, `rollback:new-discarded:done`, `rollback:new-discarded`, `rollback:moved:<member>` (after each of db, -wal, -shm moves back), `rollback:old-restored`. A non-nil hook error aborts the call with that error, leaving disk state as a crash would.
-`RollbackSwap` (restore/import only): journal `Rollback = "started"` → if the new file is installed at `Target` (Step ≥ `installed`, `Discard` empty): rename it to a fresh `.tkr-tmp-rollback-*` path, record it in `Discard`, `Rollback = "new-discarded"` → move each old member from `Aside` back (a member already at `Target` and absent from `Aside` counts as moved) → `Rollback = "old-restored"` → delete `Discard`, remove `Aside`, remove the journal. Once `Rollback` is set, `ResumeSwap` refuses (`ErrRollbackInProgress`, "run `tkr restore --rollback`") and a repeated `RollbackSwap` continues from the recorded point — it never deletes `Target` unless `Discard` names it.
+Hook points, in order: `prepared`, `moved-old:done`, `moved-old`, `installed:done`, `installed`, `on-installed`, `aside-deleted:done`, `aside-deleted` (`X:done` = action finished, journal not yet updated; `X` = journal updated). Rollback points: `rollback:started`, `rollback:discarding`, `rollback:new-discarded:done`, `rollback:new-discarded`, `rollback:moved:<member>` (after each of db, -wal, -shm moves back), `rollback:old-restored`. A non-nil hook error aborts the call with that error, leaving disk state as a crash would.
+`RollbackSwap` (restore/import only): journal `Rollback = "started"` → if the new file is installed at `Target` (Step ≥ `installed`): first pick a fresh `.tkr-tmp-rollback-<16 hex>` path beside `Target` (must not exist), write it to the journal as `Discard` with `Rollback = "discarding"` and fsync journal + dir, then rename `Target` to it and journal `Rollback = "new-discarded"` (a resumed `"discarding"` treats an existing `Discard` file as already renamed, else renames `Target` — the old set is still in `Aside`, so `Target` can only be the new file) → move each old member from `Aside` back (a member already at `Target` and absent from `Aside` counts as moved) → `Rollback = "old-restored"` → delete `Discard`, remove `Aside`, remove the journal. Once `Rollback` is set, `ResumeSwap` refuses (`ErrRollbackInProgress`, "run `tkr restore --rollback`") and a repeated `RollbackSwap` continues from the recorded point — it never deletes `Target` unless `Discard` names it.
 
 - [ ] **Step 1: Write the failing tests** (fixture per case: `<d>/taskronin.db` = "OLD", `-wal` = "OLDWAL", `-shm` = "OLDSHM", `<d>/staging/new.db` = "NEW")
 
@@ -523,7 +523,7 @@ func TestSwapCrashThenResume(t *testing.T) // for kind ∈ {restore, import, scr
 func TestSwapCrashThenRollback(t *testing.T) // kind ∈ {restore, import} × points before aside-deleted:
 	// RollbackSwap → Target == "OLD", -wal == "OLDWAL", -shm == "OLDSHM", Aside gone, journal gone
 func TestRollbackCrashThenRollbackAgain(t *testing.T) // restore kind crashed at "installed", then RollbackSwap crashed at each rollback point
-	// (incl. between the db and -wal moves) → RollbackSwap again → Target == "OLD", -wal == "OLDWAL", -shm == "OLDSHM", Discard and Aside gone,
+	// (incl. "rollback:discarding" — journal names Discard but the rename has not happened — and between the db and -wal moves) → RollbackSwap again → Target == "OLD", -wal == "OLDWAL", -shm == "OLDSHM", Discard and Aside gone,
 	// journal gone; ResumeSwap during an interrupted rollback → ErrRollbackInProgress and nothing moves
 func TestRollbackScrubRefused(t *testing.T)  // scrub journal → errors.Is(err, ErrNoRollback)
 func TestResumeNoJournal(t *testing.T)       // errors.Is(ResumeSwap(...), ErrNoJournal)
@@ -681,7 +681,7 @@ func TestInitUnitsOnly(t *testing.T)         // after Init, UnitsOnly re-renders
 ```
 
 - [ ] **Step 2: Run to verify failure** — `go test ./internal/config ./internal/offline -run 'OtherHuman|Init' -race` → FAIL.
-- [ ] **Step 3: Implement** per Interfaces. gosec directives: `os.Open(passwdPath)` in `OtherHumanAccounts` → `//nolint:gosec // G304: /etc/passwd or a test fixture`; the `exec.CommandContext(ctx, "systemctl", args...)` default → `//nolint:gosec // G204: fixed binary, fixed subcommands and unit names`. Units: `os.MkdirAll(Paths.UnitsDir(), 0o700)` (an existing dir keeps its mode) and `os.WriteFile(p, b, 0o644) //nolint:gosec // G306: systemd unit files are world-readable by design (A§8.6)`. Publish = rename staged file to `Paths.DB` + `FsyncDir`; the owner.token write happens before it (A§8.5 step 7).
+- [ ] **Step 3: Implement** per Interfaces. gosec directives: `os.Open(passwdPath)` in `OtherHumanAccounts` → `//nolint:gosec // G304: /etc/passwd or a test fixture`; the `exec.CommandContext(ctx, "systemctl", args...)` default → `//nolint:gosec // G204: fixed binary, fixed subcommands and unit names`. Units: `os.MkdirAll(Paths.UnitsDir(), 0o700)` (an existing dir keeps its mode) and `fsutil.WriteFileAtomic(p, b, 0o644)` — its explicit chmod defeats the 0077 umask `Init` sets, so the files really are 0644 (gosec reports nothing at this call, so no directive here). Publish = rename staged file to `Paths.DB` + `FsyncDir`; the owner.token write happens before it (A§8.5 step 7).
 - [ ] **Step 4: Run to verify pass** → PASS; `make check`.
 - [ ] **Step 5: Commit** — `feat(offline): tkr init with staged publish, owner token and systemd units`.
 
@@ -746,6 +746,8 @@ type Route struct {
 }
 func (s *Server) Routes() []Route     // the single table: router and scope-matrix test both read it
 func (s *Server) APIHandler() http.Handler // == s.handlerFor(s.Routes())
+func (s *Server) BeginShutdown()   // cancels the server's stop context; called by Run at shutdown step 1 (Task 13)
+func (s *Server) longCtx(r *http.Request) (context.Context, context.CancelFunc) // r.Context() also cancelled by BeginShutdown (Task 17's long routes; they also watch svc.Stopping())
 func (s *Server) handlerFor(routes []Route) http.Handler // A§6.2 API chain around a ServeMux of routes + GET /healthz (tests pass stub routes)
 func statusFor(c domain.Code) int     // A§2.8 table
 func (s *Server) writeProblem(w http.ResponseWriter, r *http.Request, err error)
@@ -895,7 +897,7 @@ func (s *Server) Start(t testing.TB)                  // run again on the same d
 func (s *Server) TokenClient(t testing.TB, name string, scopes domain.Scopes, perHour int, channel string) *client.Client
 	// svc.CreateToken as owner; token file 0600 under Paths.TokensDir
 ```
-Startup: config from `cfg` (data dir, socket, backup dir); lock (`ErrHeld` → "already running"); journals refused with the Task 8 texts; `CleanupTemps`; `store.Open` ("database not found; run `tkr init`" when missing); schema (too new / checksum → refuse; pending → premigrate snapshot → migrate); `GetAuthState` not found → refuse ("run `tkr init`"); `OpenLedger` → `ReapplyLedger` → `CheckpointTruncate` (failure refuses to start); `SyncTimezone` (changed → warn `timezone changed from X to Y; wall-clock times keep their meaning`); `Reconcile`; `listenAPI`; web listener only if `cfg.Web.Enabled && newWebHandler != nil`; `cfg.WebListenerAllowed()` failing → log its explanation and run without web (the socket API still serves); otherwise bind TCP loopback, pass `ln.Addr().String()` as `listen`, wrap the handler in recoverer/requestID/accessLog, then warn if `config.OtherHumanAccounts` is non-empty; both `http.Server`s with A§6.1 timeouts and `ConnContext`; schedulers; `systemd.Notify("READY=1")`. Shutdown (`// AIDEV-NOTE:` drain order): `Notify("STOPPING=1")` → `svc.BeginShutdown()` → `Shutdown` with 10 s (deadline from `clock.Real{}`) → cancel scheduler ctx → `svc.Drain` (no deadline; never abandoned) → `FlushUsage` → `CheckpointTruncate` → close → remove the socket if created → release the lock. Schedulers (`clk.After`, each job inside the service's in-flight accounting): reconcile at every minute boundary + 500 ms; maintenance minutely `FlushUsage`, hourly `ExpireIdempotency` + `ExpireSessions`; backup at startup if the last success is > 24 h old, then daily at `cfg.Backup.Time` (next instant via `zone.Instant(date, minute, civil.GapForward)`), as `RunBackup(schedCtx, domain.SystemActor(), backup.KindDaily)`. Each scheduler loop reports "armed"/"ran" to the observer seam (no-op in production).
+Startup: config from `cfg` (data dir, socket, backup dir); lock (`ErrHeld` → "already running"); journals refused with the Task 8 texts; `CleanupTemps`; `store.Open` ("database not found; run `tkr init`" when missing); schema (too new / checksum → refuse; pending → premigrate snapshot → migrate); `GetAuthState` not found → refuse ("run `tkr init`"); `OpenLedger` → `ReapplyLedger` → `CheckpointTruncate` (failure refuses to start); `SyncTimezone` (changed → warn `timezone changed from X to Y; wall-clock times keep their meaning`); `Reconcile`; `listenAPI`; web listener only if `cfg.Web.Enabled && newWebHandler != nil`; `cfg.WebListenerAllowed()` failing → log its explanation and run without web (the socket API still serves); otherwise bind TCP loopback, pass `ln.Addr().String()` as `listen`, wrap the handler in recoverer/requestID/accessLog, then warn if `config.OtherHumanAccounts` is non-empty; both `http.Server`s with A§6.1 timeouts and `ConnContext`; schedulers; `systemd.Notify("READY=1")`. Shutdown (`// AIDEV-NOTE:` drain order): `Notify("STOPPING=1")` → `svc.BeginShutdown()` and `apiServer.BeginShutdown()` (long routes abort their responses) → `Shutdown` with 10 s (deadline from `clock.Real{}`) → cancel scheduler ctx → `svc.Drain` (no deadline; never abandoned) → `FlushUsage` → `CheckpointTruncate` → close → remove the socket if created → release the lock. Schedulers (`clk.After`, each job inside the service's in-flight accounting): reconcile at every minute boundary + 500 ms; maintenance minutely `FlushUsage`, hourly `ExpireIdempotency` + `ExpireSessions`; backup at startup if the last success is > 24 h old, then daily at `cfg.Backup.Time` (next instant via `zone.Instant(date, minute, civil.GapForward)`), as `RunBackup(schedCtx, domain.SystemActor(), backup.KindDaily)`. Each scheduler loop reports "armed"/"ran" to the observer seam (no-op in production).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1037,11 +1039,12 @@ func TestAIReviewOwnerOnly(t *testing.T) // token client ReviewAIChanges → 403
 
 **Files:**
 - Create: `internal/server/h_admin.go`, `internal/server/h_admin_test.go` and `scope_matrix_test.go` (package `server_test`), `internal/client/admin.go`
+- Consumes also: Plan A Task 18 `(*Service).Stopping() <-chan struct{}`
 - Modify: `internal/server/routes.go`
 
 **Interfaces:**
 - Consumes: Tasks 11–16; Plan A Task 32 (`Settings`), Task 35a (`UpdateSettings`, `ListTokens`, `CreateToken`, `RevokeToken`, `ChangePassword`), Task 36 (`BackupStatus`, `RunBackup(ctx, a, backup.KindManual)` for `POST /backups`, `Export`; both observe shutdown inside the service — the handlers only extend the write deadline).
-- Produces: routes `GET/PATCH /settings` (PATCH exempt), `GET /tokens`, `POST /tokens` (exempt, 201), `POST /tokens/{id}/revoke`, `POST /password` (exempt, OwnerOnly, 204), `GET /backups`, `POST /backups` (exempt, 201, Long), `GET /export` (Long, `Content-Type: application/json`, `Content-Disposition: attachment; filename="taskronin-export.json"`); client `Tokens`, `Backups`, `Export`, `RevokeToken`, `UpdateSettings`, `CreateToken`, `ChangePassword`, `RunBackup` (A§6.7 exact; `UpdateSettings`, `CreateToken`, `ChangePassword` and `RunBackup` use `callExempt`, `RevokeToken` uses `callKeyed` — Task 12). Long routes extend the write deadline 10 min with `http.ResponseController.SetWriteDeadline(clock.Real{}.Now().Add(10*time.Minute))` (`// AIDEV-NOTE:` real time for I/O deadlines). Password-bearing handlers decode into the api struct, call the service, and zero the struct's password fields after the call.
+- Produces: routes `GET/PATCH /settings` (PATCH exempt), `GET /tokens`, `POST /tokens` (exempt, 201), `POST /tokens/{id}/revoke`, `POST /password` (exempt, OwnerOnly, 204), `GET /backups`, `POST /backups` (exempt, 201, Long), `GET /export` (Long, `Content-Type: application/json`, `Content-Disposition: attachment; filename="taskronin-export.json"`); client `Tokens`, `Backups`, `Export`, `RevokeToken`, `UpdateSettings`, `CreateToken`, `ChangePassword`, `RunBackup` (A§6.7 exact; `UpdateSettings`, `CreateToken`, `ChangePassword` and `RunBackup` use `callExempt`, `RevokeToken` uses `callKeyed` — Task 12). Long routes (`POST /backups`, `GET /export`) run the service call with `s.longCtx(r)` and start a watcher goroutine that waits for `svc.Stopping()` (Plan A Task 18; closed by `BeginShutdown`) or the handler's return; on stopping it calls `rc.SetWriteDeadline(time.Unix(1, 0))` — a past deadline fails a `Write` already blocked on a stalled reader at once, without `time.Now`. The service call then returns an error (Plan A Task 36 also checks ctx between rows) and the handler aborts the connection with `panic(http.ErrAbortHandler)`, so `Drain` never waits on a stalled client and the client sees a truncated stream, never a complete document. Long routes extend the write deadline 10 min with `http.ResponseController.SetWriteDeadline(clock.Real{}.Now().Add(10*time.Minute))` (`// AIDEV-NOTE:` real time for I/O deadlines). Password-bearing handlers decode into the api struct, call the service, and zero the struct's password fields after the call.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1052,6 +1055,9 @@ func TestChangePassword(t *testing.T)    // wrong current → 403 password_inval
 	// contain neither password (dump via a second store.Open + SELECT)
 func TestSettingsLowering(t *testing.T)  // keep_daily 7→5 without password → 403 password_required; with Password → 200 Settings{5,4};
 	// raising to 9 needs none; 2 → 422 validation
+func TestExportStalledReaderDoesNotBlockShutdown(t *testing.T) // seed 40 tasks with 64 KiB notes through srv.Svc (export ≫ socket buffers);
+	// a raw unix-socket connection sends GET /api/v1/export with the owner token and never reads; after 200 ms srv.Stop() returns within
+	// 3 s and the lock is released; reading the connection afterwards yields a truncated body (no closing "}")
 func TestBackupsHTTP(t *testing.T)       // RunBackup → kind "manual", file 0600; Backups().Healthy true and lists it
 func TestExportStream(t *testing.T)      // Export(ctx, &buf) → JSON with "format":"taskronin-export","version":1; raw response has
 	// Content-Disposition attachment
@@ -1064,7 +1070,7 @@ func TestScopeMatrix(t *testing.T)       // driven by expectedRoutes (not Routes
 	// `matrixInputs` (path values, minimal body, If-Match fetched with the owner client) must cover every expectedRoutes row
 ```
 
-- [ ] **Step 2: Run to verify failure** — `go test ./internal/server -run 'Tokens|ChangePassword|Settings|BackupsHTTP|Export|RouteInventory|ScopeMatrix' -race` → FAIL.
+- [ ] **Step 2: Run to verify failure** — `go test ./internal/server -run 'Tokens|ChangePassword|Settings|ExportStalled|BackupsHTTP|Export|RouteInventory|ScopeMatrix' -race` → FAIL.
 - [ ] **Step 3: Implement** handlers and client methods (`RunBackup`/`Export` use an 11 min budget).
 - [ ] **Step 4: Run to verify pass** → PASS; `make check`.
 - [ ] **Step 5: Commit** — `feat(server,client): admin endpoints, export stream, scope matrix`.
@@ -1828,9 +1834,10 @@ func addTool[In any](s *mcp.Server, t *mcp.Tool, out *jsonschema.Schema, h func(
 	// SDK adapter (go-sdk v1.8.0's generic mcp.AddTool validates typed output even on IsError results): registers a raw
 	// mcp.ToolHandler via (*mcp.Server).AddTool with InputSchema = jsonschema.For[In](opts) and OutputSchema = out, both resolved once;
 	// arguments are decoded strictly (DisallowUnknownFields) and validated against the resolved input schema (failure → toolError
-	// with code "validation", never a JSON-RPC error); success → CallToolResult{StructuredContent: result} (validated against `out`);
-	// error → toolError(err) with no output validation
-func toolError(err error) *mcp.CallToolResult                  // IsError; StructuredContent {"code","detail","retry_after"};
+	// with code "validation", never a JSON-RPC error); success → CallToolResult{StructuredContent: result (validated against `out`),
+	// Content: []mcp.Content{&mcp.TextContent{Text: <the same JSON>}}}; error → toolError(err) with no output validation.
+	// The raw path does not mirror structured output into Content, so the adapter always sets both (A§10 output contract)
+func toolError(err error) *mcp.CallToolResult                  // IsError; StructuredContent {"code","detail","retry_after"} and a TextContent with the same JSON;
 	// rate_limited → detail "rate limit reached; retry after N s"; datespec errors → code "validation"
 func resolveDate(ctx context.Context, c *client.Client, s string, m datespec.Mode) (domain.Moment, error) // against GET /clock
 ```
@@ -1846,7 +1853,8 @@ func TestReadToolsList(t *testing.T) // tools/list has today list_tasks get_task
 func TestReadSchemasGolden(t *testing.T) // each read tool's input and output schema → testutil.Golden "mcp_<tool>_input"/"mcp_<tool>_output";
 	// civil.Date fields {"type":"string","format":"date"}
 func TestStructuredErrorThroughSession(t *testing.T) // get_task {id: 999} over the in-memory session → IsError, StructuredContent
-	// {"code":"not_found","detail":…} survives the SDK round trip
+	// {"code":"not_found","detail":…} and Content[0] a TextContent whose JSON equals it
+func TestTextMirrorOnSuccess(t *testing.T) // today over the session → Content[0] is a TextContent whose JSON decodes equal to StructuredContent
 func TestTodayTool(t *testing.T)     // StructuredContent decodes into api.Today; Clock.Today == 2026-10-28
 func TestListTasksLimit(t *testing.T) // limit 201 → IsError code "validation" (adapter's schema check), no API call (srv.Log has no GET /api/v1/tasks);
 	// no limit → at most 50 items, view backlog
