@@ -1,8 +1,9 @@
 # Taskronin — Behavior Catalog (executable-spec scenarios)
 
-Status: DRAFT 2, derived from the design spec Draft v6
+Status: DRAFT 3, derived from the design spec Draft v6
 (`2026-10-25-taskronin-design.md`, cited as D§n) and aligned with the
-architecture Draft A1 (`2026-10-25-taskronin-architecture.md`, cited as A§n).
+architecture Draft A1 after its review rounds 1–2 (`2026-10-25-taskronin-architecture.md`,
+cited as A§n; change maps A§14.4/14.5, design deltas A§14.2 D36–D37).
 Every scenario here is meant to become one or more service-layer tests with an
 injected clock (`testutil.Scenario`). Ambiguities found while writing Draft 1
 were ruled on; the rulings are in §16 and are applied in the scenarios.
@@ -49,13 +50,16 @@ worked|missed|auto)` (`block.outcome`), `AddEntry(task|null, text, date[, at])`
 (`entry.add`), `UpdateEntry`, `RelinkEntry`, `DeleteEntry`, `UndeleteEntry`
 (`entry.update|relink|delete|undelete`), `SetFocus(task|null[, interrupt])`
 (`focus.set`), `Revert(op)`, `Undo()`, `Redo()` (`op.revert|undo|redo`),
-`Purge(...)` (`purge.task|entry`), `Reconcile(at T)` (`system.reconcile`).
+`Reconcile(at T)` (`system.reconcile`). Purge is the **offline** command
+`tkr purge` (`purge.task|entry` via `PurgeLive`, A§12.6, §14) — there is no
+API/web/MCP purge.
 Datespec arguments are written as the CLI would type them; the service receives
 the resolved `Moment`/`BlockSpan`/`Date`. Every mutation of an existing record
 carries the correct `If-Match`/`Expect` unless the scenario is about it.
 
 **Shorthand for expected state.**
-- `PLACED(#n)` ≡ reason rows of #n deleted; `last_placed_at = now`;
+- `PLACED(#n)` ≡ reason rows of #n deleted; `last_placed_at = now`,
+  `last_placed_seq = op.seq`;
   `due_ack = phase(#n)` where phase is `overdue` if due moment ≤ now, else
   `due` if `due_date ≤ today`, else `none`; `due_ack_date = today`;
   `version++`; within the op, `slipped`/`continue` additions for #n are
@@ -64,15 +68,20 @@ carries the correct `If-Match`/`Expect` unless the scenario is about it.
   `Reblock`, `Complete`, `Drop`, and `AddTask` with a placement flag incl.
   `--now` (A§14 D6: `done` and `drop` are placements; `delete` is not).
   A placement on a deferred task also clears the defer (A§14 D5).
-- `slip(B)` ≡ `B.slipped = 1`, `B.slipped_at = now`. `unslip(B)` ≡
-  `B.slipped = 0` (`slipped_at` is left as history).
+- `slip(B)` ≡ `B.slipped = 1`, `B.slipped_at = now`, `B.slipped_seq = op.seq`.
+  `unslip(B)` ≡ `B.slipped = 0` (`slipped_at`/`slipped_seq` are left as history).
 - `L/S` = slip counts of a task: lifetime / since last triage
-  (`slipped = 1 ∧ slipped_at > last_placed_at`).
-- `now` inside one op is a single timestamp (A§4.2 `op.now`): every column
-  written in that op (`slipped_at`, `last_placed_at`, `resolved_at`, `since`)
-  gets the same value, so `slipped_at > last_placed_at` is false for a slip
-  and a placement in the same op. Op times are strictly increasing across ops
-  (`nextOpTime`), so `>` between ops is well-defined.
+  (`slipped = 1 ∧ slipped_seq > COALESCE(last_placed_seq, 0)`).
+- **Ordering and acknowledgement use `ops.seq`** (A§4.2, S3): `last_placed_seq`,
+  `slipped_seq`, `resolved_seq`, `task_triage.seq`. A slip and a placement in
+  the same op share one seq, so `>` is false and the slip counts as
+  acknowledged. `now` is read once per transaction; every `*_at` column is
+  informational (display, history). In fixtures, timestamps imply seq order
+  (a later op has a higher seq); where a scenario writes `slipped_seq >
+  last_placed_seq` it means exactly that seq comparison.
+- Events recorded by `recompute` (block re-derivations and the `slipped`/
+  `continue` changes their hooks make) carry `derived = 1` (A§2.7, R2-1):
+  revert never replays them, it re-derives through the normal hooks instead.
 - A block row is written `B{status, src, slipped, cancel}` e.g.
   `B1{missed, auto, 1, –}` or `B2{cancelled, –, 0, task_closed}`. "started"
   = start instant ≤ now; "ended" = end instant ≤ now; containment is on
@@ -93,15 +102,19 @@ carries the correct `If-Match`/`Expect` unless the scenario is about it.
 field-level: spans, dates, defer/due rule, past block, DST gap), `malformed`
 (400), `not_found` (404), `deleted` (409: mutating a tombstoned entity),
 `conflict` (409: illegal status transition, ineligible task for block/focus,
-overlap, invariant violation, empty undo/redo stack, "already reverted"),
-`revert_conflict` (409, lists conflicts), `not_revertible` (409),
+overlap, invariant violation, unblock/outcome on the wrong block state),
+`nothing_to_undo` / `nothing_to_redo` (409, empty stack), `revert_conflict`
+(409, lists conflicts; also "already reverted by <actor>"), `not_revertible` (409),
 `precondition_failed` (412, body carries the current representation),
 `precondition_required` (428, missing `If-Match`), `idempotency_key_required`
 (428), `idempotency_mismatch` (422), `forbidden` (403: scope, channel),
 `peer_rejected` (403: socket guard), `password_required` / `password_invalid`
-(403), `unauthenticated` (401), `rate_limited` (429), `busy` (503). An op that
+(403; online only for web login and retention lowering — purge prompts on a
+TTY), `unauthenticated` (401), `rate_limited` (429), `busy` (503). An op that
 errors changes nothing and writes no events; the reconcile that ran before it
-is kept (A§4.2 step 16).
+is kept (A§4.3 step 17). The one exception is a `committedError` from
+`Undo`/`Redo` (A§4.6): the unusable stack entry is popped and the 409 is
+stored for the idempotency key, but no ops row or event is written.
 
 ---
 
@@ -128,15 +141,16 @@ is kept (A§4.2 step 16).
 | TRI-17 | `#1{new}` v1 | `Skip(#1)` (TUI `s`) | No request / no change: version 1, reasons `{new}`, no events. |
 | TRI-18 | `#1{new}` (since 09:00), `#2{new}` (since 09:30), `#3{new,slipped}`, `#4{surfaced}`; backlog [#9] | `AcceptNew(items = [{#1, etag}, {#2, etag}])` | #1, #2 PLACED as `Place{bottom}` each, in item order → Backlog [#9, #1, #2]. #3, #4 untouched. One op (`task.accept_new`), undone as one; `OpResult.Tasks` = [#1, #2]. Only tasks whose reason set is exactly `{new}` qualify (R1): `AcceptNew([{#3, etag}])` → `conflict`, whole op refused (all-or-nothing); a stale item etag → `precondition_failed`, nothing applied. |
 | TRI-19 | `#1{new}` v3 as shown on a screen; then `Reconcile` adds `overdue` → v4 | `Place(#1, keep, If-Match "<gen>-3")` | `precondition_failed` (412), body = #1 at v4 with `{new, overdue}`; nothing changed, no events. Retrying with `If-Match "<gen>-4"` → PLACED (clears both rows). Without `If-Match` → `precondition_required` (428). An `If-Match` with a different `db_generation` (after a restore) → `precondition_failed`. |
-| TRI-20 | eight tasks with exactly one reason each, all `since` equal except as noted: `#1{new}`, `#2{manual}`, `#3{reopened}`, `#4{surfaced}`, `#5{continue}`, `#6{due}`, `#7{overdue}`, `#8{slipped}`; plus `#9{slipped}` whose `since` is 1 h *earlier* than #8's; plus `#10{new, overdue}` with overdue.since 1 h *later* than #7's | read Triage | Order: #9, #8, #7, #10, #6, #5, #4, #3, #2, #1. (Highest reason first; within a reason, ascending `since`; a multi-reason task sorts by its highest reason's `since`.) |
-| TRI-21 | `#1{new,due}` | `Delete(#1)` then `Undelete(#1)` | after Delete: `#1{}`, `deleted_at` set, not in any view. After Undelete: `deleted_at = null`, `#1{manual}` (`since = now`), in Triage. `triage:add #1 manual`. |
-| TRI-22 | `#1{}` in backlog | `MarkManual(#1)` twice | first: `#1{manual}`, `triage:add #1 manual`, version++. second: `NoChange` (`op_id = null`, no event, version unchanged, nothing pushed on the undo stack; PK `(task_id, reason)`, `since` kept). |
-| TRI-23 | #1 done then deleted | `Undelete(#1)` (`destroy`) | `deleted_at = null`, status done, **no** `manual` row (A§14 D30: reasons only on open tasks). `mcp` → `forbidden`. |
+| TRI-20 | eight tasks with exactly one reason each, added by ops in this order (ascending `seq`): `#1{new}`, `#2{manual}`, `#3{reopened}`, `#4{surfaced}`, `#5{continue}`, `#6{due}`, `#7{overdue}`, `#8{slipped}`; then `#9{slipped}` whose `slipped` row was added by an op with a **lower** seq than #8's (an earlier reconcile); then `#10{new, overdue}` whose `overdue` row has a **higher** seq than #7's | read Triage | Order: #9, #8, #7, #10, #6, #5, #4, #3, #2, #1 — highest reason first; within a reason ascending `task_triage.seq` (oldest op first, A§3.7/R2), then task id; a multi-reason task sorts by its highest reason's row. `since` is display-only and never used for ordering. |
+| TRI-21 | `#1{new,due}` | `Delete(#1)` then `Undelete(#1)` (`write`) | after Delete: `#1{}`, `deleted_at` set, not in any view. After Undelete: `deleted_at = null`, `#1{manual}` (`since = now`, `seq` = this op), in Triage; a future defer, if any, is cleared like `MarkManual` (A§3.2, D4); blocks and focus untouched. `triage:add #1 manual`. |
+| TRI-22 | `#1{}` in backlog | `MarkManual(#1)` twice (keys K1, K2) | first: `#1{manual}`, `triage:add #1 manual`, version++. second: `NoChange` (`op_id = null`, 200, no event, version unchanged, nothing pushed on the undo stack; PK `(task_id, reason)`, `since`/`seq` kept) — and an idempotency row **is** stored for K2 with `op_id` NULL (R-j), so a replay of K2 returns 200 `replayed = true` with no effects. |
+| TRI-23 | #1 done then deleted | `Undelete(#1)` (`write`, A§3.2/A18) | `deleted_at = null`, status done, **no** `manual` row (A§14 D30: reasons only on open tasks). `mcp` (has `write`) → allowed. |
 | TRI-24 | `#1{}` backlog, `due_date = 10-28`, `due_ack = none`, `#1{due}` after reconcile | `Place(#1, keep)` | PLACED with `due_ack = due`, `due_ack_date = 10-28`. (Phase computation per §0.) |
 | TRI-25 | `#1{new}` | `Place(#1, keep)` by `mcp` | allowed (`write`); PLACED; op `actor = token:ai`; op listed in AI changes (`unreviewed` 1). |
 | TRI-26 | `#1{}` deferred to 11-02 (in Upcoming), rank r | `Place(#1, keep)` (TUI Upcoming `k`) | defer cleared (`defer_date = defer_min = null`), PLACED; #1 in Backlog at rank r (A§14 D5). `Place(#1, top)` → same plus `task:move`. |
-| TRI-27 | `#1{}` deferred to 11-02 | `Defer(#1, nil)` (`tkr defer 1 none`) | identical to `Place(#1, keep)`: defer cleared, PLACED, rank kept; op kind `task.defer` (R24, A§3.2). On a task that is not deferred → still a placement (clears reasons). |
+| TRI-27 | `#1{}` deferred to 11-02 | `Defer(#1, nil)` (`tkr defer 1 none`, `POST …/defer {"until": null}`) | identical to `Place(#1, keep)`: defer cleared, PLACED, rank kept; op kind `task.defer` (R24, A§3.2). `nil` never touches blocks or focus: on a non-deferred `#1{new}` with B1 planned tomorrow → `#1{}` PLACED, B1 untouched. |
 | TRI-28 | `#1{}` deferred to 11-02 | `MarkManual(#1)` | `#1{manual}` **and** defer cleared (A§14 D4) so the task is visible in Triage; not a placement (`last_placed_at` unchanged). |
+| TRI-29 | `#1{}` open, `defer_date = 11-02`, then `Delete(#1)` | `Undelete(#1)` | `#1{manual}` and `defer_date = null` (an open undeleted task must be visible in triage, A§3.2); not a placement. |
 
 ## 2. Blocks (BLK)
 
@@ -171,7 +185,7 @@ is kept (A§4.2 step 16).
 | ID | Given | When | Then |
 |---|---|---|---|
 | BLK-17 | B1(#1, 10-28 13:00-15:00), no entries | `Reconcile(10-28 23:59)` | B1 still `planned` (Today view marks it *reblock?*). No events. |
-| BLK-18 | same | `Reconcile(10-29 00:00 = 06:00Z)` | `B1{missed, auto, 1, –}`, `slipped_at = resolved_at = 2026-10-29T06:00Z`; `#1{slipped}` with `since` = same; `#1.version++`. `block:update B1`, `triage:add #1 slipped`; actor `system`. L/S = 1/1. |
+| BLK-18 | same | `Reconcile(10-29 00:00 = 06:00Z)` | `B1{missed, auto, 1, –}`, `slipped_at = resolved_at = 2026-10-29T06:00Z`, `slipped_seq = resolved_seq =` the reconcile op's seq; `#1{slipped}` with `since` = same instant and `seq` = same op; `#1.version++` (finalized by the reconcile op itself, R-i). `block:update B1`, `triage:add #1 slipped`; actor `system`. L/S = 1/1 (`slipped_seq > COALESCE(last_placed_seq, 0)`). |
 | BLK-19 | B1(#1, 2026-11-01 13:00-15:00) | `Reconcile(2026-11-02T06:59Z)` (= 23:59 MST 11-01) | still `planned` — the day is 25 h long; resolving at 06:00Z would be a bug. |
 | BLK-20 | same | `Reconcile(2026-11-02T07:00Z)` | resolved `missed`, slipped, `#1{slipped}`. |
 | BLK-21 | B1(#1, 2027-03-14 13:00-15:00) | `Reconcile(2027-03-15T05:59Z)` → planned; `Reconcile(2027-03-15T06:00Z)` → resolved (the day is 23 h; 07:00Z would be an hour late). |
@@ -203,14 +217,14 @@ is kept (A§4.2 step 16).
 
 | ID | Given | When | Then |
 |---|---|---|---|
-| BLK-40 | B1(#1, 10-27){missed, auto, 1}, `#1{slipped}` | `Reblock(B1, 10-28, 13:00-15:00)` | B1 untouched (still missed, slipped = 1, `slipped_at` unchanged); new B2 planned today; PLACED(#1) → `#1{}`; L/S = 1/0 (acknowledged, `slipped_at < last_placed_at`). |
+| BLK-40 | B1(#1, 10-27){missed, auto, 1}, `#1{slipped}` | `Reblock(B1, 10-28, 13:00-15:00)` | B1 untouched (still missed, slipped = 1, `slipped_at` unchanged); new B2 planned today; PLACED(#1) → `#1{}`; L/S = 1/0 (acknowledged, `slipped_seq < last_placed_seq`). |
 | BLK-41 | B1 `{cancelled}` / `{worked}` / `{done}` | `Reblock(B1, 10-29, …)` | new block created, old untouched, PLACED. |
 | BLK-42 | B1(#1, 10-28 13:00-15:00) unstarted; B9(#2, 10-29 09:00-10:00) | `Reblock(B1, 10-29, 09:30-10:30)` | `conflict` (overlap with B9); B1 unchanged (still planned, not cancelled), #1 not PLACED. Atomic. |
 | BLK-43 | – | `Unblock(B1{cancelled})`, `Unblock(B1{missed})` → `conflict` (not planned); `Unblock(999)` → `not_found`. |
 | BLK-44 | B1(#1, 10-27){missed, auto, 1}, `#1{slipped}`; no other slipped block | `SetOutcome(B1, worked)` on 10-28 | `B1{worked, user, 0, –}`; `#1{continue}` (`slipped` removed by unslip; `continue` added as for a re-derive to worked). |
 | BLK-45 | B1(#1, 10-27){worked, auto, 0}, `#1{continue}` | `SetOutcome(B1, missed)` | `B1{missed, user, 1, –}`, `slipped_at = now`; `#1{slipped}` (`continue` removed, `slipped` added — recap outcome is not a placement). L/S 1/1. |
 | BLK-46 | after BLK-45 | `AddEntry(#1, "x", 10-27)` | recompute skips user-resolved blocks: B1 stays `{missed, user, 1}`; `#1{slipped}` unchanged. Entry stored normally. |
-| BLK-47 | B1(#1, 10-28 13:00-15:00) `planned`, now 10-28 16:00 (ended, still planned) | `SetOutcome(B1, missed)` | `B1{missed, user, 1, –}`, `resolved_at = now`; `#1{slipped}` (R9). At 14:00 (not ended) → `conflict`. On a `cancelled` block → `conflict`. |
+| BLK-47 | B1(#1, 10-28 13:00-15:00) `planned`, now 10-28 16:00 (ended, still planned) | `SetOutcome(B1, missed)` | `B1{missed, user, 1, –}`, `resolved_at = now`, `resolved_seq = slipped_seq = op.seq`; `#1{slipped}` (R9). At 14:00 (started, not ended) → also allowed (A§3.3/A9). At 12:00 (unstarted) → `conflict` ("use unblock"). On a `cancelled` block → `conflict`. |
 | BLK-49 | B1(#1, 10-27){missed, user, 1} (from BLK-45), `#1{slipped}`; `W(#1, 10-27)` exists | `SetOutcome(B1, auto)` | date < today → re-derived: `B1{worked, auto, 0}`; `#1{continue}` (slip/continue hooks apply). |
 | BLK-50 | B1(#1, 10-28 13:00-15:00){missed, user, 1} set at 16:00 today (BLK-47) | `SetOutcome(B1, auto)` at 17:00 | date = today → back to `planned` (`outcome_source = null`, `resolved_at = null`, `slipped = 0` → unslip removes `#1{slipped}`); resolves normally at midnight (BLK-18). |
 | BLK-48 | B1(#1, 10-28 13:00-15:00) | read at 12:59, 13:00, 14:30, 15:00 | current block: none, B1, B1, none (half-open). `status --short` shows `▶ #1 … (→15:00)` only while current. |
@@ -221,9 +235,9 @@ is kept (A§4.2 step 16).
 |---|---|---|---|
 | SLP-01 | B1(#1, Mon 10-26 13:00-15:00){missed, auto, 1, slipped_at Tue 00:00}; `#1{slipped}`; `last_placed_at = Mon 09:00` | `AddEntry(#1, "Did it", date = mon)` on Wed | `B1{worked, auto, 0}` (`slipped_at` unchanged); `#1{continue}`: `triage:remove #1 slipped`, `triage:add #1 continue`, `block:update B1`. L/S 0/0. |
 | SLP-02 | B1(#1, Mon){missed, 1}, B2(#1, Tue){missed, 1}; `#1{slipped}` (since Tue 00:00); `last_placed_at` Mon 09:00 | `AddEntry(#1, "x", mon)` | B1 → worked, unslip. B2 still `slipped = 1` with `slipped_at (Wed 00:00) > last_placed_at` → `slipped` reason **stays**; `continue` added → `#1{slipped, continue}`. L/S 1/1. |
-| SLP-03 | B1(#1, Mon){missed, 1, slipped_at Tue 00:00}; `Place(#1, keep)` Tue 09:00 (→ `#1{}`, `last_placed_at` Tue 09:00); B2(#1, Tue){missed, 1, slipped_at Wed 00:00}; `#1{slipped}` | `AddEntry(#1, "x", tue)` Wed 10:00 | B2 → worked, unslip. B1 still slipped but `slipped_at < last_placed_at` (acknowledged) → `slipped` reason removed. `#1{continue}`. L/S 1/0. |
+| SLP-03 | B1(#1, Mon){missed, 1, slipped_at Tue 00:00}; `Place(#1, keep)` Tue 09:00 (→ `#1{}`, `last_placed_at` Tue 09:00); B2(#1, Tue){missed, 1, slipped_at Wed 00:00}; `#1{slipped}` | `AddEntry(#1, "x", tue)` Wed 10:00 | B2 → worked, unslip. B1 still slipped but `slipped_seq < last_placed_seq` (acknowledged) → `slipped` reason removed. `#1{continue}`. L/S 1/0. |
 | SLP-04 | state after SLP-01 (`#1{continue}`, B1 worked, entry E) | `DeleteEntry(E)` Wed 11:00 | recompute (#1, Mon): `B1{missed, auto, 1}`, `slipped_at = Wed 11:00`; `#1{slipped}` — `continue` removed, `slipped` added. L/S 1/1. |
-| SLP-05 | SLP-01 performed by `mcp` (AI log) | owner `Revert(op)` | entry tombstoned; delta restore of reasons (`+slipped`, `−continue`) and recompute agree: `B1{missed, auto, 1, slipped_at = now}`, `#1{slipped}`. Op appears as reverted in AI changes. |
+| SLP-05 | SLP-01 performed by `mcp` (AI log) | owner `Revert(op)` | X's non-derived events (the `entry:insert`) are reverted → entry tombstoned; its derived events (`block:update B1`, `−slipped`, `+continue`) are **skipped** and the pair (#1, Mon) is recomputed instead: `B1{missed, auto, 1, slipped_at = now, slipped_seq = R.seq}`, `#1{slipped}` (−continue). Op X shows as reverted in AI changes. Same result if #1 was `Place`d between X and R: the re-slip is unacknowledged (`slipped_seq > last_placed_seq`, S = 1) and the placement's `task:update` on #1 is no conflict (X touched only the entry). |
 | SLP-06 | B1(#1, Mon), B2(#1, Tue 09:00-10:00) planned; `W(#1, Mon)` | `Reconcile(Tue 00:00)` | `B1{worked}`; **no** `continue` (planned block on a later date). `#1{}`. Then `W(#1, Tue)`; `Reconcile(Wed 00:00)` → `B2{worked}`, `#1{continue}` (no later block now). |
 | SLP-07 | B1(#1, today 13:00-15:00) started (now 14:00); `W(#1, today)` | `Defer(#1, "+2d")` | `B1{worked, auto, 0}`; PLACED; no `continue` (same op is a placement on #1). `#1{}`. Same for `Reblock(B1, …)`. |
 | SLP-08 | SLP-01 state | `UpdateEntry(E, work_date → Tue)` | recompute both (#1, Mon) and (#1, Tue): B1 → missed, slip, `continue` replaced by `slipped`. (= "continue replaced by slip on re-derive to missed".) |
@@ -241,7 +255,7 @@ is kept (A§4.2 step 16).
 | ID | Given | When | Then |
 |---|---|---|---|
 | RCP-01 | E = `W(#1, Mon)`; B1(#1, Mon){worked, auto}, `#1{continue}`; B2(#2, Mon){missed, auto, 1}, `#2{slipped}` | `RelinkEntry(E, task → #2)` | one transaction: (#1, Mon): `B1{missed, auto, 1, slipped_at now}`, `#1{slipped}` (−continue). (#2, Mon): `B2{worked, auto, 0}`, `#2{continue}` (−slipped). Events for both blocks and both tasks share one `op_id`. |
-| RCP-02 | E = `W(#1, Mon)`; B1(#1, Mon){worked}; B2(#1, Tue){missed, 1}; `#1{slipped, continue}` | `UpdateEntry(E, work_date → Tue)` | B1 → missed (slip), B2 → worked (unslip). End state `#1{slipped, continue}`: `slipped` present (B1 now unacked), `continue` present (B2 is `worked` with `resolved_at > last_placed_at`, A§4.4 removal rule). Tests assert the reason set, not the `since` of `continue` (it may be kept or re-added depending on block processing order). L/S 1/1. |
+| RCP-02 | E = `W(#1, Mon)`; B1(#1, Mon){worked}; B2(#1, Tue){missed, 1}; `#1{slipped, continue}` | `UpdateEntry(E, work_date → Tue)` | B1 → missed (slip), B2 → worked (unslip). End state `#1{slipped, continue}`: `slipped` present (B1 now unacked), `continue` present (B2 is `worked` with `resolved_seq > last_placed_seq`, A§4.4 removal rule). Tests assert the reason set, not the `since` of `continue` (it may be kept or re-added depending on block processing order). L/S 1/1. |
 | RCP-03 | SLP-01 state | `DeleteEntry(E)` | = SLP-04. |
 | RCP-04 | RCP-03 state | `UndeleteEntry(E)` | B1 → worked, unslip; `#1{continue}`. |
 | RCP-05 | RCP-01 state | `Undo()` (reverts the relink) | both pairs recomputed back: `B1{worked}`, `#1{continue}`; `B2{missed, 1, slipped_at = now}`, `#2{slipped}`. |
@@ -268,7 +282,7 @@ is kept (A§4.2 step 16).
 | LIF-12 | #1 done (LIF-01 state), `C1` | `Reopen(#1)` | status open; `completed_at/date = null`; `due_ack = none`, `due_ack_date = null`; `#1{reopened}`; `C1.reopened = 1` (not deleted); `last_placed_at`/`due_ack_date` keep the values set by `Complete` (a placement, D6), so any block slipped before completion counts as acknowledged: L/S = L/0 until a new slip. C1 still counts as `complete` for derivation. `task:update #1 (status, completed_*, due_ack)`, `entry:update C1 (reopened)`. |
 | LIF-13 | LIF-04 state (B2, B3 cancelled task_closed) | `Reopen(#1)` | B2, B3 remain `cancelled/task_closed`; B1 remains `{done}`. CLI prints the hint that `undo` of the `done` op would restore them. |
 | LIF-20 | LIF-05 state after `Complete(#1, --date mon)` (Mon block `done`, Wed block cancelled+unslipped; `last_placed_at = now_complete`); then `Reopen(#1)` on 10-30 | `Reconcile`; read #1 | `#1{reopened}` only; L/S = 0/0 (the Wed slip was unslipped by `Complete`; Mon is `done`). Then `Unblock` of a fresh today block at 10-30 (≥ 15 min old) → L/S = 1/1 and `#1{reopened, slipped}` — only slips after the completion placement count as "since last triage". |
-| LIF-14 | LIF-04 state; actor owner | `Reopen(#1, remove_entry)` | C1 `deleted_at = now`; recompute (#1, 10-28): `B1{missed, auto, 1, slipped_at = now}` (no other entry that day); `#1{reopened, slipped}` (Reopen is not a placement, so the new slip is unacknowledged: `slipped_at > last_placed_at` set by `Complete`; L/S = 1/1). Same by `mcp` → `forbidden` (needs `destroy`). |
+| LIF-14 | LIF-04 state; actor owner | `Reopen(#1, remove_entry)` | C1 `deleted_at = now`; recompute (#1, 10-28): `B1{missed, auto, 1, slipped_at = now}` (no other entry that day); `#1{reopened, slipped}` (Reopen is not a placement, so the new slip is unacknowledged: `slipped_seq > last_placed_seq` set by `Complete`; L/S = 1/1). Same by `mcp` → `forbidden` (needs `destroy`). |
 | LIF-15 | #1 done, C1 | `DeleteEntry(C1)` → `conflict` ("use reopen --remove-entry"); `UpdateEntry(C1, notes)` → allowed (`destroy`); `UpdateEntry(C1, title)` / `work_date` → `validation` (A§14 D32: only notes of a `complete` entry are editable). After `Reopen(#1)`: `DeleteEntry(C1)` → allowed (destroy). |
 | LIF-16 | #1 dropped | `Reopen(#1)` | status open; `#1{reopened}`; `due_ack = none`. |
 | LIF-17 | LIF-12 state | `Complete(#1)` again on 10-29 | second entry `C2(#1, 10-29)`; C1 keeps `reopened = 1`. Report: 10-28 `✓ … (reopened)`, 10-29 `✓ …`. |
@@ -342,24 +356,28 @@ is kept (A§4.2 step 16).
 | UND-01 | owner `AddTask("A")` = op A | `Undo()` | #1 `deleted_at` set (inserted rows tombstoned), reason rows removed; revert op R1 has its own `op_id`; undo stack(owner) = [], redo = [A]. `#1.version` advanced. |
 | UND-02 | UND-01 | `Redo()` | reverts R1: #1 `deleted_at = null`, `#1{new}` restored; undo = [A], redo = []. |
 | UND-03 | UND-02 | `Undo()` | #1 tombstoned again; undo = [], redo = [A]. (undo/redo/undo.) |
-| UND-04 | op A; `Undo()`; then `AddTask("B")` = op B | `Redo()` | `conflict` (redo stack empty: the forward op cleared it). undo = [B]. |
+| UND-04 | op A; `Undo()`; then `AddTask("B")` = op B | `Redo()` | `nothing_to_redo` (409; the forward op cleared the redo stack). undo = [B]. |
 | UND-05 | owner op A (`AddTask`), then `mcp` op B (`Log`) | `mcp Undo()` → reverts B (A untouched); `owner Undo()` → reverts A. Stacks are per actor; web session and CLI share the `owner` stack. |
 | UND-06 | op A `Place(#1, top)`; op B `UpdateTask(#1)` | `Undo()` on A (e.g. via `Revert(A)`) | `revert_conflict` listing (task #1, op B). Nothing changed. `Undo()` pops B first (stack order), so this needs `Revert(A)` or an interleaved actor. Stack unchanged on refusal. |
 | UND-07 | Mon: op A `Block(#1, Mon 13:00-15:00)`; `Reconcile(Tue 00:00)` resolved it | `Undo()` Tue | `revert_conflict` (block B1 has a later `system` event). |
 | UND-08 | A `AddTask` → #1; B `Place(#1, top)`; `Undo()` (reverts B, net-zero pair B/R_B) | `Undo()` again | reverts A: allowed — the B/R_B pair is ignored in the conflict check. #1 tombstoned. |
 | UND-09 | B1(#1, Thu 09:00-10:00) planned. A `Unblock(B1)` (future → no slip); B `Block(#2, Thu, 09:00-10:00)` | `Revert(A)` | `conflict` (invariant: restored B1 would overlap B2). No conflict-refusal (A touched B1 only, B touched B2 and #2). State unchanged. |
 | UND-10 | B1(#1, Thu) planned. A `Unblock(B1)`; B `Defer(#1, "+5d")` (allowed: no planned blocks) | `Revert(A)` | `conflict` (invariant: deferred task with a planned block). |
-| UND-11 | `mcp` op X = `AddEntry(#1, …, mon)` (unslipped B1, `#1{continue}`) | owner `Revert(X)` via `ai-changes --revert` | forward owner op R: entry tombstoned; `B1{missed,1}`, `#1{slipped}`; R pushed on owner undo stack; AI changes shows X as reverted. `entry:tombstone` by actor owner. |
+| UND-11 | `mcp` op X = `AddEntry(#1, …, mon)` (unslipped B1, `#1{continue}`; those are X's derived events) | owner `Revert(X)` via `ai-changes --revert` | forward owner op R (`op.revert`, `reverts_op_id = X`): `entry:tombstone` by actor owner; recompute re-derives `B1{missed, 1, slipped_seq = R.seq}`, `#1{slipped}`; R pushed on the owner undo stack, owner redo cleared; X.state = reverted; AI changes shows X as reverted. |
 | UND-12 | owner op D = `Drop(#1)` (destroy); owner op P = `Place(#2, top)` (write) | `mcp Revert(D)` → `forbidden` (scope). `mcp Revert(P)` → `forbidden` too: a non-owner actor may revert only its own ops (A§14 D15). `mcp Revert(own AddEntry op)` → allowed (`capture`). Owner may revert any revertible op of any actor. |
-| UND-13 | op A `AddEntry(#1, …)` → E; `DeleteEntry(E)`; `Purge(entry E)` | `Revert(A)` → `not_revertible`; `Undo()` whose top is A → `not_revertible` (entry dropped from stack). |
+| UND-13 | op A `AddEntry(#1, …)` → E; `DeleteEntry(E)`; offline `tkr purge entry E` (§14) | `Revert(A)` → `not_revertible` (`ops.purged = 1`); `Undo()` with A on top → `committedError{not_revertible}`: A popped from the stack, the 409 stored for the idempotency key, no ops row, no event (UND-26). |
 | UND-14 | backlog [#X, #T, #Y]; op A `Place(#T, top)` → [#T, #X, #Y]; `AddTask("Z", --bottom)` → [#T, #X, #Y, #Z]; rank renormalization may run | `Revert(A)` | #T re-inserted relative to its recorded neighbor (after #X) → [#X, #T, #Y, #Z]. No conflict (Z is another entity; renormalization writes no events). |
 | UND-15 | `#1{new}`; A `MarkManual(#1)` → `{new, manual}`; B `Complete(#1)` → `{}`; `Undo()` (R_B) → `{new, manual}` restored as delta, status open | `Undo()` (reverts A; B/R_B net-zero) | delta: only `manual` removed → `#1{new}`. |
 | UND-16 | BLK-27 state (A = `Unblock(B1)`: cancelled, slipped, `#1{slipped}`) | `Undo()` | before-images restored directly: `B1{planned, null, 0, –}`, `slipped_at = null`; `#1{}` via delta (−slipped); no slip-rule events. If the undo happens the next day, B1 is a `planned` block on a past date → REC-10. |
 | UND-17 | LIF-04 state (op D = Complete) | `Undo()` | status open, `completed_*` null, C1 tombstoned, `B1{planned}` again (started), B2/B3 `planned`; reasons restored as delta (`+new` if Complete removed it, original `since`); `last_placed_at`/`due_ack*` back to their before-images (Complete is a placement); recompute re-derives nothing (B1 was re-planned, not auto-resolved). Focus (R15): same-day undo → `focus:set` back to the before-image (#1, today) because invariant I6 still holds; the midnight `system.reconcile` focus event is ignored in the conflict check, so an undo on 10-29 is **not** refused — it leaves focus null (before-image `date = 10-28` fails I6), no error. |
-| UND-18 | empty stacks | `Undo()` → `conflict` ("nothing to undo"); `Redo()` → `conflict`. |
+| UND-18 | empty stacks | `Undo()` → `nothing_to_undo` (409); `Redo()` → `nothing_to_redo`. Both roll back and store nothing (not committed pops). |
 | UND-19 | owner op A via CLI | web `undo` | reverts A (same actor `owner`, `channel` differs on the event). |
-| UND-20 | UND-11 state (X reverted by owner; X is the only entry on the mcp undo stack) | `mcp Undo()` | X is no longer `active` → skipped and discarded from the stack (A§4.5); the stack is then empty → `conflict` ("nothing to undo"). With an older active op Y below X → Y is reverted instead and X is gone. `Revert(X)` explicitly → `conflict` ("already reverted"). |
+| UND-20 | UND-11 state (X reverted by owner); mcp undo stack = [Y (older, active), X (top)] | `mcp Undo()` key K | X is `reverted` → `committedError{revert_conflict "already reverted by owner"}` (A§4.6/A16): X is popped and discarded, the 409 (code + detail) is stored for K, no ops row, no event, Y untouched. `mcp Undo()` key K again → replays the same 409 without touching Y. `mcp Undo()` key K2 → reverts Y. `Revert(X)` explicitly → `revert_conflict` ("already reverted by owner"). |
 | UND-23 | op A `Block(#1, 10-29, 09:00-10:00)` | `Revert(A)` | block tombstoned (`block:update B1 (deleted_at)` via `setBlock{Restore}`), never slips, excluded from overlap checks; `last_placed_at`/`due_ack*` of #1 restored; reasons re-added as delta with original `since`. A later `Block(#2, 10-29, 09:00-10:00)` → accepted. |
+| UND-24 | `mcp` op X = `AddEntry(#1, "a", mon)` (B1 Mon missed→worked, `#1{continue}`, derived); then owner op Y = `AddEntry(#1, "b", mon)` (no block change, no derived events) | owner `Revert(X)` | no conflict (Y touched entry E_b, X's non-derived events touch only E_a); E_a tombstoned; recompute of (#1, Mon) finds E_b → B1 stays `{worked}`; **no** block or triage events are written (R2-1 second-entry case); `#1{continue}` unchanged. |
+| UND-25 | op F = `SetFocus(#1)` at 10-28 22:00 with before-image focus = #2 (date 10-28); midnight reconcile cleared focus | `Undo()` on 10-29 | the before-image (#2, date 10-28) fails I6 → focus left null; the current focus is already null → **no domain events**, yet the undo succeeds (R2-4): ops row `op.undo` kept with `op_id` returned (not `NoChange`), F.state = reverted, F moved to the redo stack, effects `[]`. |
+| UND-26 | owner undo stack = [B (active), A (top, `purged = 1`)] | `Undo()` key K | `committedError{not_revertible}`: A's stack row deleted, idempotency row for K stored with status 409 + code/detail, `COMMIT`; no ops row, no event. Retry `Undo()` key K → the same 409 is replayed and B is **not** touched (R2-5). `Undo()` key K2 → reverts B. |
+| UND-27 | T0 = `AddTask("A")`; R = `Revert(T0)`; U = `Undo()` (pops R); D = `Redo()` (re-applies R by reverting U) | read `ops` states after each step | after R: T0 reverted, R active (undo stack [R]). After U: R reverted, T0 **active** (chain walked, R2-11), redo [R]. After D: U reverted, R active, T0 reverted; undo stack [R], redo []. `Redo()` again → `nothing_to_redo`. |
 | UND-21 | `system` reconcile op S | `Revert(S)` → `not_revertible`. |
 | UND-22 | A `Defer(#1, "+2d")` with B1(today) cancelled/deferred+slipped | `Undo()` | `defer_date` back to null, `B1{planned, 0}`, `last_placed_at` and `due_ack*` restored to before-images, reasons restored as delta. |
 
@@ -370,10 +388,12 @@ is kept (A§4.2 step 16).
 | IDM-01 | – | `POST /tasks {title:"A"}` key K → 201 #1; `UpdateTask(#1, "A2")`; replay `POST /tasks {title:"A"}` key K | 201 with current representation of #1 (title "A2", current version/ETag); no second task; no new op. |
 | IDM-02 | after IDM-01 | `POST /tasks {title:"B"}` key K | `idempotency_mismatch` (422); no task created. |
 | IDM-03 | owner used key K | `mcp POST /tasks {title:"C"}` key K | independent: 201 #2 (hash includes actor). |
-| IDM-04 | – | `Login`, `ChangePassword`, `Purge`, `ScrubBackups`, `UpdateSettings`, `CreateToken`, `RunBackup` (A§4.8 exempt list) | no `idempotency` row written; `Idem.Body`/`request_hash` never computed over a password; test asserts no idempotency row, ops/event JSON, or log line contains the test password. |
+| IDM-04 | – | `Login`, `ChangePassword`, `UpdateSettings`, `CreateToken`, `RunBackup` (A§4.9 exempt list; purge and backup scrubbing are offline and never see idempotency) | no `idempotency` row written; `Idem.Body`/`request_hash` never computed over a password; test asserts no idempotency row, ops/event JSON, pending-request file, or log line contains the test password. |
 | IDM-05 | key K stored at T | replay at T + 7 d + 1 s | treated as new (row expired): creates #2. |
 | IDM-06 | – | non-exempt `POST`/`PATCH` without `Idempotency-Key`, or with a key outside `[A-Za-z0-9_-]{16,128}` | `idempotency_key_required` (428) / `malformed` (400); no op. |
 | IDM-08 | `Place(#1, keep)` key K succeeded; then `Place(#1, keep)` key K again but with a stale `If-Match` | replay | `Replayed = true`, 200, current representation — the stored op wins; `If-Match` is not re-evaluated on a replay. |
+| IDM-09 | CLI sends `Place(#1, top)` key K; the socket connection drops after the request was written, no response after retries (`client.ErrOutcomeUnknown`) | – | CLI saves `<state>/pending/K.json` (0600: method, path, If-Match, body, created_at), prints "outcome unknown — saved as pending request K; run `tkr pending retry`", exit 3. `tkr pending retry` resends with key K → replay (200, `replayed = true`) or the original result; the file is deleted on any definitive answer. A pending file older than 7 days → `tkr pending retry` refuses it and tells the user to check (`tkr show`, `tkr entries`) then `tkr pending drop K` (R2-10). Password-bearing requests are never saved. |
+| IDM-10 | `MarkManual(#1)` key K2 when `#1{manual}` already (no-op) | replay K2 | first call: `NoChange`, 200, idempotency row `{op_id: NULL, status 200, refs: [task #1]}` (R-j). Replay: 200, `replayed = true`, effects `[]`, current representation of #1. Same key with a different body → `idempotency_mismatch`. |
 | IDM-07 | `POST /tasks/1/complete` key K → 200; `Reopen(#1)`; replay key K | 200 with current representation (#1 open) — no response body is stored; replay never re-completes. |
 
 ## 11. Scopes matrix (SCP)
@@ -382,29 +402,29 @@ is kept (A§4.2 step 16).
 |---|---|---|---|---|---|
 | GET views, report, search, history, clock | ✓ | | | | |
 | `AddTask` without placement flag (→ triage) | | ✓ | | | |
-| `AddTask` with placement flag (`--top` … `--now`) | | ✓ | + ✓ | | |
+| `AddTask` with placement flag (`--top` … `--now`) | | ✓ | + ✓ **owner only** (any `ActorToken` → `forbidden`, R-b) | | |
 | `AddEntry` (new `work` entry; explicit task or null) | | ✓ | | | |
-| `Place`, `AcceptNew`, `MarkManual`, `Defer`, `SetDue`, `Block`, `Reblock`, `Unblock`, `SetOutcome`, `SetFocus`, `Complete`, `Reopen` (no `remove_entry`), `UpdateTask` (title/notes/tags/project/priority), `RelinkEntry`, `MarkAIReviewed` | | | ✓ | | |
-| `Drop`, `Delete`, `Undelete`, `UpdateEntry`/`DeleteEntry`/`UndeleteEntry` of existing entries, `Reopen --remove-entry` | | | | ✓ | |
-| `Purge` (+ password) | | | | ✓ | |
-| `CreateToken`/`RevokeToken`/`ListTokens` (never via web), `UpdateSettings` (+ password when lowering retention), `RunBackup`, `Export`; `ScrubBackups` also needs `destroy` + password | | | | | ✓ |
+| `Place`, `AcceptNew`, `MarkManual`, `Defer` (incl. nil), `SetDue`, `Block`, `Reblock`, `Unblock`, `SetOutcome`, `SetFocus`, `Complete`, `Reopen` (no `remove_entry`), `Undelete` (task, A18), `UpdateTask` (title/notes/tags/project/priority), `RelinkEntry`; `MarkAIReviewed` (**owner only**, R-a) | | | ✓ | | |
+| `Drop`, `Delete`, `UpdateEntry`/`DeleteEntry`/`UndeleteEntry` of existing entries, `Reopen --remove-entry` | | | | ✓ | |
+| `tkr purge`, `tkr scrub-backups` | offline: instance lock + password on a TTY; no token, no scope, no endpoint (A§14 D37) | | | | |
+| `CreateToken`/`RevokeToken`/`ListTokens` (never via web), `UpdateSettings` (+ password when lowering retention), `ChangePassword` (owner), `RunBackup`, `BackupStatus`, `Export` | | | | | ✓ |
 | `Revert`/`Undo`/`Redo` | scopes of the reverted op; a non-owner actor only for its own ops (A§14 D15) | | | | |
 
 
 | ID | Given | When | Then |
 |---|---|---|---|
 | SCP-01 | token `ro` = read | `AddTask`, `Log`, `Place` → `forbidden`; `GET /today` → 200. |
-| SCP-02 | `mcp` (read+capture+write) | `Drop`, `Delete`, `Purge`, `DeleteEntry`, `UpdateEntry(existing)`, `Reopen --remove-entry` → `forbidden`; `Complete`, `Defer`, `Block`, `Place`, `update`, `Log`, `AddTask` → allowed. MCP `add_task` tool itself never passes a placement flag (always triage). |
-| SCP-03 | `mcp` | `Purge(entry, password = correct)` → `forbidden` (scope checked before password). |
+| SCP-02 | `mcp` (read+capture+write) | `Drop`, `Delete`, `DeleteEntry`, `UpdateEntry(existing)`, `Reopen --remove-entry` → `forbidden`; `Complete`, `Defer`, `Block`, `Place`, `UpdateTask`, `Undelete`, `AddEntry`, `AddTask` (no placement) → allowed. There is no purge endpoint to call (PRG-18). |
+| SCP-03 | token `t` with `capture+write` (also `mcp`) | `AddTask("x", place = top)` → `forbidden` (R-b: token-created tasks always land in triage, regardless of scopes); `AddTask("x")` → 201 `{new}`; the same `place` by owner → allowed. The MCP `add_task` tool never offers a placement field. |
 | SCP-04 | owner token | over the TCP web listener any `/api/v1/*` request → 401 `unauthenticated` (v1 API is socket-only, A§14 D13/16). `AuthenticateToken(owner, verifiedSocket = false)` → `unauthenticated` (unit test of the socket-only rule). Same token over the socket with matching peer UID → 200. Socket connection whose peer UID ≠ server UID → 403 `peer_rejected` before authn. |
 | SCP-05 | web session cookie | `POST /api/v1/tasks` on the socket with cookie only → `unauthenticated` (the API chain strips `Cookie`); bearer token on `/ui/*` → 303 to `/ui/login` (GET) / 401 (POST), `Authorization` stripped. |
 | SCP-06 | socket request carrying `Forwarded` / `X-Forwarded-For` / `Via` | any `/api/v1` call → 403 `peer_rejected`, even with a valid owner token. |
-| SCP-07 | web session (owner) | `CreateToken`/`RevokeToken`/`ListTokens` → `forbidden` (channel `web`); everything else as owner incl. password-gated purge. |
+| SCP-07 | web session (owner) | `CreateToken`/`RevokeToken`/`ListTokens` → `forbidden` (channel `web`); everything else as owner; retention lowering (`PATCH /settings`) still requires the password; purge and backup scrubbing are not available from the web (offline commands). |
 | SCP-13 | owner token on the socket with `X-Taskronin-Channel: mcp` | any request → `forbidden` (A§14 D33); `tkr mcp` itself refuses to start when `GET /whoami` says `owner: true`. |
 | SCP-08 | token `w` = write only (no read) | `Place(#1, keep)` → allowed; `GET /tasks/1` → `forbidden`. |
 | SCP-09 | `mcp` | `Undo()` of its own `AddEntry` → allowed (`capture`); `Revert(owner Drop)` → `forbidden` (scope and ownership, UND-12). |
 | SCP-10 | `mcp`, `mutations_per_hour = 60` | 61st mutation within a sliding hour → `rate_limited` with `RetryAfter = oldest op in window + 1 h − now` (counted from `ops` rows of the actor, A§4.2 step 9; `NoChange` ops are rolled back and do not count); reads unaffected; owner has no cap. |
-| SCP-11 | `mcp` | `AddEntry(#1, …)` → entry `origin = token:ai`; op listed in `GET /ai-changes` (`unreviewed = 1`); `status --short` shows `· ai 1` until `MarkAIReviewed(through_seq ≥ op.seq)` (`POST /ai-changes/review`, `tkr ai-changes --ack`) advances `settings.ai_reviewed_through`; that review op is itself not revertible. |
+| SCP-11 | `mcp` | `AddEntry(#1, …)` → op `actor = token:ai`; listed in `GET /ai-changes` (`unreviewed = 1`); `status --short` shows `· ai 1` until the **owner** runs `MarkAIReviewed(through_seq ≥ op.seq)` (`POST /ai-changes/review`, `tkr ai-changes --ack`), which sets `settings.ai_reviewed_through`. `mcp MarkAIReviewed` → `forbidden` (owner only, R-a); owner with `through_seq` > latest committed `ops.seq` → `validation`. The review op is not revertible. |
 | SCP-12 | expired token / revoked token / token file mode 0644 | request → `unauthenticated`; client refuses to send a token from a non-0600 file. |
 
 ## 12. Dates and datespec (DAT)
@@ -426,7 +446,7 @@ and `done --date`; "future-exclusive" rules to `defer`, `due`, `block --date`.
 | DAT-10 | `--at 14:30` / `--at 24:00` / `--at 9:5` | log | `occurred_min = 870` / `validation` / `validation` | |
 | DAT-11 | `--at 02:30` with `--date 2027-03-14` | log | accepted, `occurred_min = 150` (display/sort only) | |
 | DAT-12 | `2026-13-01` / `2026-2-3` / `nextweek` / `+3x` | any | `validation` | |
-| DAT-13 | `--week` / `--last-week` / `--month` / `--today` | report | 10-26..10-28 (week start … today, A§14 D12) / 10-19..10-25 (previous full week) / 10-01..10-28 (1st … today) / 10-28 | inclusive; `--from 10-30 --to 10-28` → `validation`; `to − from > 366 d` → `validation` |
+| DAT-13 | `--week` / `--last-week` / `--month` / `--today` | report | 10-26..11-01 (full current week from `week_start`, A§14 D12 as revised in round 1) / 10-19..10-25 (previous full week) / 10-01..10-31 (full calendar month) / 10-28 | inclusive; `--from 10-30 --to 10-28` → usage error (CLI) / `validation` (API); `to − from > 366 d` → `validation` |
 | DAT-14 | `GET /clock` | – | `{"now":"2026-10-28T10:00:00.000-06:00","today":"2026-10-28","timezone":"America/Denver","week_start":"monday","due_soon_days":3,"server_version":…}`; after fall-back the offset is `-07:00`. Clients resolve datespecs against `today`; the server validates and echoes resolved values in `effects`. |
 | DAT-17 | `--at 10:30` with `--date today` (now 10:00) | log | `validation` (A§14 D9: a time on today cannot be in the future); `--at 09:59` → ok; `--at 10:30 --date yesterday` → ok. |
 | DAT-15 | `defer 2026-11-01 01:30` | defer | `defer_min = 90`; moment = earlier occurrence 07:30Z | compare DUE-03 |
@@ -456,29 +476,44 @@ project `infra.keycloak`); #57 "Run ansible against dev qt cluster" (tag
 | RPT-07 | #7 deleted; #42 purged | #7's entry still listed with its current title; #42 lines show `[#42 [purged]]` / entry titles `[purged]`. |
 | RPT-08 | retitle | #57's earlier entries (if any) show the **current** title. |
 | RPT-09 | `--format json` | `api.Report`: `{from, to, tag, project, days:[{date, lines:[{entry_id, kind, title, notes, task_id, time, reopened}]}], tasks:{"42":{title, status, deleted}, …}, todo?, upcoming?}`; days ascending, days without entries omitted. `md`: `## Mon 2026-10-26` headings, `- ` / `- ✓ ` bullets, annotation `(#42 Title)` then `(#42)`, user text markdown-escaped. Text: title column padded to the widest line (max 60 cols). |
-| RPT-10 | range with no entries | `days = []`, `tasks = {}`; text output prints nothing but the (optional) todo/upcoming sections; exit 0. |
+| RPT-10 | range with no entries | `days = []`, `tasks = {}`; text output prints the header only (plus any `--todo`/`--upcoming` sections); exit 0. |
 
-## 14. Purge (PRG)
+## 14. Purge (PRG) — offline command
 
-Fixture: #42 with `C101(#42, 10-26)`, `W100(#42, 10-23)`, `W102(#42, 10-26)`;
-#42 is `done` then `Delete`d (tombstoned). Password `pw`.
+Purge is an **offline** command (A§14 D37, A§12.6, D§5.11 as amended):
+`tkr purge task|entry ID [--with-entries] [-y]` needs the instance lock (server
+stopped) and the password on a TTY, then runs: ledger intent → live scrub →
+WAL checkpoint → scrub of every backup set via journaled swaps → ledger
+`complete`. There is no API, web or MCP purge. Fixture: server stopped; #42
+with `C101(#42, 10-26)`, `W100(#42, 10-23)`, `W102(#42, 10-26)`; #42 is `done`
+then `Delete`d (tombstoned); password `pw`; the backup dir holds snapshot S1
+(taken while #42 was still open, with `#42{new}` and a planned block B9 on
+10-27) and a `*.pre-restore-*` set P1; ledger at `<data>/purge-ledger` (0600).
 
 | ID | Given | When | Then |
 |---|---|---|---|
-| PRG-01 | #42 not tombstoned | `Purge(task 42, pw)` | `conflict` ("delete first"); nothing written, no ledger record. |
-| PRG-02 | – | `Purge(task 42)` without password → `password_required`; wrong password → `password_invalid` through the rate-limited verifier; no ledger record, no idempotency row in either case. |
-| PRG-03 | – | `Purge(task 42, pw)` | order (A§12.6): authz `destroy` → password through the gate → compute the set → ledger line `{v, rec, at, state:"pending", tasks:[42], entries:[101]}` (the `complete` entry only) appended + fsync file and dir **before any DB write** → writer op `purge.task` → `wal_checkpoint(TRUNCATE)` → ledger line `state:"complete"`. W100/W102 untouched; `PurgeResult.LinkedNotIncluded = [100, 102]`, CLI lists them. |
-| PRG-04 | – | `Purge(task 42, --with-entries, pw)` | ledger ID set `{task 42, entries 100, 101, 102}`; all four scrubbed. |
-| PRG-05 | after PRG-04 (#42 was tombstoned; entries 100–102 were **not**) | inspect | In the purge op: entries 100–102 are tombstoned first (`entry:tombstone`; the FTS triggers remove their rows with `secure-delete`, A§14 issue 3), then `store.ScrubEntities`: `tasks.title = "[purged]"`, `notes = ""`, `project = NULL`, its `task_tags` rows deleted and orphaned `tags` deleted; same title/notes scrub for entries 100–102; every `task`/`entry`/`task_tags` event of the set has `title → "[purged]"`, `notes → ""`, `project → null`, `tags → []` in `before_json`/`after_json` (other fields intact); every op with an event on the set has `purged = 1, revertible = 0`; content-free `purge` events `{"ids":[…]}`. FTS tables hold no rows for the set; FTS5 content `integrity-check` passes. |
-| PRG-06 | crash injected after ledger fsync, before scrub txn | restart | startup re-applies the pending record: content scrubbed exactly as PRG-05; record marked complete. |
-| PRG-07 | crash after scrub txn commit, before ledger "complete" | restart | re-apply is idempotent (scrubbing `[purged]` again changes nothing, no new events); record marked complete; no error. |
-| PRG-08 | crash before the ledger write is fsynced | restart | no record, no scrub; content intact; user re-runs purge. |
-| PRG-09 | already purged | `Purge(task 42, pw)` again | re-scrub is idempotent (content unchanged); a ledger record covering the set exists afterwards; no error. |
-| PRG-10 | `mcp` | `Purge(…, pw)` → `forbidden` (SCP-03). |
-| PRG-11 | op A (`AddTask` #42), op L (`Log` → 100) | `Revert(A)`, `Revert(L)` → `not_revertible`. `Undo()` with such ops on top → `not_revertible`, popped. |
-| PRG-12 | – | `report` | lines remain (rows not deleted) with `[purged]` titles (RPT-07). |
-| PRG-13 | older snapshot contains #42's text | `restore SNAPSHOT` | restore re-applies every ledger record → content stays `[purged]`; CLI lists which snapshots still hold it; `--scrub-backups` (password) rewrites them. |
-| PRG-14 | checkpoint cannot truncate within 30 s | – | op reports success of the scrub, prints loudly, sets `purge_checkpoint_pending` banner; background retry clears it. |
+| PRG-01 | server running (instance lock held) | `tkr purge task 42` | refused before any prompt: "the server is running — `systemctl --user stop taskronin.socket taskronin.service` first"; nothing changed. With `<data>/swap.journal` or `<backupdir>/scrub.journal` present → refused ("resume it first"). |
+| PRG-02 | stdin is not a TTY | `tkr purge task 42 -y` | refused: the password can only be prompted on a TTY (`-y` skips the confirmation, never the password); exit 4; nothing changed. |
+| PRG-03 | TTY, wrong password three times | `tkr purge task 42` | 1 s delay after each failure; after the third → exit 4. No ledger line, no DB change, no ops row. The password never appears in logs, ledger or any file. |
+| PRG-04 | #42 `done` but **not** tombstoned | `tkr purge task 42` (pw) | `conflict` "delete it first" (exit 6) from `PurgeLive` **before** the ledger append: no ledger line, nothing scrubbed. `tkr purge entry 100` while e100 is not tombstoned → same. Missing ID → `not_found`. |
+| PRG-05 | fixture | `tkr purge task 42` (pw) | Order (A§12.6): lock → `CleanupTemps` → password → `OpenLedger` (not damaged) → `ReplayLedger(live)` (no earlier intent → true no-op, no ops row) → **one writer transaction** `purge.task` (actor `owner`, channel `cli`, not revertible, no idempotency) via `run`: validate the target, select the exact set {task 42; entries [101]} (the `complete` entry only), `Append` the `pending` line + fsync file and dir **while holding the writer**, `ScrubEntities`, content-free `purge` event `{"ids":[42,101]}`, commit → `PRAGMA wal_checkpoint(TRUNCATE)` (succeeds: no other connection; WAL truncated) → scrub S1 and P1 (PRG-10) → `Append` the `complete` line → print scrubbed IDs, "linked entries not purged: e100, e102", per-set results, and that earlier exports/log lines are out of reach. `PurgeLiveResult{TaskIDs:[42], EntryIDs:[101], LinkedNotIncluded:[100,102], Changed:true}`. |
+| PRG-06 | fixture | `tkr purge task 42 --with-entries` | set = {42; 100, 101, 102}; all four scrubbed; `LinkedNotIncluded = []`. `DeleteEntry(100)` then `tkr purge entry 100` → set = {entries [100]} only; #42 untouched. |
+| PRG-07 | after PRG-06 | inspect the live DB | `ScrubEntities` (A§12.0): per member **one** `UPDATE … SET deleted_at = COALESCE(deleted_at, now), purged_at = now, title = '[purged]', notes = ''` — e100–e102 were live, so the FTS trigger sees their old content and removes their rows with `secure-delete` (R-p); task `project = NULL`, its `task_tags` deleted, orphaned `tags` deleted; `before_json`/`after_json` of every `task`/`entry`/`task_tags` event of the set rewritten (`title → "[purged]"`, `notes → ""`, `project → null`, `tags → []`, other fields intact); every op with an event on the set has `purged = 1, revertible = 0`. FTS content `integrity-check` passes; `CheckAll` passes (I4 accepts a done task whose only completion entry is purged). |
+| PRG-08 | after PRG-05 | read the ledger | two JSON lines: `{"v":1,"rec":"<32 hex>","at":<ms>,"state":"pending","tasks":[42],"entries":[101],"sum":"<64 hex>"}` then the same `rec` with `"state":"complete"`; `sum` = SHA-256 of the record encoded with `sum = ""`. Lines are never removed or rewritten except by `--repair-ledger`. |
+| PRG-09 | crash injected inside the writer tx **after** the pending `Append` + fsync, before `COMMIT` | `tkr serve` | the tx rolled back (DB unchanged) but the `pending` line exists → startup `ReapplyLedger` (`ReplayLedger(live)`, op `system.ledger_replay`, events) scrubs the set, then `wal_checkpoint(TRUNCATE)` before the listeners open. Startup never writes `complete`: dashboard banner `purge_incomplete`, `status --short` shows `⚠ purge` (`purge_warning`), until `tkr scrub-backups` finishes every backup set and appends `complete`. |
+| PRG-10 | backup scrub (purge step 7 = `tkr scrub-backups` steps 4–6) | sets S1, P1 | per set: `Stage` (copy DB + `-wal` into `<data>/staging/`, **normal** open so the WAL is recovered, then `journal_mode=DELETE`; never `immutable=1`) → `ReplayLedger(historical)` (`noReconcile`, `structuralOnly`): in S1 #42 is open → delete semantics first: `B9{cancelled, –, 0, task_closed}` (no derivation, no slip), triage rows deleted, focus cleared if on #42, then tombstone + scrub; **no reconcile** — S1's other past `planned` blocks stay `planned` (point in time preserved, R2-2) → `CheckStructural`, `integrity_check`, FTS check → `VACUUM INTO` a `.tkr-tmp-*` file next to the target → `Verify` → `Swap{Kind: scrub, DeleteAside: true}` (old set moved to a `.tkr-tmp-` quarantine dir, new file renamed into place, old set unlinked, journal removed). Snapshot names and count unchanged. A set without any member → `clean`, discarded, untouched. |
+| PRG-11 | crash after PRG-05's commit, before the checkpoint | `tkr serve` | `ReapplyLedger` finds nothing to change (`ScrubEntities` is a true no-op: no ops row, no events, R2-12), checkpoints the WAL; record still `pending` → `purge_incomplete` banner until `tkr scrub-backups`. |
+| PRG-12 | crash during step 7 leaving `<backupdir>/scrub.journal` at step `moved-old` | `tkr serve` → refuses to start ("resume the swap"). `tkr scrub-backups` (or `--resume`) → `ResumeSwap` finishes that swap first (install `New`, unlink the aside set, remove the journal), then continues with the remaining sets, then appends `complete` for every `pending` record. A later failure that leaves a journal stops the batch (R2-7); a failure without a journal is reported and the batch continues. |
+| PRG-13 | crash before the pending line's fsync completed (file ends mid-line, no newline) | next `OpenLedger` (startup or purge) | torn tail → truncated back to the last complete line and fsynced before any append; `Damaged = false`; nothing was scrubbed (the append was inside the uncommitted tx); the user simply re-runs purge. |
+| PRG-14 | ledger with a newline-terminated line whose `sum` is wrong (or that does not parse) | `tkr serve`; `tkr purge task 42` | startup: `Damaged = true`, the bad line is kept on disk and skipped, all valid records replay (R2-8); banner `purge_ledger_damaged`, `⚠ purge`. `tkr purge task 42` → refused "run `tkr purge --repair-ledger`" (no new intents while damaged, no prompt side effects). `tkr scrub-backups` is still allowed and applies the valid records. |
+| PRG-15 | PRG-14 | `tkr purge --repair-ledger` (lock + pw) | `Repair()` rewrites the file from the valid records (temp + fsync + rename + dir fsync) and prints the dropped line numbers; then `ReplayLedger(live)` + checkpoint; `Damaged = false`; the banner is gone at the next start. |
+| PRG-16 | already purged (PRG-05 done) | `tkr purge task 42` again (pw) | content unchanged; `ReplayLedger` and `PurgeLive` write no events (`Changed = false`, no ops row); a ledger record covering {42, 101} exists; exit 0. |
+| PRG-17 | ops A (`AddTask` → #42) and L (`AddEntry` → e100), both `purged = 1` after PRG-06 | `Revert(A)`, `Revert(L)` → `not_revertible`; `Undo()` with A on top → `committedError{not_revertible}` (UND-26). `GET /tasks/42/history` still lists the events, with scrubbed payloads. |
+| PRG-18 | – | `POST /api/v1/tasks/42/purge`, `POST /api/v1/entries/100/purge`, a web purge form, an MCP purge tool | none exist: 404 (route not registered) / no form / no tool. No scope grants purge; `destroy` covers only drop/delete/entry edits (A§7.3). |
+| PRG-19 | after PRG-06 | `report`, `GetTask(42)`, `search "keycloak"` | report lines remain with `[purged]` titles (RPT-07); `GetTask` returns `title = "[purged]"`, `purged_at` set, `view = deleted`; search finds nothing. |
+| PRG-20 | an older snapshot S0 or an old export still holds #42's text | `tkr restore S0` / `tkr import FILE` | the staged copy gets `ReplayLedger(live)` → `Reconcile` → `CheckAll` before the swap, so the installed DB already shows `[purged]`; the pre-restore/pre-import set left aside is scrubbed by the next `tkr scrub-backups` (PRG-10) and reported by purge step 9 until then. |
+| PRG-21 | interrupted staging left a copy under `<data>/staging/` and a `.tkr-tmp-*` file in the backup dir, none referenced by a journal | next `tkr serve` or any offline command | `CleanupTemps` deletes them under the lock (they may hold unscrubbed content, R2-6); paths referenced by an active swap journal are kept for `--resume`. |
+| PRG-22 | – | `tkr scrub-backups --check` | reports `contains` / `clean` per set, rewrites nothing, takes no `prescrub` snapshot, appends no `complete` line. Without `--check`: `ReplayLedger(live)` + checkpoint first, a fresh verified `prescrub` snapshot, then PRG-10 per set, then `complete` lines for all `pending` records. |
 
 ## 15. Interruptions (INT)
 
@@ -513,16 +548,16 @@ scenarios). "A§" = architecture Draft A1.
 | R6 | BLK-14 | "Current block" in the repeated fall-back hour. | Instant semantics (A§2.1: containment computed on instants, never on minutes). |
 | R7 | BLK-41 | `reblock` of a `cancelled`/`worked`/`done` block. | Allowed; same as reblocking a resolved `missed` block: the old block is untouched, a new planned block is created, the task is placed. |
 | R8 | BLK-44 | Does a user outcome `worked` add `continue`? | Yes (A§3.3 `SetOutcome`: slip/continue rules apply). |
-| R9 | BLK-47 | Recap outcome on today's still-planned block. | Allowed once the block has ended; resolves now with `outcome_source = user`. Not ended → `conflict` (A§3.3). |
+| R9 | BLK-47 | Recap outcome on today's still-planned block. | Allowed on resolved blocks and on today's `planned` blocks once **started** (A§3.3/A9, round 1 wording); unstarted planned or cancelled → `conflict` ("use unblock"). Resolves now with `outcome_source = user`. |
 | R10 | LIF-07 | `done` on a `dropped` task. | `conflict`; transitions limited to A§14 D10. |
 | R11 | DUE-01, DUE-13, DUE-17, LIF-18 | Reconcile steps 2 and 3 both fire → `{due, overdue}` on one task. | Keep: harmless (ordering uses the highest reason, placement clears both); A§4.3 implements the steps literally. |
 | R12 | DUE-11 | Setting a due moment in the past. | Reject (`validation`). `due today` (date-only, moment 24:00) is allowed. |
 | R13 | DUE-18 | Due-soon bound. | `due_date ≤ today + due_soon_days` (A§2.6 `TaskView.DueSoon`). |
 | R14 | UND-06 | After a `revert_conflict`, does the op stay on the undo stack? | Stays; a failed undo leaves both stacks unchanged (A§4.5). |
 | R15 | UND-17, INT-09 | Is focus restored by undo/revert? | `focus` events are ignored in revert conflict checks (the midnight `system.reconcile` clear must not block next-day undo). The focus before-image is restored only if it still satisfies invariant I6 (task open, not deleted, not deferred, `before.date = today`); otherwise focus is left unchanged (null after midnight), no error. Ruled §17 C1; architecture A§4.5 to be updated. |
-| R16 | UND-20 | Actor A's `undo` whose top op was already reverted by actor B. | A§4.5 rule adopted: entries whose op is no longer `active` are skipped and discarded; an explicit `Revert` of a reverted op → `conflict` ("already reverted"). |
+| R16 | UND-20 | Actor A's `undo` whose top op was already reverted by actor B. | A§4.6 (round 1–2): `committedError{revert_conflict "already reverted by <actor>"}` — the entry is popped, the 409 is stored for the idempotency key, no ops row/event; other stack entries untouched. An explicit `Revert` of a reverted op → `revert_conflict`. |
 | R17 | IDM-06 | Missing `Idempotency-Key`. | `idempotency_key_required` (428); malformed key → `malformed` (400) (A§2.8, A§4.2 step 2). |
-| R18 | SCP matrix | Scope of `AddTask` with a placement flag, and of `Undelete`. | `AddTask` with `place` needs `capture + write` (A§3.2); `Undelete` and `UndeleteEntry` need `destroy` (A§3.2/3.4 — supersedes the Draft-1 proposal of `write`). |
+| R18 | SCP matrix | Scope of `AddTask` with a placement flag, and of `Undelete`. | `AddTask` with `place` needs `capture + write` **and the owner** (tokens → `forbidden`, R-b); task `Undelete` is `write` (A§3.2/A18, final); `UndeleteEntry` is `destroy` (A§3.4). |
 | R19 | DAT-06 | Bare `HH:MM` as a datespec. | Today at that time (A§9.2 grammar: "clock alone → today"); future-direction commands reject it when ≤ now. |
 | R20 | DAT-11 | `--at` with a nonexistent DST wall time. | Accept — `occurred_min` is display/sort only; it is never converted to an instant. |
 | R21 | RPT-06 | Report filters. | `-t`/`-P` exclude standalone (task-less) entries (A§14 D12). `-P X` matches project `X` and any dotted descendant `X.*` (prefix on a `.` boundary), not a plain string prefix. |
@@ -545,3 +580,34 @@ the architecture is being updated to match.
 | C4 | BLK-41 (R7): `Reblock` of a `cancelled`/`worked`/`done` block creates a new block. | A§3.3 `Reblock` covers planned (in place or ended) and resolved `missed` blocks only. | **Ruled** — Add the R7 wording to A§3.3. |
 | C5 | RPT-06 (R21): `-P X` matches `X` and `X.*`. | A§3.7 `ListTasks`/`Report` take `Project` with no matching rule; A§14 D12 covers only standalone exclusion. | **Ruled** — Add the dotted-descendant rule to A§3.7 and A§9.7 (one `LIKE`/`GLOB` on `project = ? OR project GLOB ?||'.*'`). |
 | C6 | TRI-18: an `AcceptNew` item whose reason set is not exactly `{new}` → `conflict`, whole op refused. | A§3.2: "all-or-nothing; only tasks whose only reason is `new`" — refuse or skip is not stated. | **Ruled** — Architecture should state "refuse with `conflict` naming the item" (the TUI/web only ever send qualifying tasks, so a mismatch means a stale screen). |
+
+### 17.1 Alignment with architecture review rounds 1–2 (A§14.4, A§14.5)
+
+Applied in this catalog (Draft 3), superseding earlier catalog text where noted:
+
+| Ref | Change adopted | Catalog |
+|---|---|---|
+| S3 | Ordering/acknowledgement by `ops.seq` (`last_placed_seq`, `slipped_seq`, `resolved_seq`, `task_triage.seq`); `*_at` informational | §0, TRI-20, BLK-18, SLP-*, L/S everywhere |
+| S4 / D37 | Purge is offline (`tkr purge`), no endpoint, password on a TTY, ledger with checksums, torn-tail/damaged handling, `--repair-ledger`, backup scrub via journaled swaps | §14 rewritten (PRG-01…22), SCP matrix, SCP-02/03, IDM-04, UND-13 |
+| R2-1 | `events.derived`; revert skips derived events and re-derives | §0, SLP-05, UND-11, UND-24 |
+| R2-4 | Eventless undo/redo still finalizes state and stack | UND-25 |
+| R2-5 / R-h | Committed pops store a 409 for the idempotency key; lookup before target selection | UND-13, UND-20, UND-26, PRG-17 |
+| R2-11 | `ops.state` chain walked transitively | UND-27 |
+| R-j | No-ops store an idempotency row (`op_id` NULL) | TRI-22, IDM-10 |
+| R-m / R2-10 | `tkr pending` with the 7-day limit | IDM-09 |
+| R-a | `MarkAIReviewed` owner only; `through_seq` bound | SCP-11, matrix |
+| R-b | Tokens cannot place at `AddTask` | SCP-03, matrix |
+| C6 | `AcceptNew` all-or-nothing | TRI-18 (unchanged) |
+| A9 (round-1 wording) | Recap outcome allowed on today's **started** planned blocks | BLK-47, R9 |
+| A16 (round-1 wording) | Undo of an already-reverted op → `committedError{revert_conflict}`, popped | UND-20, R16 |
+| A18 (final) | Task `Undelete` is `write`; clears a future defer on an open task | TRI-21, TRI-23, TRI-29, R18 |
+| D12 (revised) | `--week`/`--month` are full calendar periods again | DAT-13 |
+| A§2.8 | `nothing_to_undo` / `nothing_to_redo` are codes of their own | §0, UND-04, UND-18 |
+
+**Remaining conflicts after this pass: none.** Two notes for the architect,
+not conflicts: (1) A§3.9 and A§6.4 still say `Undo`/`Redo` on an empty stack
+→ `nothing_to_undo`/`nothing_to_redo` while A§4.3 step 7 says the same — the
+catalog follows them; (2) A§12.6 step 5 appends the ledger line *inside* the
+writer transaction, so a crash before `COMMIT` leaves a `pending` record for
+content that was never scrubbed — harmless (replay scrubs it at the next start,
+PRG-09) but worth a sentence in A§12.6 so implementers do not "fix" it.

@@ -94,7 +94,7 @@ Makefile derives it with `go list -m`).
 | `internal/client` | Go client for `/api/v1` over the unix socket: token file, headers, idempotency keys, retries, not-sent vs outcome-unknown classification, pending-request store, problem decoding. | `client.go`, `transport.go`, `retry.go`, `pending.go`, `errors.go`, `tasks.go`, `entries.go`, `blocks.go`, `views.go`, `ops.go`, `admin.go` |
 | `internal/report` | Render `api.Report` as text / markdown (D§14). | `text.go`, `markdown.go` |
 | `internal/editor` | `$VISUAL`/`$EDITOR` via `SplitWords` (no shell), drafts dir lifecycle. | `editor.go`, `shellwords.go`, `drafts.go` |
-| `internal/offline` | Lock-holding commands that open the DB directly: `init`, `migrate`, `restore`, `import`, `scrub-backups`, `passwd --reset`, offline `backup`. | `init.go`, `migrate.go`, `restore.go`, `import.go`, `scrub.go`, `passwd.go`, `backup.go` |
+| `internal/offline` | Lock-holding commands that open the DB directly: `init`, `migrate`, `restore`, `import`, `purge`, `scrub-backups`, `passwd --reset`, offline `backup`. | `init.go`, `migrate.go`, `restore.go`, `import.go`, `purge.go`, `scrub.go`, `passwd.go`, `backup.go` |
 | `internal/cli` | Cobra tree, arg parsing, human/JSON output, exit codes, prompts. | `main.go`, `root.go`, `output.go`, `errors.go`, `ids.go`, `logargs.go`, `cmd_*.go` |
 | `internal/tui` | Bubble Tea app (plan C): tabs, Plan/Recap/Triage modes, polling. | `app.go`, `keys.go`, `styles.go`, `poll.go`, `tab_*.go`, `mode_plan.go`, `mode_recap.go`, `forms.go` |
 | `internal/mcpserver` | `tkr mcp`: stdio MCP server over `client`. | `server.go`, `tools_read.go`, `tools_write.go`, `inputs.go` |
@@ -136,7 +136,7 @@ as listed). Anything not listed is forbidden.
 | `mcpserver` | `client`, `api`, `domain`, `civil`, `datespec`, `config`, `buildinfo` | go-sdk, jsonschema-go |
 | `archtest` | — (stdlib `go/parser`, `os/exec`) | — |
 | `testutil` | anything (test-only; imported only from `_test.go`) | teatest (plan C) |
-| `cli` | `client`, `api`, `domain`, `civil`, `datespec`, `textsafe`, `report`, `editor`, `config`, `buildinfo`, `fsutil`; **only** `cmd_serve.go` → `server`; **only** `cmd_{init,migrate,restore,import,scrub,passwd,backup}.go` → `offline`; `cmd_tui.go`/`cmd_plan.go`… → `tui`; `cmd_mcp.go` → `mcpserver` | cobra, lipgloss, `x/term` |
+| `cli` | `client`, `api`, `domain`, `civil`, `datespec`, `textsafe`, `report`, `editor`, `config`, `buildinfo`, `fsutil`; **only** `cmd_serve.go` → `server`; **only** `cmd_{init,migrate,restore,import,purge,scrub,passwd,backup}.go` → `offline`; `cmd_tui.go`/`cmd_plan.go`… → `tui`; `cmd_mcp.go` → `mcpserver` | cobra, lipgloss, `x/term` |
 | `cmd/tkr` | `cli` | — |
 
 Rules:
@@ -165,7 +165,7 @@ Rules:
   Required anchors (at minimum): `service.run` (single write path),
   `reconcileTx`, `setBlock` (slip/continue hooks), `revertTx` (conflict and
   net-zero rule), `civil.Zone.Instant` (DST), `store.ScrubEntities` and the
-  ledger-first order in `Purge`, `backup.OpenLedger` (torn-tail truncation),
+  ledger-first order in `PurgeLive`, derived-event skipping in `revertTx`, `backup.OpenLedger` (torn-tail truncation),
   `backup.Swap` (journal steps), the FTS triggers and views, the pragma
   verification hook, `socketGuard` + owner-token rule, `web/csrf.go`, the
   seq-based acknowledgement comparisons (§4.2), the shutdown drain (§4.10).
@@ -549,6 +549,7 @@ type Event struct {
 	Action   Action
 	Before   json.RawMessage  // changed fields only, keyed by column name; NULL for insert/add
 	After    json.RawMessage  // changed fields only; NULL for tombstone-less removes
+	Derived  bool             // recorded by recompute (block re-derivation + its hook triage changes); revert re-derives instead of replaying (§4.6)
 }
 type EntityRef struct {
 	Entity EntityKind
@@ -564,7 +565,7 @@ Event payload conventions (field-level, column names as keys):
 | task update | changed fields | changed fields |
 | task move | `{"after_id": N\|null}` (predecessor in global `(rank,id)` order) | `{"after_id": M\|null}` |
 | task/entry tombstone, untombstone | `{"deleted_at": …}` | `{"deleted_at": …}` |
-| triage add / remove | — / `{"reason","since"}` | `{"reason","since"}` / — |
+| triage add / remove | — / `{"reason","since","seq"}` | `{"reason","since","seq"}` / — |
 | task_tags set | `{"tags":[…]}` | `{"tags":[…]}` |
 | entry insert/update | as task | as task |
 | block insert/update | changed columns | changed columns |
@@ -600,6 +601,7 @@ const (
 	CodeNothingToRedo      Code = "nothing_to_redo"          // 409 empty redo stack
 	CodePreconditionReq    Code = "precondition_required"    // 428 missing If-Match
 	CodeIdemRequired       Code = "idempotency_key_required" // 428 missing Idempotency-Key
+	CodeGenerationMismatch Code = "generation_mismatch"      // 412 request bound to another db_generation (R3-3)
 	CodeRateLimited        Code = "rate_limited"             // 429 (+RetryAfter)
 	CodeInternal           Code = "internal"                 // 500
 	CodeBusy               Code = "busy"                     // 503 (+RetryAfter)
@@ -670,7 +672,8 @@ func New(o Options) (*Service, error)
 // Meta accompanies every mutating call.
 type Meta struct {
 	Actor domain.Actor
-	Idem  Idem // zero only for idempotency-exempt ops
+	Idem  Idem              // zero only for idempotency-exempt ops
+	Gen   domain.Generation // required on every mutation (header Taskronin-Generation / web `_gen`); offline callers pass the live value
 }
 type Idem struct {
 	Key    string // 16..128 chars [A-Za-z0-9_-]
@@ -728,14 +731,14 @@ derived block/triage events from §4.5).
 | `UpdateTask` | `Title, Notes, Project *string; Priority *Priority; TagsAdd, TagsRemove []string` | write | — | ✓ | ✓ | task:update, task_tags:set. Retitle is its own effect. |
 | `SetDue` | `Due *Moment` (nil clears) | write | — | ✓ | ✓ | task:update(due_date, due_min, due_ack=none, due_ack_date=NULL); triage:remove due/overdue. `validation` if the due moment ≤ now (A12; `today` date-only is fine — its moment is 24:00) or if it violates D§5.7 against an existing defer. |
 | `Place` | `How PlaceHow; Ref TaskID` | write | ✓ | ✓ | ✓ | task:move (unless keep), task:update(placement fields; clears defer if set — §14 D5); triage:remove all. `Ref` missing → `not_found`, tombstoned → `deleted`. |
-| `AcceptNew` | `Items []struct{ID; Expect}` | write | ✓ each | per item | ✓ | One op, all-or-nothing (C6): any item whose reasons are not exactly `{new}` → `conflict` naming it; any stale item → `precondition_failed`. Placed at the bottom in ascending `new` seq order. |
+| `AcceptNew` | `Items []struct{ID; Expect}` | write | ✓ each | per item | ✓ | One op, all-or-nothing (C6): empty or duplicate IDs → `validation`; any item whose reasons are not exactly `{new}` → `conflict` naming it; any stale item → `precondition_failed`. Placed at the bottom in ascending `new` seq order. |
 | `Defer` | `Until *Moment` (nil = clear defer: `defer ID none`, A24) | write | ✓ | ✓ | ✓ | Set: task:update(defer_*); rank never changes; blocks via `closeForDefer` (`cancelled/deferred`, slip if today unstarted & outside grace); focus cleared if focused. `validation` if the defer moment ≤ now, the task is overdue ("change the due date first"), or defer ≥ due (D§5.7). **`nil`**: only clears `defer_*` and places (= `Place{keep}`); never touches blocks or focus. |
 | `MarkManual` | — | write | — | ✓ | ✓ | triage:add `manual`; task:update(defer cleared) if deferred (§14 D4). |
 | `Complete` | `As *string; Date civil.Date (zero=today); LogTitle, LogNotes string` | write | ✓ | ✓ | ✓ | task:update(title if As, status=done, completed_*); entry:insert kind=complete (title = LogTitle else final title); blocks per D§5.6 `done --date`; triage:remove all; focus:set nil if focused. Date ≤ today; `completed_date = Date`, `completed_at = now` even when backdated. From `open` only. |
-| `Reopen` | `RemoveEntry bool` | write; **+destroy** if `RemoveEntry` | — | ✓ | ✓ | task:update(status=open, completed_*=NULL, due_ack=none, due_ack_date=NULL); entry:update(reopened=1) or entry:tombstone; triage:add `reopened`. From `done` or `dropped`. With `RemoveEntry` the recompute may re-derive the completion day's block to `missed` → slip + `slipped` reason (kept as specified, A23; the CLI echoes it). |
+| `Reopen` | `RemoveEntry bool` | write; **+destroy** if `RemoveEntry` | — | ✓ | ✓ | task:update(status=open, completed_*=NULL, due_ack=none, due_ack_date=NULL); entry:update(reopened=1) on the task's `complete` entry with `reopened=0` — also when that entry is purged (content untouched, never re-tombstoned) — and with `RemoveEntry` also entry:tombstone unless already tombstoned; triage:add `reopened`. From `done` or `dropped`. With `RemoveEntry` the recompute may re-derive the completion day's block to `missed` → slip + `slipped` reason (kept as specified, A23; the CLI echoes it). |
 | `Drop` | — | destroy | ✓ | ✓ | ✓ | task:update(status=dropped); blocks per D§5.6; triage:remove all; focus cleared. From `open` only. |
 | `Delete` | — | destroy | — | ✓ | ✓ | task:tombstone; blocks per D§5.6 (`drop`/`delete`); triage:remove all; focus cleared. |
-| `Undelete` | — | **write** (A18) | — | ✓ | ✓ | task:untombstone; triage:add `manual` only if open (A3). Blocks stay as they are; focus untouched. |
+| `Undelete` | — | **write** (A18) | — | ✓ | ✓ | Purged task → `conflict` ("purged", R3-4). task:untombstone; if open: triage:add `manual` and clear a future defer (like `MarkManual`, D4); not open: no reason (A3). Blocks stay as they are; focus untouched. |
 
 ```go
 type AddPlacement struct {
@@ -761,10 +764,10 @@ type AddPlacement struct {
 | Method | Input | Scope | Pl | IfM | Idem | Events / key rules |
 |---|---|---|---|---|---|---|
 | `AddEntry` | `TaskID sql.Null[TaskID]` (explicit, D§5.2); `Title, Notes; WorkDate (zero=today); At sql.Null[Minute]` | capture | — | — | ✓ | entry:insert; recompute (§4.5). WorkDate ≤ today; if WorkDate = today and At set, At ≤ now's minute. `At` is 0–1439 and never converted to an instant, so a nonexistent DST wall time is accepted (A20). Task must exist and not be deleted (closed is OK + warning). |
-| `UpdateEntry` | `Title, Notes *string; WorkDate *civil.Date; At *sql.Null[Minute]` | destroy | — | ✓ | ✓ | entry:update; recompute over before∪after pairs. `complete` entries: only `Notes` editable. |
-| `RelinkEntry` | `TaskID sql.Null[TaskID]` | write | — | ✓ | ✓ | entry:update(task_id); recompute over before∪after pairs (a `null` side contributes no pair). `complete` entries → `validation`. |
+| `UpdateEntry` | `Title, Notes *string; WorkDate *civil.Date; At *sql.Null[Minute]` | destroy | — | ✓ | ✓ | entry:update; recompute over before∪after pairs. `complete` entries: only `Notes` editable. Purged → `conflict`. |
+| `RelinkEntry` | `TaskID sql.Null[TaskID]` | write | — | ✓ | ✓ | entry:update(task_id); recompute over before∪after pairs (a `null` side contributes no pair). `complete` entries → `validation`. Purged → `conflict`. |
 | `DeleteEntry` | — | destroy | — | ✓ | ✓ | entry:tombstone; recompute. Refused for a `complete` entry whose task is done (use `Reopen{RemoveEntry}`). |
-| `UndeleteEntry` | — | destroy | — | ✓ | ✓ | entry:untombstone; recompute. |
+| `UndeleteEntry` | — | destroy | — | ✓ | ✓ | entry:untombstone; recompute. Purged → `conflict` (R3-4). |
 
 ### 3.5 Focus
 
@@ -777,10 +780,10 @@ type AddPlacement struct {
 | Method | Input | Scope | Idem | Rules |
 |---|---|---|---|---|
 | `Revert` | `OpID` | the reverted op's `Scopes`; a non-owner actor may revert only its own ops | ✓ | Forward op (`via="revert"`), pushed on the actor's undo stack. §4.6. |
-| `Undo` | — | scopes of the popped op | ✓ | §4.6; `via="undo"`; never pushed. Empty stack → `nothing_to_undo`. |
-| `Redo` | — | scopes of the popped op | ✓ | §4.6; `via="redo"`; never pushed. Empty stack → `nothing_to_redo`. |
+| `Undo` | — | scopes of the popped op | ✓ | §4.6; `via="undo"`; never pushed. Empty stack: §3.9. |
+| `Redo` | — | scopes of the popped op | ✓ | §4.6; `via="redo"`; never pushed. Empty stack: §3.9. |
 | `ListAIChanges` (read) | `IncludeReviewed bool; Cursor; Limit` → `AIChanges{ReviewedThrough OpSeq; Unreviewed int; Ops []OpSummary; NextCursor string}` | read | — | Ops with `actor LIKE 'token:%'` plus any `settings.retention_lowered` op; newest first. |
-| `MarkAIReviewed` | `Through OpSeq` | write + **`ActorOwner` only** (R-a) | ✓ | `Through` > latest committed `ops.seq` → `validation`. setting:update `ai_reviewed_through = max(current, Through)`. Not revertible. |
+| `MarkAIReviewed` | `Through OpSeq` | write + **`ActorOwner` only** (R-a) | ✓ | `Through ≥ o.rec.Seq` (i.e. beyond the latest op committed before this one) → `validation`. setting:update `ai_reviewed_through = max(current, Through)`. Not revertible. |
 
 ### 3.7 Reads and aggregates
 
@@ -825,7 +828,7 @@ either filter, standalone entries (no task) are excluded.
 | `RunBackup` | → `backup.SnapshotInfo` | admin | exempt (not a DB op; a duplicate snapshot is harmless) | §12.1 |
 | `BackupStatus` | → `BackupStatus{Snapshots; LastSuccessAt; LastError; Healthy; Warning}` | admin | — | Healthy = last success ≤ 48 h and last attempt succeeded. |
 | `Export` | `w io.Writer` | admin | — | §12.4; one read tx. |
-| `Purge` | `Target (task\|entry); ID; WithEntries bool; Password` → `PurgeResult{TaskIDs, EntryIDs; LinkedNotIncluded []EntryID; Inventory []backup.InventoryItem; CheckpointPending bool}` | destroy + password | **exempt** | §12.6. Scrubs the live DB only; backups are scrubbed offline by `tkr scrub-backups` (S1, §12.7). |
+| `PurgeLive` | `Target (task\|entry); ID; WithEntries bool` → `PurgeLiveResult{TaskIDs, EntryIDs, LinkedNotIncluded []int64; Changed bool}` | **offline only** (S4): called by `offline.Purge` after it holds the lock and verified the password; never routed by the server | — | §12.6 step 5 |
 | `Reconcile` | — | internal (system) | — | §4.4 |
 | `ReapplyLedger` | — | internal (startup/restore/import) | — | §12.6 |
 | `FlushUsage` | — | internal | — | Writes coalesced `last_used_at`/`last_seen_at` (≤ 1/min, no events). |
@@ -836,10 +839,12 @@ either filter, standalone entries (no task) are excluded.
 |---|---|
 | Task/entry/block missing | `not_found` |
 | Target tombstoned (any mutation except `Undelete*`, purge) | `deleted` |
+| Target purged (`purged_at` set): undelete, update, relink (purged entities are immutable; `Reopen` may still set `reopened=1` on a purged completion entry) | `conflict` ("purged") |
+| Mutation with a missing / stale `Taskronin-Generation` | `precondition_required` / `generation_mismatch` |
 | Illegal status transition (e.g. done→drop, complete on dropped) | `conflict` |
 | Overlap; block on a non-open task; focus on a non-open or deferred task; unblock/outcome on the wrong block state | `conflict` |
 | Field-level: past block end, past due/defer moment, future work/completion date, defer/due ordering (D§5.7), deferring an overdue task, DST gap, relinking a `complete` entry, bad enum/length | `validation` |
-| Undo/redo on an empty stack | `nothing_to_undo` / `nothing_to_redo` |
+| Undo/redo on an empty stack (the one definition; §3.6, §4.6, §6.4 refer here) | `nothing_to_undo` / `nothing_to_redo` |
 | If-Match missing / stale (incl. generation) | `precondition_required` / `precondition_failed` |
 
 ### 3.10 Op kinds
@@ -917,10 +922,11 @@ const (classForward opClass = iota + 1; classRevert; classUndo; classRedo)
 
 type op struct {
 	tx       *sql.Tx
-	rec      domain.OpRecord             // rec.Seq set by the ops INSERT (step 10)
+	rec      domain.OpRecord             // rec.Seq set by the ops INSERT (step 11)
 	actor    domain.Actor
 	now      time.Time
 	today    civil.Date
+	target   *domain.OpRecord            // revert/undo/redo: selected in step 7
 	placed   map[domain.TaskID]bool
 	dirty    map[domain.EntityRef]bool   // tasks/entries/blocks/focus: version++ (+updated_at) once at finalize
 	pairs    map[pairKey]struct{}        // (task_id, work_date) for recompute
@@ -928,73 +934,88 @@ type op struct {
 	warnings []string
 }
 type opSpec struct {
-	kind       domain.OpKind
-	class      opClass
-	scopes     domain.Scopes // forward ops; revert/undo/redo resolve theirs in step 1
-	idem       bool          // Meta.Idem required
-	revertible bool
-	ownerOnly  bool
-	notWeb     bool
+	kind           domain.OpKind
+	class          opClass
+	scopes         domain.Scopes // forward ops; revert/undo/redo take the target's (step 7)
+	idem           bool          // Meta.Idem required
+	revertible     bool
+	ownerOnly      bool
+	notWeb         bool
+	noReconcile    bool          // historical-copy ledger replay only (R2-2)
+	structuralOnly bool          // invariants: CheckStructural rules only (R2-2)
 }
-// committedError: returned by fn when a stack entry must be removed even though the
-// call fails (§4.6). The runner commits the pop and returns Err. No ops row, no event.
+// committedError: a stack entry that can never succeed. The runner deletes the stack row,
+// stores the terminal error in the idempotency row, commits, and returns Err (§4.6).
 type committedError struct{ Err *domain.Error; StackRow undoRowKey }
 
 func (s *Service) run(ctx context.Context, m Meta, spec opSpec, fn func(*op) error) (*OpResult, error)
 ```
 
 `run` steps (AIDEV-NOTE: the single write path; the writer is used elsewhere
-only by §4.10 maintenance, `FlushUsage` and migrations; `ReapplyLedger` and offline staging ops also go through `run` as system ops):
+only by §4.10 maintenance, `FlushUsage` and migrations; `ReapplyLedger` and
+offline/staged ops also go through `run`):
 
-1. **Scopes.** Forward ops: `spec.scopes`. `Revert`: read the target op (reader)
-   → its `scopes`; a non-owner actor must be the target's actor. `Undo`/`Redo`:
-   read the top of the actor's stack → its target op's `scopes`; empty →
-   `nothing_to_undo`/`nothing_to_redo` without opening the writer. Then
-   `Actor.Scopes.Has(scopes)`, `ownerOnly`, `notWeb` → `forbidden`. Step 11
-   re-reads the target/stack inside the transaction and refuses if it changed.
-2. If `spec.idem`: missing key → `idempotency_key_required` (428); malformed →
-   `malformed` (400).
+1. **Static authz.** Forward ops: `Actor.Scopes.Has(spec.scopes)`, `ownerOnly`,
+   `notWeb` → `forbidden`. Revert/undo/redo check only `ownerOnly`/`notWeb` here;
+   their scopes come from the target in step 7, **after** the idempotency lookup (R2-5).
+2. If `spec.idem`: missing key → `idempotency_key_required` (428); malformed → `malformed` (400).
+   Every mutation: `Meta.Gen` missing → `precondition_required`; ≠ the cached
+   `db_generation` → `generation_mismatch` (412) (R3-3). A request bound to a
+   database that was since restored can therefore never apply — including
+   undo/redo/revert, which carry no If-Match.
 3. `ctx = context.WithoutCancel(ctx)` with the 15 s op budget (§4.11); register in
    the service's in-flight `sync.WaitGroup`; if shutdown has begun → `busy`.
 4. `BEGIN IMMEDIATE` (writer `BeginTx`). `SQLITE_BUSY` after `busy_timeout` → `busy` (503, `Retry-After: 1`).
 5. `now`, `today` (§4.2).
-6. If `spec.idem`: look up `(actor.Key(), key)`. Same hash → roll back; return a
-   replay (`Replayed=true`, stored status code and refs; effects rebuilt from the
-   stored op's events, none for a stored no-op; current representations loaded
-   after). Different hash → `idempotency_mismatch`.
-7. `reconcileTx(tx, now)` — a complete system op (own `ops` row with a lower seq,
-   events, **and its own version bumps finalized here**), only if there is work
-   (§4.4). The user op's `If-Match` checks in step 11 therefore compare against
-   post-reconcile versions (a reason added by reconcile → 412 on a stale placement).
-8. `SAVEPOINT user_op`.
-9. Rate cap: if `actor.MutationsPerHour > 0`: `SELECT COUNT(*) FROM ops WHERE actor = ? AND at > ?` (now − 1 h) ≥ cap → `rate_limited`, `RetryAfter = oldest_in_window + 1h − now`.
-10. Insert the `ops` row (`state='active'`, resolved `scopes`, `revertible`) → `rec.Seq`.
-11. `fn(op)`: preconditions (`Expect` vs current versions), validation, writes via
+6. If `spec.idem`: look up `(actor.Key(), key)`. Same hash → roll back and replay:
+   a stored success returns its status, refs and current representations
+   (effects rebuilt from the stored op's events; none for a stored no-op); a
+   stored terminal error (status 409) returns the same code and detail. Different
+   hash → `idempotency_mismatch`.
+7. **Target selection** (revert/undo/redo only, now that a replay is excluded):
+   `Revert` loads the op by id (`not_found`); `Undo`/`Redo` take the top of the
+   actor's stack (empty → §3.9 code, rolled back). Then
+   `Actor.Scopes.Has(target.Scopes)`, and a non-owner actor must be the target's
+   actor → `forbidden`. Permanent failures (§4.6) → `committedError`.
+8. Unless `spec.noReconcile`: `reconcileTx(tx, now)` — a complete system op (own
+   `ops` row with a lower seq, events, **its own version bumps finalized here**),
+   only if there is work (§4.4). The user op's `If-Match` checks in step 12 compare
+   against post-reconcile versions (a reason added by reconcile → 412 on a stale placement).
+9. `SAVEPOINT user_op`.
+10. Rate cap: if `actor.MutationsPerHour > 0`: `SELECT COUNT(*) FROM ops WHERE actor = ? AND at > ?` (now − 1 h) ≥ cap → `rate_limited`, `RetryAfter = oldest_in_window + 1h − now`.
+11. Insert the `ops` row (`state='active'`, resolved `scopes`, `revertible`; for
+    revert/undo/redo `via` and `reverts_op_id` in the **same** INSERT) → `rec.Seq`.
+12. `fn(op)`: preconditions (`Expect` vs current versions), validation, writes via
     `store` (errors through `store.MapErr`), events via `op.record*`. Every
     triage-reason or `task_tags` change calls `o.markTaskDirty(id)`.
-12. Finalize: `recompute(op)` (§4.5) → `checkInvariants(op)` (§4.7) → version
-    (+`updated_at`) bump once per dirty entity.
-13. Result paths:
-    - **No change** (no events): `ROLLBACK TO user_op` (drops the ops row); if
-      `spec.idem`, insert an idempotency row with `op_id = NULL`, status 200,
-      refs = the addressed entity (if any); `RELEASE`, `COMMIT`; return `NoChange`.
-    - **Forward / revert** (`classForward`, `classRevert`) with `spec.revertible`:
-      push `rec.ID` on the actor's undo stack, clear the actor's redo stack, trim
-      to `UndoDepth`. A per-op `Revert` (e.g. from AI changes) is therefore undoable.
-    - **Undo / redo**: move the stack entry as §4.6 says; the undo/redo op itself
-      is never pushed.
-14. If `spec.idem`: insert the idempotency row (status 201/200, refs).
-15. `RELEASE user_op; COMMIT`.
-16. Errors from steps 9–14:
-    - `committedError` (permanent pop, §4.6): `ROLLBACK TO user_op`, delete the
-      named stack row, `RELEASE`, `COMMIT`, return `Err` (no ops row, no event,
-      no idempotency row).
-    - anything else: `ROLLBACK TO user_op; RELEASE; COMMIT` (reconcile is kept);
-      return the error. Commit failure → `internal` (the client retries with the same key).
-17. After commit: load result views via the reader pool; leave the WaitGroup.
+13. Finalize: `recompute(op)` (§4.5) → `checkInvariants(op)` (§4.7; structural
+    rules only if `spec.structuralOnly`) → version (+`updated_at`) bump once per
+    dirty entity.
+14. Result paths:
+    - **Forward op with no events**: `ROLLBACK TO user_op` (drops the ops row); if
+      `spec.idem`, insert an idempotency row (`op_id` NULL, status 200, refs =
+      the addressed entity if any); `RELEASE`, `COMMIT`; return `NoChange`.
+    - **Revert/undo/redo with no domain events** (e.g. undo of a focus switch whose
+      before-image is no longer valid): still succeeds — the ops row stays, the
+      target's state chain and the stack movement are finalized (R2-4). Never a no-op.
+    - **Forward / revert** with `spec.revertible`: push `rec.ID` on the actor's undo
+      stack, clear the actor's redo stack, trim to `UndoDepth`.
+    - **Undo / redo**: move the stack entry as §4.6 says; never pushed themselves.
+15. If `spec.idem`: insert the idempotency row (status 201/200, refs).
+16. `RELEASE user_op; COMMIT`.
+17. Errors:
+    - `committedError` (from step 7 or `fn`): roll back any savepoint, delete the
+      named stack row, insert an idempotency row with status 409 and the error's
+      full problem body as `error_json` (if `spec.idem`), `COMMIT`, return `Err`. No ops row, no event.
+      A retry with the same key replays that error instead of touching the next entry.
+    - anything else: `ROLLBACK TO user_op; RELEASE; COMMIT` (reconcile is kept; before
+      step 9 a plain rollback); return the error. Commit failure → `internal`.
+18. After commit: load result views via the reader pool; leave the WaitGroup.
 
 Read path: `s.read(ctx, a, scopes, reconcileFirst, fn func(q store.Q) error)` →
-authz → optional `s.Reconcile(ctx)` → reader `BeginTx(ReadOnly)` → `fn` → commit.
+authz → optional `s.Reconcile(ctx)` (which registers in the in-flight WaitGroup
+like a scheduler job while it holds the writer) → reader `BeginTx(ReadOnly)` →
+`fn` → commit.
 
 ### 4.4 Reconcile (`service/reconcile.go`, D§5.8)
 
@@ -1044,7 +1065,7 @@ type blockChange struct {
 |---|---|
 | `slipped` 0→1 | `slipped_at = now`, `slipped_seq = seq`; if the task is open, not deleted, and `!o.placed[task]` → add `slipped` (`ON CONFLICT DO NOTHING`). |
 | `slipped` 1→0 | Remove `slipped` unless another block of the task has `slipped=1 AND slipped_seq > COALESCE(last_placed_seq, 0)`. |
-| status → `worked` (task open) | Add `continue` unless `o.placed[task]` or the task has a non-deleted `planned` block with `date > b.date`. |
+| status → `worked` (task open **and** not deleted) | Add `continue` unless `o.placed[task]` or the task has a non-deleted `planned` block with `date > b.date`. |
 | status `worked` → other | Remove `continue` unless another block has `status='worked' AND resolved_seq > COALESCE(last_placed_seq, 0)` (§14 D7). |
 
 - Slip value on resolution/re-derivation: `slipped = (status == missed)`.
@@ -1056,7 +1077,9 @@ type blockChange struct {
 - **Recompute** (`recompute(op)`): for every `(task_id, work_date)` in `o.pairs`
   (entry before- and after-images from every entry write and from revert),
   re-derive each non-deleted `auto`-resolved block of that task on that date;
-  `setBlock` when the status differs. Planned, cancelled and user-set blocks are untouched.
+  `setBlock` when the status differs. Planned, cancelled and user-set blocks are untouched. Every event recorded during
+  recompute (block re-derivations and the triage changes their hooks make) has
+  `derived = 1` (§4.6).
 - Placement (`o.place(task)`): delete all reason rows, `last_placed_at = now`,
   `last_placed_seq = seq`, `due_ack = duePhase`, `due_ack_date = today`,
   `o.placed[task] = true`, mark dirty.
@@ -1069,43 +1092,56 @@ type blockChange struct {
 
 ### 4.6 Revert, undo, redo (`service/revert.go`, `service/undo.go`)
 
+Events recorded while `recompute` runs — the block re-derivations and the
+`slipped`/`continue` triage changes their hooks make — carry `derived = 1`
+(§2.7). They are consequences of entries, so revert never replays them; it
+re-derives instead (R2-1).
+
 `revertTx(o *op, target domain.OpRecord) error`:
 1. `target.Revertible` else `not_revertible`; `target.State == active` else
    `revert_conflict` ("already reverted by <actor>").
-2. Conflict check: for each conflict key touched by the target's events — `(entity,
-   entity_id)`, except triage `(triage, task_id, reason)`; **focus events are
-   ignored** (C1) — any event with `id > max(target event ids)` on the same key
-   from an op `X ≠ target` counts, except net-zero pairs (ops with
-   `state='reverted'` and the active reversals pointing at them). Any remaining
-   → `revert_conflict` listing them.
+2. Conflict check over the target's **non-derived** events: for each key —
+   `(entity, entity_id)`, except triage `(triage, task_id, reason)`; focus events
+   are ignored (C1) — any event (derived or not) with `id > max(target event ids)`
+   on the same key from an op `X ≠ target` counts, except net-zero pairs (ops with
+   `state='reverted'` and the active reversals pointing at them). Any remaining →
+   `revert_conflict` listing them.
 3. Pre-check: every block whose before-image is a non-deleted `planned` block is
    checked for overlap against current planned blocks not touched by this
    revert → `conflict` naming the block, before any write (the trigger stays a
    backstop via `store.MapErr`).
-4. Apply the target's events in **reverse id order**, recording events for `o`:
-   insert → tombstone (task/entry/block/interruption) or delete the row (triage
-   add); update → write `Before` fields; tombstone ↔ untombstone; triage remove →
-   re-insert with the original `since`/`seq`; task_tags set → `Before.tags`;
-   move → place immediately after `Before.after_id` (top if null); block changes
-   via `setBlock{Restore: true}`. Entry writes add their pairs.
+4. Apply the target's **non-derived** events in reverse id order, recording events
+   for `o`: insert → tombstone (task/entry/block/interruption) or delete the row
+   (triage add); update → write `Before` fields; tombstone ↔ untombstone; triage
+   remove → re-insert with the original `since` and `seq`; task_tags set →
+   `Before.tags`; move → place immediately after `Before.after_id` (top if null);
+   block changes via `setBlock{Restore: true}`. Entry writes add their pairs; the
+   target's derived events contribute their `(task_id, date)` pairs too.
 5. Focus last (C1): restore the focus before-image only if it satisfies I6 now
    (its date is today and its task is open, not deleted, not deferred); otherwise
    leave focus unchanged. If the current focus then violates I6 (its task was
    tombstoned/closed by this revert), clear it.
-6. `recompute(o)` (slip rule applies to re-derivations); `checkInvariants`;
-   violation → `conflict` (whole op rolled back).
-7. `target.state = 'reverted'`; `o.rec.RevertsOpID = target.ID`; if
-   `target.RevertsOpID` is set, that op returns to `active`.
+6. `recompute(o)` with normal hooks: e.g. reverting a backdated AI log flips
+   Monday's block back to `missed`, slips it with `slipped_seq` = this op's seq
+   and re-adds `slipped` even if the task was placed since; with a second
+   Monday entry still present nothing changes and no event is written.
+   `checkInvariants`; violation → `conflict` (whole op rolled back).
+7. State chain (R2-11): `target.state = 'reverted'`, `o.rec.RevertsOpID = target.ID`;
+   then walk down `reverts_op_id` from the target: each next op's state is the
+   opposite of the op above it (`reverted` above → `active` below and vice versa).
+   E.g. T0 ← R (revert) ← U (undo of R) ← D (redo): after D, U = reverted,
+   R = active, T0 = reverted.
 
 Undo/redo (`undo_stack` rows per actor key; `seq` = max+1 within `(actor, stack)`;
-the top is the highest `seq`):
-- `Undo`: empty → `nothing_to_undo`. Top op `T`: if `T` is not revertible →
-  `committedError{not_revertible}`; if `T.state = reverted` (reverted by another
-  actor or a per-op `Revert`) → `committedError{revert_conflict "already reverted by <actor>"}`
+the top is the highest `seq`; selected in runner step 7):
+- `Undo`: empty → §3.9. Top op `T`: not revertible →
+  `committedError{not_revertible}`; `T.state = reverted` (by another actor or a
+  per-op `Revert`) → `committedError{revert_conflict "already reverted by <actor>"}`
   (A16). Otherwise `revertTx(T)` with `via="undo"`; on success move `T` to the redo stack.
-- `Redo`: empty → `nothing_to_redo`. Top `T` must be `reverted` with an active
-  reversal `R` (`reverts_op_id = T`), else `committedError{revert_conflict}`;
-  `revertTx(R)` with `via="redo"`; on success move `T` back to the undo stack.
+- `Redo`: empty → §3.9. Top `T` must be `reverted` with an active
+  reversal `R` (`reverts_op_id = T`), else `committedError{revert_conflict}`; if
+  `T` or `R` is not revertible (e.g. purged) → `committedError{not_revertible}`.
+  Otherwise `revertTx(R)` with `via="redo"`; on success move `T` back to the undo stack.
 - A `revert_conflict` from step 2 or a `conflict` from steps 3/6 leaves both stacks
   unchanged (A14; no `undo --skip` in v1).
 - Owner channels (cli/tui/web) share the `owner` stacks.
@@ -1118,7 +1154,7 @@ the top is the highest `seq`):
 | I1b | `planned` blocks only on non-deferred tasks (defer moment > now) | time-dependent |
 | I2 | No overlapping non-deleted `planned` blocks (also a trigger) | structural |
 | I3 | If defer and due both set: defer moment < due moment and `defer_date ≤ due_date` | structural |
-| I4 | A non-deleted `done` task has exactly one non-deleted `complete` entry with `reopened=0`, **or** none and one purged (`purged_at` set) `complete` entry with `reopened=0` (ledger replay, R-e); non-deleted open/dropped tasks have no non-reopened active `complete` entry | structural |
+| I4 | A non-deleted `done` task has exactly one non-deleted `complete` entry with `reopened=0`, **or** none and ≥ 1 purged (`purged_at` set) `complete` entries (ledger replay, R-e/R2-12); a non-deleted open or dropped task has no non-deleted `complete` entry with `reopened=0` (`Reopen` always sets `reopened=1`, also when it tombstones) | structural |
 | I5 | Triage rows only on open, non-deleted tasks | structural |
 | I6 | Focus is NULL or an open, non-deleted, non-deferred task with `focus.date = today` | time-dependent |
 | I7 | Ranks unique | structural |
@@ -1144,8 +1180,11 @@ the top is the highest `seq`):
 - Stored in the op's transaction, including successful no-ops (`op_id` NULL,
   status 200); no response body (D§7.5). `entity_refs` = JSON `[{"entity":"task","id":42}]`.
 - Expiry: maintenance deletes rows with `created_at < now − 7 d` hourly.
+- Committed pops of revert/undo/redo store their terminal error as the full
+  problem body (`error_json`: code, detail, conflicts; status 409) so a retry
+  replays it exactly (§4.3 step 17).
 - Exempt (never stored, never logged with bodies): `Login`, `ChangePassword`,
-  `Purge`, `UpdateSettings`, `CreateToken`, `RunBackup`. A test asserts no
+  `UpdateSettings`, `CreateToken`, `RunBackup` (purge is offline, §12.6). A test asserts no
   idempotency row, ops/event JSON, pending-request file, or log line contains a
   test password.
 
@@ -1155,11 +1194,11 @@ Startup (`server.Run(ctx, cfg, deps) error`):
 1. Load + validate server config (timezone required, D§5.12). `unix.Umask(0o077)`.
 2. Ensure data/state/runtime dirs 0700 and owned by the uid.
 3. `lock.Acquire(<datadir>/taskronin.lock)` (`LOCK_EX|LOCK_NB`); failure → "already running".
-4. Refuse if a swap journal exists (`<datadir>/swap.journal` or `<backupdir>/scrub.journal`): "run `tkr restore --resume|--rollback`" / "`tkr scrub-backups --resume`".
+4. Refuse if a swap journal exists (`<datadir>/swap.journal` or `<backupdir>/scrub.journal`): "run `tkr restore --resume|--rollback`" / "`tkr scrub-backups --resume`". Then `CleanupTemps` (§12.0).
 5. `store.Open` (writer/reader/snapshot, `mode=rw`); pragma verification; `quick_check`.
 6. Schema: newer than binary or checksum mismatch → refuse. Pending → verified pre-migrate snapshot (§12.1, kind `premigrate`) → migrate.
 7. Refuse if the `auth_state` row is missing ("run `tkr init`").
-8. `ledger.Open` (verifies checksums, truncates a torn tail, §12.6); `ReapplyLedger`.
+8. `OpenLedger` (truncates a torn tail; a damaged ledger only raises the `purge_ledger_damaged` banner, §12.6); `ReapplyLedger`; then **always** `wal_checkpoint(TRUNCATE)` and confirm truncation (`busy=0`, `log=0`) — no other connection is in use yet; failure → refuse to start (R3-2). A `pending` record raises the `purge_incomplete` banner.
 9. If `settings.tz_last_seen ≠ config tz` → warn (floating wall-clock semantics, D§5.12) and `UPDATE` it.
 10. `Reconcile`.
 11. Listeners (§6.1): `systemd.Listeners()` (`LISTEN_PID`/`LISTEN_FDS`/`LISTEN_FDNAMES`, name `api`) else create the socket (unlink a stale one — lock is held — then bind, `chmod 0600`). Web TCP listener only if `web.enabled` and plan D handlers exist; loopback only.
@@ -1174,7 +1213,6 @@ each job registers in the in-flight WaitGroup while it runs):
 | reconcile | every minute, aligned to :00 + 500 ms | `svc.Reconcile` |
 | maintenance | minutely: `FlushUsage`; hourly: idempotency expiry, expired web sessions | writer tx, no events |
 | backup | daily at `backup.time` (default 03:30 local); at startup if last success > 24 h | `svc.RunBackup` as system; observes the shutdown ctx |
-| purge checkpoint | while `purge_checkpoint_pending=1`: backoff 1 s → 60 s | `wal_checkpoint(TRUNCATE)`; clears the flag only after a confirmed truncation (`busy=0`, `log=0`) |
 
 Shutdown (SIGTERM/SIGINT), AIDEV-NOTE anchor:
 1. `Notify("STOPPING=1")`; mark the service as shutting down (new ops → `busy`).
@@ -1194,7 +1232,6 @@ systemd `TimeoutStopSec=45s` (§8.6) covers 10 + 20 s plus margin.
 | ordinary op (detached writer tx) | 15 s (incl. 5 s busy wait) | `timeout` = 20 s (client default) |
 | reads / aggregates | 10 s | 20 s |
 | `status --short` | — | 300 ms |
-| `Purge` | gate ≤ 15 s + op ≤ 15 s + checkpoint ≤ 30 s + inventory ≤ 60 s = 120 s | 150 s |
 | `RunBackup` (`POST /backups`), `Export` | 10 min, abort on shutdown | 11 min |
 | shutdown | HTTP 10 s, drain ≤ 20 s | systemd stop 45 s |
 
@@ -1438,7 +1475,8 @@ CREATE TABLE events (
     action      TEXT    NOT NULL CHECK (action IN ('insert','update','move','tombstone','untombstone',
                                                    'add','remove','set','revoke','purge')),
     before_json TEXT    CHECK (before_json IS NULL OR json_valid(before_json)),
-    after_json  TEXT    CHECK (after_json IS NULL OR json_valid(after_json))
+    after_json  TEXT    CHECK (after_json IS NULL OR json_valid(after_json)),
+    derived     INTEGER NOT NULL DEFAULT 0 CHECK (derived IN (0,1))  -- written by recompute (§4.6)
 ) STRICT;
 CREATE INDEX events_entity ON events(entity, entity_id, id);
 CREATE INDEX events_task   ON events(task_id, id) WHERE task_id IS NOT NULL;
@@ -1456,26 +1494,28 @@ CREATE TABLE idempotency (
     actor        TEXT    NOT NULL,
     key          TEXT    NOT NULL CHECK (length(key) BETWEEN 16 AND 128 AND key NOT GLOB '*[^A-Za-z0-9_-]*'),
     request_hash BLOB    NOT NULL CHECK (length(request_hash) = 32),
-    op_id        TEXT    REFERENCES ops(op_id),   -- NULL for a stored no-op
-    status_code  INTEGER NOT NULL CHECK (status_code IN (200, 201)),
+    op_id        TEXT    REFERENCES ops(op_id),   -- NULL for a stored no-op or terminal error
+    status_code  INTEGER NOT NULL CHECK (status_code IN (200, 201, 409)),
     entity_refs  TEXT    NOT NULL CHECK (json_valid(entity_refs)),
+    error_json   TEXT    CHECK (error_json IS NULL OR json_valid(error_json)), -- 409 only: full problem body of a committed pop
     created_at   INTEGER NOT NULL,
-    CHECK (op_id IS NOT NULL OR status_code = 200),
+    CHECK (op_id IS NOT NULL OR status_code IN (200, 409)),
+    CHECK ((status_code = 409) = (error_json IS NOT NULL)),
     PRIMARY KEY (actor, key)
 ) STRICT, WITHOUT ROWID;
 CREATE INDEX idempotency_created ON idempotency(created_at);
 
 -- ---------------------------------------------------------------- settings and auth
 -- settings keys: db_generation, tz_last_seen, backup_keep_daily, backup_keep_weekly,
---   last_backup_at, last_backup_attempt_at, last_backup_error, ai_reviewed_through,
---   purge_checkpoint_pending. Secrets live in auth_state (never exported).
+--   last_backup_at, last_backup_attempt_at, last_backup_error, ai_reviewed_through.
+--   Secrets live in auth_state (never exported).
 CREATE TABLE settings (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 ) STRICT, WITHOUT ROWID;
 INSERT INTO settings (key, value) VALUES
     ('backup_keep_daily', '7'), ('backup_keep_weekly', '4'), ('ai_reviewed_through', '0'),
-    ('purge_checkpoint_pending', '0'), ('last_backup_at', ''), ('last_backup_attempt_at', ''),
+    ('last_backup_at', ''), ('last_backup_attempt_at', ''),
     ('last_backup_error', ''), ('tz_last_seen', '');
 
 CREATE TABLE auth_state (
@@ -1560,6 +1600,7 @@ CREATE TRIGGER events_no_delete        BEFORE DELETE ON events        BEGIN SELE
 CREATE TRIGGER events_frozen BEFORE UPDATE ON events
 WHEN NEW.id IS NOT OLD.id OR NEW.op_id IS NOT OLD.op_id OR NEW.entity IS NOT OLD.entity
   OR NEW.entity_id IS NOT OLD.entity_id OR NEW.task_id IS NOT OLD.task_id OR NEW.action IS NOT OLD.action
+  OR NEW.derived IS NOT OLD.derived
 BEGIN
     SELECT RAISE(ABORT, 'taskronin: events are append-only');
 END;
@@ -1593,8 +1634,10 @@ END;
   normal path). Tests run `INSERT INTO tasks_fts(tasks_fts, rank) VALUES('integrity-check', 1)`
   (content-checking mode) after every scenario. Search queries are built by
   `service.ftsQuery(user string) (string, error)`: split on whitespace, each term
-  double-quoted with `"` doubled, a trailing `*` kept as a prefix marker outside
-  the quotes, terms joined with spaces (implicit AND); empty → `validation`.
+  double-quoted with `"` doubled; trailing `*`s are stripped and a single prefix
+  `*` is emitted outside the quotes only if the remaining stem is non-empty (a
+  bare `*` term is dropped); terms joined with spaces (implicit AND); no terms
+  left → `validation`.
   Results: `bm25()` order, `snippet()` 10 tokens; snippets are user text (sanitized at render).
 - **Rank** is not `UNIQUE` (renormalization rewrites all rows in one statement);
   invariant I7 checks uniqueness.
@@ -1620,7 +1663,7 @@ END;
   `MaxHeaderBytes` 64 KiB) and `ConnContext: peercred.ConnContext`.
   Long routes extend their write deadline to their §4.11 budget with
   `http.ResponseController.SetWriteDeadline` (`POST /backups`, `GET /export`:
-  10 min; `POST …/purge`: 120 s).
+  10 min).
 - The API is **not** routed on TCP in v1 (§14 D13). The authn middleware
   still enforces "owner token only on a verified socket" so the rule holds if
   a later remote mode mounts the API on TCP.
@@ -1660,6 +1703,7 @@ Web (TCP, plan D):
 | `If-Match: "<gen>-<version>"` | req | required on every mutation of an existing task/entry/block (428 if absent, 412 if stale incl. generation). Exactly one strong ETag; `*` not accepted. |
 | `Idempotency-Key: <16–128 [A-Za-z0-9_-]>` | req | required on every POST/PATCH except the exempt routes marked **ex** below: absent → 428 `idempotency_key_required`, malformed → 400 `malformed`. Client: 32 hex chars from `crypto/rand`, reused on retry. |
 | `X-Taskronin-Channel` | req | informational (cli, tui, mcp, api) |
+| `Taskronin-Generation: <16 hex>` | req | required on every POST/PATCH (missing → 428 `precondition_required`, other → 412 `generation_mismatch`); clients read it from `GET /clock` or `GET /whoami` (R3-3) |
 | `If-None-Match` | req | aggregates (`/today`, `/status`) → 304 when equal |
 | `ETag` | resp | entity: `"<gen>-<version>"`; aggregate: `"a-<first 16 hex of SHA-256(body)>"` computed after reconcile |
 | `Location` | resp | on 201 |
@@ -1708,7 +1752,6 @@ under `/api/v1` unless shown otherwise.
 | `POST /tasks/{id}/drop` | destroy | `{}` → `OpResponse{task}` | IfM; placement |
 | `POST /tasks/{id}/delete` | destroy | `{}` → `OpResponse{task}` | IfM |
 | `POST /tasks/{id}/undelete` | write | `{}` → `OpResponse{task}` | IfM |
-| `POST /tasks/{id}/purge` | destroy + password | `PurgeRequest` → `PurgeResult` | **ex**; long (120 s); 403 `password_invalid`; 409 if not tombstoned |
 | `GET /tasks/{id}/history?limit&cursor` | read | → `Page[EventView]` | |
 | `POST /triage/accept-new` | write | `AcceptNewRequest` → `OpResponse{tasks}` | per-item etags; all-or-nothing (C6); placement |
 | `GET /entries?from&to&task&include_deleted&limit&cursor` | read | → `Page[Entry]` | `task` = id \| `none`; `from`/`to` required (≤ 366 d) unless `task` is an id |
@@ -1718,7 +1761,6 @@ under `/api/v1` unless shown otherwise.
 | `POST /entries/{id}/relink` | write | `RelinkRequest` → `OpResponse{entry}` | IfM |
 | `POST /entries/{id}/delete` | destroy | `{}` → `OpResponse{entry}` | IfM |
 | `POST /entries/{id}/undelete` | destroy | `{}` → `OpResponse{entry}` | IfM |
-| `POST /entries/{id}/purge` | destroy + password | `PurgeRequest` → `PurgeResult` | **ex**; long (120 s) |
 | `GET /blocks?from&to&task` | read | → `[]Block` | `from`/`to` required (≤ 366 d) unless `task` is set |
 | `GET /blocks/{id}` | read | → `Block` | ETag |
 | `POST /blocks/{id}/reblock` | write | `ReblockRequest` → `OpResponse{block, task}` | IfM (block) + `task_etag`; placement |
@@ -1728,7 +1770,7 @@ under `/api/v1` unless shown otherwise.
 | `GET /ops?actor&since_seq&limit&cursor` | read | → `Page[OpSummary]` | |
 | `GET /ops/{op_id}` | read | → `OpDetail` | |
 | `POST /ops/{op_id}/revert` | scopes of op | `{}` → `OpResponse` | 409 `revert_conflict`/`not_revertible` |
-| `POST /undo`, `POST /redo` | scopes of op | `{}` → `OpResponse` | 409 `nothing_to_undo`/`nothing_to_redo`, `revert_conflict`, `not_revertible` |
+| `POST /undo`, `POST /redo` | scopes of op | `{}` → `OpResponse` | 409: empty stack (§3.9), `revert_conflict`, `not_revertible` |
 | `GET /ai-changes?all&limit&cursor` | read | → `AIChanges` | |
 | `POST /ai-changes/review` | write, owner only | `ReviewRequest` → `OpResponse` | 422 if `through_seq` > latest op seq |
 | `GET /settings` | read | → `Settings` | |
@@ -1749,7 +1791,10 @@ type Moment struct {
 	Date civil.Date    `json:"date"`
 	Time *civil.Minute `json:"time"` // null = date-only
 }
-type Opt[T any] struct{ Set, Null bool; V T } // PATCH tri-state: absent / null / value
+type Opt[T any] struct{ Set, Null bool; V T } // tri-state: absent / null / value
+func (o Opt[T]) IsZero() bool                 // !Set — with `,omitzero` an unset field is omitted
+func (o Opt[T]) MarshalJSON() ([]byte, error) // Null (or !Set) → null; else V
+func (o *Opt[T]) UnmarshalJSON(b []byte) error // key present → Set; null → Null
 
 type Reason struct { Reason string `json:"reason"`; Since Time `json:"since"` }
 type Slips  struct { Lifetime int `json:"lifetime"`; SinceTriage int `json:"since_triage"` }
@@ -1857,8 +1902,9 @@ type Clock struct {
 	WeekStart     string     `json:"week_start"`
 	DueSoonDays   int        `json:"due_soon_days"`
 	ServerVersion string     `json:"server_version"`
+	Generation    string     `json:"generation"` // db_generation; send as Taskronin-Generation
 }
-type Banner struct{ Kind, Message string } // kinds: backup_failed, backup_stale, ai_changes, purge_checkpoint_pending, tz_changed
+type Banner struct{ Kind, Message string } // kinds: backup_failed, backup_stale, ai_changes, purge_incomplete, purge_ledger_damaged, tz_changed
 type BackupHealth struct {
 	LastSuccessAt *Time  `json:"last_success_at"`
 	LastError     string `json:"last_error"`
@@ -1886,7 +1932,7 @@ type Status struct {
 	Due          int          `json:"due"`           // due-phase + overdue open tasks
 	AI           int          `json:"ai"`
 	BackupWarn   bool         `json:"backup_warning"`
-	PurgePending bool         `json:"purge_checkpoint_pending"`
+	PurgeWarning bool         `json:"purge_warning"` // purge_incomplete or purge_ledger_damaged
 }
 type Day struct {
 	Date          civil.Date     `json:"date"`
@@ -1955,7 +2001,7 @@ type EventView struct {
 }
 type OpDetail  struct { Op OpSummary `json:"op"`; Events []EventView `json:"events"` }
 type AIChanges struct { ReviewedThrough int64 `json:"reviewed_through"`; Unreviewed int `json:"unreviewed"`; Ops []OpSummary `json:"ops"`; NextCursor *string `json:"next_cursor"` }
-type WhoAmI    struct { Actor string `json:"actor"`; Scopes string `json:"scopes"`; Owner bool `json:"owner"` }
+type WhoAmI    struct { Actor string `json:"actor"`; Scopes string `json:"scopes"`; Owner bool `json:"owner"`; Generation string `json:"generation"` }
 type TokenInfo struct {
 	ID int64 `json:"id"`; Name string `json:"name"`; Scopes string `json:"scopes"`; Owner bool `json:"owner"`
 	MutationsPerHour int `json:"mutations_per_hour"`; CreatedAt Time `json:"created_at"`
@@ -1965,13 +2011,6 @@ type TokenCreated struct { Token TokenInfo `json:"token"`; Secret string `json:"
 type Settings     struct { BackupKeepDaily int `json:"backup_keep_daily"`; BackupKeepWeekly int `json:"backup_keep_weekly"` }
 type Snapshot     struct { Name string `json:"name"`; Path string `json:"path"`; Kind string `json:"kind"`; At Time `json:"at"`; Size int64 `json:"size"`; SchemaVersion int `json:"schema_version"` }
 type BackupStatus struct { BackupHealth; Dir string `json:"dir"`; Snapshots []Snapshot `json:"snapshots"` }
-type PurgeResult  struct {
-	TaskIDs []int64 `json:"task_ids"`; EntryIDs []int64 `json:"entry_ids"`
-	LinkedNotIncluded []int64 `json:"linked_not_included"` // entries left alone without with_entries
-	Inventory []InventoryItem `json:"inventory"` // snapshots / pre-restore sets: contains | clean | unchecked → run `tkr scrub-backups`
-	CheckpointPending bool `json:"checkpoint_pending"`
-}
-type InventoryItem struct { Path string `json:"path"`; Status string `json:"status"`; Error string `json:"error,omitempty"` }
 ```
 
 Requests (`internal/api/requests.go`):
@@ -1993,10 +2032,10 @@ type AddPlacement struct {
 	Block *BlockRequest `json:"block,omitempty"`
 }
 type UpdateTaskRequest struct {
-	Title      Opt[string] `json:"title"`    // null rejected
-	Notes      Opt[string] `json:"notes"`    // null rejected
-	Project    Opt[string] `json:"project"`  // null clears
-	Priority   Opt[string] `json:"priority"` // null clears
+	Title      Opt[string] `json:"title,omitzero"`    // null rejected
+	Notes      Opt[string] `json:"notes,omitzero"`    // null rejected
+	Project    Opt[string] `json:"project,omitzero"`  // null clears
+	Priority   Opt[string] `json:"priority,omitzero"` // null clears
 	TagsAdd    []string    `json:"tags_add,omitempty"`
 	TagsRemove []string    `json:"tags_remove,omitempty"`
 }
@@ -2022,15 +2061,14 @@ type AddEntryRequest  struct {
 	Time     *civil.Minute `json:"time,omitempty"`
 }
 type UpdateEntryRequest struct {
-	Title    Opt[string]       `json:"title"`
-	Notes    Opt[string]       `json:"notes"`
-	WorkDate Opt[civil.Date]   `json:"work_date"`
-	Time     Opt[civil.Minute] `json:"time"` // null clears
+	Title    Opt[string]       `json:"title,omitzero"`
+	Notes    Opt[string]       `json:"notes,omitzero"`
+	WorkDate Opt[civil.Date]   `json:"work_date,omitzero"`
+	Time     Opt[civil.Minute] `json:"time,omitzero"` // null clears
 }
 type RelinkRequest      struct { TaskID Opt[int64] `json:"task_id"` } // present; null = standalone
 type FocusRequest       struct { TaskID Opt[int64] `json:"task_id"`; Interrupt bool `json:"interrupt,omitempty"` }
 type ReviewRequest      struct { ThroughSeq int64 `json:"through_seq"` }
-type PurgeRequest       struct { Password string `json:"password"`; WithEntries bool `json:"with_entries,omitempty"` }
 type PasswordRequest    struct { Current string `json:"current"`; New string `json:"new"` }
 type SettingsRequest    struct { BackupKeepDaily *int `json:"backup_keep_daily,omitempty"`; BackupKeepWeekly *int `json:"backup_keep_weekly,omitempty"`; Password string `json:"password,omitempty"` }
 type CreateTokenRequest struct {
@@ -2044,7 +2082,10 @@ type CreateTokenRequest struct {
 Password-bearing request structs implement `slog.LogValuer` returning a
 redacted value, and `Idem.Body` is never computed for them. Every `Opt[T]`
 field documented as "key required" is rejected with `validation` when `!Set`
-(the decoder checks this, so `null` and "absent" are never confused).
+(the decoder checks this, so `null` and "absent" are never confused); those
+fields carry no `omitzero` and clients always set them. Optional `Opt[T]` fields
+carry `,omitzero`, so the canonical `Idem.Body` of `{}` and `{"project":null}`
+differs (tested).
 
 ### 6.6 Problems
 
@@ -2097,7 +2138,7 @@ in the in-memory usage map (flushed ≤ 1/min).
 
 | Aspect | Rule |
 |---|---|
-| Row | `api_tokens` with `is_owner=1`, name `owner.<YYYYMMDDTHHMMSSZ>`, all scopes, no expiry, no rate cap; at most one unrevoked (partial unique index). Actor key is always `owner`. |
+| Row | `api_tokens` with `is_owner=1`, name `owner.<YYYYMMDDTHHMMSS.mmmZ>-<4 hex>`, all scopes, no expiry, no rate cap; at most one unrevoked (partial unique index). Actor key is always `owner`. |
 | File | `$XDG_STATE_HOME/taskronin/owner.token`, 0600, content `tkr_…\n`, written with `fsutil.WriteFileAtomic`. Docs: never sync or commit it. |
 | Created | `tkr init`. |
 | Replaced | `tkr passwd --reset` (revokes **all** tokens and sessions, mints a new owner token, rewrites the file); `tkr restore` when the current DB is unreadable (D§7.3 step 4). |
@@ -2110,7 +2151,7 @@ in the in-memory usage map (flushed ≤ 1/min).
 | Actor | Scopes | Restrictions |
 |---|---|---|
 | `owner` (owner token over verified socket) | all | — |
-| `owner` (web session, channel `web`) | all | token management refused (D§10.3); purge/scrub/retention-lowering need password re-entry like everyone |
+| `owner` (web session, channel `web`) | all | token management refused (D§10.3); retention lowering needs password re-entry; purge and backup scrubbing are offline commands |
 | `token:<name>` | as granted; MCP preset `read,capture,write`, 60 mutations/hour | may revert only its own ops; never `ChangePassword` |
 | `system` | internal | never authenticated; reconcile, maintenance, scheduled backups |
 
@@ -2123,7 +2164,7 @@ behavior catalog's SCP table aligns to it):
 | read | all GETs (views, today/status/day, report, search, history, ops, ai-changes, settings, clock) |
 | capture | `AddTask` without placement; `AddEntry` |
 | write | `AddTask` with placement (needs capture **and** write; owner only — tokens get `forbidden`, R-b); `UpdateTask` (title/notes/tags/project/priority); `SetDue`; `Place`; `AcceptNew`; `Defer` (incl. `none`); `MarkManual`; `Block`; `Reblock`; `Unblock`; `SetOutcome`; `Complete`; `Reopen` (no remove); `Undelete` (task); `RelinkEntry`; `SetFocus`; `MarkAIReviewed` (owner only, R-a) |
-| destroy | `Drop`; `Delete`; `UpdateEntry`; `DeleteEntry`; `UndeleteEntry`; `Reopen{RemoveEntry}`; `Purge` (+password). (`tkr scrub-backups` is offline: lock + password, no token.) |
+| destroy | `Drop`; `Delete`; `UpdateEntry`; `DeleteEntry`; `UndeleteEntry`; `Reopen{RemoveEntry}`. (`tkr purge` and `tkr scrub-backups` are offline: instance lock + password, no token, S4.) |
 | admin | tokens (not web); `UpdateSettings`; `ChangePassword` (owner); `RunBackup`; `BackupStatus`; `Export` |
 | scopes of the target op | `Revert`, `Undo`, `Redo` (tokens: own ops only, §14 D15) |
 
@@ -2159,15 +2200,16 @@ func (g *PasswordGate) Verify(ctx context.Context, key, encoded, pw string) (boo
 - CSRF token = base64url(HMAC-SHA256(csrf_secret, "tkr-csrf-v1")); emitted in a
   hidden `_csrf` field on every form and as `hx-headers='{"X-CSRF-Token":"…"}'`
   on `<body>`. Every POST except login must carry a matching token (constant-time compare)
-  **and** pass the origin check: `Origin` equals `http://127.0.0.1:<port>` or
-  `http://localhost:<port>`, or `Sec-Fetch-Site: same-origin`; reject when both
-  headers are absent or either mismatches.
+  **and** pass the origin check: `Origin` is `http://` + one of the host allowlist
+  entries of §6.2 (so `[::1]` works when bound there), or `Sec-Fetch-Site:
+  same-origin`; reject when both headers are absent or either mismatches.
 - `ChangePassword` and `passwd --reset` delete all sessions. Logout deletes the row.
 - Web form idempotency: each rendered form carries `_nonce` (128-bit hex) used as
   `Idem.Key`; `Idem.Body` = sorted, re-encoded form values minus `_csrf`/`_nonce`.
 - Web forms carry full ETags (`"<gen>-<version>"`): `etag` of the target,
   `task_etag` for reblock, one `etag` per item for accept-new; the handler parses
-  them into `domain.Expect`.
+  them into `domain.Expect`. Every mutating form (incl. undo/redo/revert buttons)
+  also carries `_gen` = the generation the page was rendered with → `Meta.Gen`.
 
 ### 7.6 Peer credentials (`server/peercred.go`)
 
@@ -2202,7 +2244,7 @@ for the owner token and a gate for all socket requests.
 | Database | `<data>/taskronin.db` (+`-wal`, `-shm`) | 0600 |
 | Instance lock | `<data>/taskronin.lock` | 0600 |
 | Purge ledger | `<data>/purge-ledger` | 0600 |
-| Swap journals / staging | `<data>/swap.journal`, `<backupdir>/scrub.journal`; staging dirs `<data>/.stage-*/` (unique, exclusive) | 0600 / 0700 |
+| Swap journals / staging | `<data>/swap.journal`, `<backupdir>/scrub.journal`; staging dir `<data>/staging/`; `.tkr-tmp-*` next to targets (§12.0) | 0600 / 0700 |
 | Pre-restore / pre-import sets | `<data>/taskronin.db.pre-restore-<UTC ts>/`, `…pre-import-<UTC ts>/` | 0700 |
 | Backups | `<data>/backups/` (`backup.dir`) | 0700 / files 0600 |
 | State dir | `$XDG_STATE_HOME/taskronin/` | 0700 |
@@ -2281,7 +2323,7 @@ Flags: `--timezone TZ`, `--password-stdin`, `--no-systemd`, `--yes`, `--mcp-toke
 4. Single-user check: list `/etc/passwd` accounts with UID ≥ 1000 and a login shell; if only the current user, confirm and set `allow_plain_loopback = true`; otherwise warn and leave it false.
 5. `umask 077`; create dirs (§8.1); acquire the instance lock.
 6. Write `server.toml` and `client.toml` (if absent) with resolved absolute paths.
-7. Stage the DB in `os.MkdirTemp(<data>, ".stage-*")` (`mode=rwc`): `Migrate` (no pre-migrate backup for an empty DB); insert `db_generation`, `UPDATE` `tz_last_seen`, `auth_state` (hash, random `idem_hmac_key`), the owner token row; close and fsync. Write `owner.token` (`WriteFileAtomic`). **Publish the DB last**: rename the staged file to `<data>/taskronin.db`, fsync the dir. If interrupted before that rename no DB exists and `init` can simply be re-run (it rewrites the token).
+7. Stage the DB in a fresh dir under `<data>/staging/` (`mode=rwc`; covered by `CleanupTemps`): `Migrate` (no pre-migrate backup for an empty DB); insert `db_generation`, `UPDATE` `tz_last_seen`, `auth_state` (hash, random `idem_hmac_key`), the owner token row; close and fsync. Write `owner.token` (`WriteFileAtomic`). **Publish the DB last**: rename the staged file to `<data>/taskronin.db`, fsync the dir. If interrupted before that rename no DB exists and `init` can simply be re-run (it rewrites the token).
 8. `--mcp-token`: create `mcp` token (MCP preset, expiry prompted) → `<state>/tokens/mcp.token`; print the MCP client snippet (`{"command": "tkr", "args": ["mcp"]}`).
 9. Unless `--no-systemd`: write units (§8.6), `systemctl --user daemon-reload`, `enable --now taskronin.socket`, `enable taskronin.service`.
 10. Print next steps (status-line snippet for shell/tmux, `tkr add`).
@@ -2366,6 +2408,10 @@ WantedBy=default.target
 - Mutations of existing records: `GET` the record, then send its ETag in
   `If-Match` (two requests over the socket). On 412 the CLI prints what changed
   and exits 6; it never retries.
+- `client` reads the generation from `GET /whoami` once per process (CLI
+  invocation, TUI/MCP session) and sends `Taskronin-Generation` on every
+  mutation. On `generation_mismatch` (the DB was restored) the TUI/MCP refetch it
+  and refresh their views, but never resend the failed mutation.
 - Every mutation echoes what it did from `OpResponse.effects` (D§5.9), e.g.
   `#42 'Set up keycloak postgres cluster' completed; ✓ logged Mon 2026-10-26`.
 - All user text printed to the terminal goes through `textsafe.Sanitize` /
@@ -2417,8 +2463,8 @@ func ParseClock(s string, allow2400 bool) (civil.Minute, error)
 | `tkr delete ID` / `tkr undelete ID` | `-y` | `POST …/delete` / `…/undelete` | |
 | `tkr undo` / `tkr redo` | — | `POST /undo` / `/redo` | Prints the reverted op's effects. |
 | `tkr revert OPID` | — | `POST /ops/{op}/revert` | |
-| `tkr purge task\|entry ID` | `--with-entries`, `-y` | `POST …/purge` | Password prompt (TTY only; refuses without a TTY). Prints scrubbed IDs, linked entries left alone, the backup inventory (contains/clean/unchecked) with "run `tkr scrub-backups`", and that earlier exports/log lines are out of reach (D§5.11). |
-| `tkr scrub-backups` | `--check`, `--resume`, `-y` | `offline.ScrubBackups` | Offline only (S1, §12.7); password prompt on a TTY. |
+| `tkr purge task\|entry ID` / `tkr purge --repair-ledger` | `--with-entries`, `-y` | `offline.Purge` | **Offline** (S4, §12.6): needs the server stopped; password prompt (TTY only). Scrubs the live DB and every backup set; prints scrubbed IDs, linked entries left alone, per-set results, and that earlier exports/log lines are out of reach (D§5.11). |
+| `tkr scrub-backups` | `--check`, `--resume`, `-y` | `offline.ScrubBackups` | Offline (S1, §12.7): the standalone/resumable form of purge step 7; password prompt on a TTY. |
 | `tkr pending` / `tkr pending retry [KEY]` / `tkr pending drop KEY` | — | resends saved requests with their original idempotency key | §9.6 |
 | `tkr plan` | — | TUI Plan mode | |
 | `tkr recap` | `--date D` | TUI Recap mode | |
@@ -2492,7 +2538,7 @@ without ID/`-N` → usage error. The API request always carries explicit `task_i
   1. focus: `▶ #42 <title ≤ 24 cols>` + ` (→15:00)` when a current block of that task exists;
      no focus but a current block: `▷ #42 <title> (→15:00)`;
   2. `triage N` (N > 0); 3. `due N` (N > 0); 4. `ai N` (N > 0);
-  5. `⚠ backup` if `backup_warning`; 6. `⚠ purge` if `purge_checkpoint_pending`.
+  5. `⚠ backup` if `backup_warning`; 6. `⚠ purge` if `purge_warning` (a purge is incomplete or the ledger is damaged).
 - `--ascii`: `>` / `>.` markers, ` | ` separator, `!backup`, `!purge`.
 - No colour unless `--color always`. Never prompts, never reads stdin, never
   writes stderr, **always exits 0**; on any error (unreachable, timeout, auth)
@@ -2504,12 +2550,12 @@ without ID/`-N` → usage error. The API request always carries explicit `task_i
 | Exit | Meaning |
 |---|---|
 | 0 | success |
-| 1 | operation refused: `validation`, `idempotency_mismatch`, `internal`, other |
+| 1 | operation refused: `validation`, `idempotency_mismatch`, `malformed`, `idempotency_key_required`, `body_too_large`, `unsupported_media_type`, `internal`, other |
 | 2 | usage error (args, flags, datespec) |
 | 3 | server unreachable or timed out |
 | 4 | `unauthenticated`, `forbidden`, `peer_rejected`, `password_*`, token-file problems |
 | 5 | `not_found` |
-| 6 | `conflict`, `deleted`, `revert_conflict`, `not_revertible`, `nothing_to_undo`, `nothing_to_redo`, `precondition_*` |
+| 6 | `conflict`, `deleted`, `revert_conflict`, `not_revertible`, `nothing_to_undo`, `nothing_to_redo`, `precondition_*`, `generation_mismatch` |
 | 7 | `rate_limited`, `busy` |
 | 130 | interrupted |
 
@@ -2533,11 +2579,15 @@ without ID/`-N` → usage error. The API request always carries explicit `task_i
   request byte was written) → the message above ("nothing was saved", exit 3).
   **Outcome unknown** (`client.ErrOutcomeUnknown`: written, no complete
   response, after retries) → the CLI saves `<state>/pending/<key>.json` (0600:
-  method, path, If-Match, body, created_at) and prints "outcome unknown — saved
+  method, path, If-Match, generation, body, created_at) and prints "outcome unknown — saved
   as pending request <key>; run `tkr pending retry`" (exit 3). `tkr pending retry`
   resends with the same key and deletes the file on any definitive answer.
-  Password-bearing requests are never saved; for purge the CLI says re-running
-  is safe (it is idempotent).
+  Password-bearing requests are never saved. A pending request older than the
+  7-day idempotency window is never resent automatically: `tkr pending retry`
+  refuses it and tells the user to check the outcome manually (`tkr show`,
+  `tkr entries`) and then `tkr pending drop` it (R2-10). It likewise refuses a
+  request whose saved generation differs from the server's current one (the DB
+  was restored since; R3-3).
 - Drafts (`editor.Draft`): `-e`/`edit` write `<state>/drafts/<ts>-<rand>.md`
   (0600) before the editor opens; deleted only after the server confirms;
   otherwise the path is printed.
@@ -2590,7 +2640,7 @@ without ID/`-N` → usage error. The API request always carries explicit `task_i
   the current record and uses its ETag (fetch-then-act). On 412 the tool returns
   an error with the current representation.
 - Errors → `CallToolResult{IsError: true}` with structured
-  `{"code","detail","retry_after"}`. `429` (server-enforced cap, §4.3 step 9)
+  `{"code","detail","retry_after"}`. `429` (server-enforced cap, §4.3 step 10)
   → "rate limit reached; retry after N s".
 - User content is returned only inside structured fields (the SDK also mirrors
   structured output as JSON text content).
@@ -2670,12 +2720,11 @@ drag-and-drop. Markdown notes via `markdown.Render` (D§10.4).
 | `GET /ui/report?…`, `/ui/search?q` | `Report`, `Search` |
 | `GET /ui/ai-changes` | `ListAIChanges` |
 | `POST /ui/tasks` | `AddTask` |
-| `POST /ui/tasks/{id}/{place,defer,due,block,triage,complete,reopen,drop,delete,undelete,edit,tags}` | the matching service op (form carries `etag` — plus `task_etag` for reblock, per-item `etag`s for accept-new — and `_nonce`, `_csrf`) |
+| `POST /ui/tasks/{id}/{place,defer,due,block,triage,complete,reopen,drop,delete,undelete,edit,tags}` | the matching service op (form carries `etag` — plus `task_etag` for reblock, per-item `etag`s for accept-new — and `_gen`, `_nonce`, `_csrf`) |
 | `POST /ui/triage/accept-new` | `AcceptNew` |
 | `POST /ui/entries`, `/ui/entries/{id}/{edit,relink,delete,undelete}` | entry ops |
 | `POST /ui/blocks/{id}/{reblock,unblock,outcome}` | block ops |
 | `POST /ui/focus`, `/ui/undo`, `/ui/redo`, `/ui/ops/{op}/revert`, `/ui/ai-changes/review` | as named |
-| `POST /ui/tasks/{id}/purge`, `/ui/entries/{id}/purge` | `Purge` (password field) |
 | `GET /static/htmx-2.0.11.min.js`, `/static/app.css` | embedded, `Cache-Control: public, max-age=31536000, immutable` |
 
 ---
@@ -2684,17 +2733,27 @@ drag-and-drop. Markdown notes via `markdown.Render` (D§10.4).
 
 ### 12.0 Shared machinery (`internal/backup`)
 
-- **Serialization.** `backup.Manager.mu` serializes every snapshot, rotation and
-  inventory in the server process. Offline commands hold the instance lock, so
-  no server runs concurrently. All temp files/dirs are created exclusively with
-  unique names (`os.CreateTemp(dir, ".tmp-*")`, `os.MkdirTemp(dir, ".stage-*")`);
-  cleanup removes only paths the current call created.
-- **Staging** — `Stage(ctx, set FileSet, dir string) (*Staged, error)`: copies a
-  database file set (the DB plus its `-wal` if present) into a fresh
-  `os.MkdirTemp` dir (0700), opens the copy with a **normal** connection (staging
-  DSN) so SQLite recovers the WAL, sets `journal_mode=DELETE` (checkpoints and
-  removes sidecars) and returns a single self-contained file. Never
-  `immutable=1`. Used by inventory, scrub, restore and import.
+- **Serialization.** `backup.Manager.mu` serializes every snapshot and rotation
+  in the server. Offline commands (restore, import, purge, scrub-backups,
+  migrate, passwd --reset, offline backup) hold the instance lock, so no server
+  runs concurrently.
+- **Temporary artifacts (R2-6).** Every copy or temp file the code creates lives
+  either in the staging dir `<data>/staging/` (0700; `Stage` copies, staged
+  restore/import/init DBs) or, when it must be renamed onto a target on the same
+  filesystem, next to that target with the prefix `.tkr-tmp-` (snapshot temps,
+  scrub outputs, quarantine dirs). All are created exclusively with unique names
+  (`os.CreateTemp`/`os.MkdirTemp`). Ones taking part in a swap are recorded in its
+  journal (`New`, `Aside`). `CleanupTemps` — run at server startup and at the
+  start of every offline command, under the lock — deletes everything in
+  `<data>/staging/` and every `.tkr-tmp-*` in the data dir, backup dir and
+  `*.pre-restore-*`/`*.pre-import-*` dirs, **except** paths referenced by an
+  active journal (those are finished by `--resume`). Leftover copies may hold
+  unscrubbed content, so they are removed, never kept.
+- **Staging** — `Stage(ctx, set FileSet) (*Staged, error)`: copies a database
+  file set (the DB plus its `-wal` if present) into a fresh dir under
+  `<data>/staging/`, opens the copy with a **normal** connection (staging DSN) so
+  SQLite recovers the WAL, sets `journal_mode=DELETE` (checkpoints and removes
+  sidecars) and returns a single self-contained file. Never `immutable=1`.
 - **Journaled swap** — replaces a database file set crash-safely:
   ```go
   type SwapKind string // "restore" | "import" | "scrub"
@@ -2704,7 +2763,7 @@ drag-and-drop. Markdown notes via `markdown.Render` (D§10.4).
   	Step              string // "prepared" | "moved-old" | "installed" | "aside-deleted"
   	New               string // staged replacement: one DELETE-mode file, verified, fsynced
   	Target            string // path of the DB being replaced; its -wal/-shm move with it
-  	Aside             string // dir receiving the old set: <target>.pre-restore-<ts>/, .pre-import-<ts>/, or a scrub quarantine dir
+  	Aside             string // dir receiving the old set: <target>.pre-restore-<ts>/, .pre-import-<ts>/, or a .tkr-tmp- quarantine dir
   	DeleteAside       bool   // scrub: delete the old set after install (its content must not survive)
   	OwnerTokenPending bool   // restore only: a new owner token was minted (secret never journaled)
   	StartedAt         time.Time
@@ -2719,25 +2778,39 @@ drag-and-drop. Markdown notes via `markdown.Render` (D§10.4).
   fsync (`aside-deleted`) → remove the journal, fsync dir. Live-DB swaps
   (restore, import) journal at `<data>/swap.journal`; snapshot scrubs at
   `<backupdir>/scrub.journal`. `serve` refuses to start while either exists.
-- **Domain-aware ledger replay** — `service.ReplayLedger(ctx, recs)` (used by
-  `ReapplyLedger` on the live DB and on every staged copy), one system op
-  (`system.ledger_replay`), events only if something changed:
+- **Ledger replay** — `service.ReplayLedger(ctx, recs, mode)`, one system op
+  (`system.ledger_replay`):
+  - `mode = live` (startup, restore/import staging): normal `run`, reconcile allowed.
+  - `mode = historical` (snapshots and pre-restore/pre-import sets being scrubbed):
+    `opSpec{noReconcile: true, structuralOnly: true}` — the copy keeps its
+    point-in-time state; only content changes (R2-2).
   - task IDs: if not yet tombstoned, apply delete semantics first — cancel its
     `planned` blocks as `cancelled/task_closed` (no derivation, no slip), delete
-    its triage rows, clear focus if it points at it; then tombstone+scrub the task
-    row;
+    its triage rows, clear focus if it points at it; then tombstone+scrub the row;
   - entry IDs (incl. a task's `complete` entries): tombstone+scrub, even when the
-    entry is the active completion entry of a done task (I4 accepts a purged
-    completion entry);
-  - `store.ScrubEntities` does each row in **one** `UPDATE … SET deleted_at =
-    COALESCE(deleted_at, :now), purged_at = COALESCE(purged_at, :now),
-    title = '[purged]', notes = ''` so the FTS trigger sees the old content
-    (R-p); then clears the task's `project` and `task_tags`, deletes orphaned
-    `tags`, rewrites `before_json`/`after_json` of `task`/`entry`/`task_tags`
-    events for the set (`title`→`"[purged]"`, `notes`→`""`, `project`→`null`,
-    `tags`→`[]`), and sets `ops.purged=1, revertible=0` for every op with an
-    event on the set;
-  - on the live DB, any change sets `purge_checkpoint_pending=1` in the same transaction.
+    entry is the active completion entry of a done task (I4 accepts purged ones);
+  - `store.ScrubEntities`: rows with `purged_at IS NULL` are scrubbed, each in
+    **one** `UPDATE … SET deleted_at = COALESCE(deleted_at, :now), purged_at = :now,
+    title = '[purged]', notes = ''` so the FTS trigger sees the old content; the
+    task's `project` and `task_tags` are cleared and orphaned `tags` deleted.
+    **Events are scrubbed content-aware, independent of `ops.purged` (R3-1):**
+    every `task`/`task_tags`/`entry` event whose entity is in the set and whose
+    payload still holds content — a `title` ≠ `"[purged]"`, a non-empty `notes`,
+    a non-null `project` or a non-empty `tags`, tested on `before_json` and
+    `after_json` with `COALESCE(json_extract(j,'$.title'),'[purged]') <> '[purged]'
+    OR COALESCE(json_extract(j,'$.notes'),'') <> '' OR json_extract(j,'$.project')
+    IS NOT NULL OR COALESCE(json_array_length(j,'$.tags'),0) > 0` — is rewritten (`title`→`"[purged]"`, `notes`→`""`, `project`→`null`,
+    `tags`→`[]`). `ops.purged=1, revertible=0` is set for every op with an event
+    on the set (revertibility only). If no row or event needs changing, the
+    replay records no events and is a true no-op (no ops row, R2-12).
+  - **Checkpoint (R3-2):** server startup (before listeners) and every offline
+    command run `wal_checkpoint(TRUNCATE)` after ledger replay
+    **unconditionally**, confirm truncation (`busy=0`, `log=0`), and fail loudly
+    otherwise — a crash between a scrub commit and its checkpoint is thus always
+    finished, even though the replay finds nothing left to change. Offline
+    snapshots are taken only after that checkpoint; online snapshots use
+    `VACUUM INTO`, which copies logical content only, never stale WAL frames or
+    free pages. No pending flag or background worker exists.
 
 ### 12.1 Snapshot (`backup.Manager`)
 
@@ -2749,35 +2822,36 @@ type Manager struct { Dir string; Clock clock.Clock; Snap *sql.DB; mu sync.Mutex
 func (m *Manager) Snapshot(ctx context.Context, kind Kind) (SnapshotInfo, error)
 func Verify(ctx context.Context, path string) (schemaVersion int, err error)
 func (m *Manager) Rotate(ctx context.Context, r Retention) (removed []string, err error)
-func (m *Manager) Inventory(ctx context.Context, recs []LedgerRecord, sets []FileSet) ([]InventoryItem, error)
+func Inventory(ctx context.Context, recs []LedgerRecord, sets []FileSet) ([]InventoryItem, error) // offline only
 func List(dir string) ([]SnapshotInfo, error)
-type InventoryItem struct { Path string; Status string /* contains | clean | unchecked */; Err string }
+type InventoryItem struct { Path string; Status string /* contains | clean */; Err string }
 ```
-1. Under `m.mu`: name `taskronin-<YYYYMMDDTHHMMSS.mmmZ>-<4 hex>-<kind>.db`; temp via `os.CreateTemp(dir, ".tmp-*.db")` (exclusive; `VACUUM INTO` accepts an existing empty file).
+1. Under `m.mu`: name `taskronin-<YYYYMMDDTHHMMSS.mmmZ>-<4 hex>-<kind>.db`; temp via `os.CreateTemp(dir, ".tkr-tmp-*.db")` (exclusive; `VACUUM INTO` accepts an existing empty file).
 2. `VACUUM INTO ?` (temp path bound; if the driver refuses a parameter there, a single-quoted literal with `'` doubled) on the snapshot pool; observes ctx (shutdown aborts and deletes the temp); `chmod 0600`.
 3. `Verify`: staging connection on the temp file, `PRAGMA integrity_check` = `ok`, FTS content integrity-check on both tables, max `schema_migrations.version`; close; assert no sidecars.
 4. fsync temp → rename to final → fsync dir.
 5. `settings`: `last_backup_at`, `last_backup_attempt_at`, `last_backup_error=''` (no events).
 6. Rotate (only after success): keep the newest snapshot per day for the last `Daily` days, newest per ISO week for the last `Weekly` weeks, everything < 24 h old, and the newest 3 overall; delete only files matching the name pattern. Never touches `*.pre-restore-*`/`*.pre-import-*`.
 On failure: delete the temp, set `last_backup_error`, keep older snapshots; banner (D§7.3).
-`offline.Backup` does the same with an offline writer when the server is down.
+`offline.Backup` (server down): lock → `CleanupTemps` → `ReapplyLedger` (live) + confirmed checkpoint → the same steps with an offline writer.
 
 ### 12.2 Restore (`offline/restore.go`)
 
-0. Acquire the lock (server stopped; the message names both units); refuse if a swap journal exists; confirm (`-y`).
+0. Acquire the lock (server stopped; the message names both units); refuse if a swap journal exists; `CleanupTemps`; confirm (`-y`).
 1. `Verify(snapshot)`; `schema ≤ binary`.
-2. `Stage` the snapshot into `<data>`; `Migrate` the staged copy to the binary schema.
+2. `Stage` the snapshot; `Migrate` the staged copy to the binary schema.
 3. Open the current DB if possible (`mode=rw`, `quick_check`): read `auth_state`, `api_tokens`, sequences.
 4. In the staged copy: replace `auth_state` and `api_tokens` with the current ones; `RaiseSequences(max)`; new `db_generation`; `DELETE FROM web_sessions`; `DELETE FROM idempotency`; record a `system.restore` op + content-free event.
    Current DB unreadable: revoke every token, mint a new owner token, set `web_login_disabled=1`, sequences = max over snapshot and all readable snapshots + 10 000; print a loud notice.
-5. Over the staged store (a temporary `service.Service`): `ReplayLedger` → `Reconcile` (real clock) → `CheckAll`; `integrity_check`; FTS integrity-check; close; assert no sidecars; fsync.
+5. Over the staged store (a temporary `service.Service`): `ReplayLedger(live)` → `Reconcile` (real clock) → `CheckAll`; `integrity_check`; FTS integrity-check; close; assert no sidecars; fsync.
 6. `Swap{Kind: restore, Aside: <live>.pre-restore-<ts>/}`; after `installed`, write `owner.token` if minted.
 - `tkr restore --resume` / `--rollback` drive `ResumeSwap`/`RollbackSwap` on `<data>/swap.journal` (also for an interrupted import). If `OwnerTokenPending` and the token file was not written, `--resume` tells the user to run `tkr passwd --reset`.
 
 ### 12.3 Migrate (`offline/migrate.go`)
 
-Lock → open (`mode=rw`) → `SchemaStatus` (`--status` prints and exits) →
-pre-migrate snapshot (§12.1) → `Migrate`. `serve` does the same at startup (§4.10).
+Lock → `CleanupTemps` → open (`mode=rw`) → `SchemaStatus` (`--status` prints and
+exits) → pre-migrate snapshot (§12.1) → `Migrate`. `serve` does the same at
+startup (§4.10).
 
 ### 12.4 Export (`service.Export`, `client.Export`)
 
@@ -2797,15 +2871,18 @@ settings. The client writes `-o` via temp + fsync + rename, mode 0600.
 
 ### 12.5 Import (`offline/import.go`) — staged (S2)
 
-1. Lock; the live DB must exist (`tkr init`) and hold no user data (no rows in `tasks`, `log_entries`, `time_blocks`, `ops`, `events`); no swap journal.
+1. Lock; `CleanupTemps`; no swap journal; the live DB must exist (`tkr init`) and hold no user data — no rows in `tasks`, `log_entries`, `time_blocks`, `tags`, `interruptions` (ops/events from `init --mcp-token` or `passwd --reset` are fine).
 2. Parse the header: `format`, `version ≤ 1`, `schema_version ≤ binary`.
-3. Create a staged DB (`os.MkdirTemp(<data>, ".stage-*")`, staging DSN `mode=rwc`); `Migrate`; copy `auth_state`, `api_tokens` and `db_generation` from the live DB.
-4. One transaction on the staged DB: insert rows in dependency order (`tasks`, `tags`, `task_tags`, `task_triage`, `ops`, `log_entries`, `time_blocks`, `interruptions`, `focus` (update id 1), `events`, `undo_stack`) using only known columns (unknown → error); titles/notes re-validated with `textsafe`; triggers maintain FTS; settings allowlist; `RaiseSequences(max(file, live))`; `system.import` op with a content-free event (row counts).
-5. Over the staged store: `ReplayLedger` → `Reconcile` → `CheckAll`; `integrity_check`, `foreign_key_check`, FTS integrity-check; close; fsync.
-6. `Swap{Kind: import, Aside: <live>.pre-import-<ts>/}` (the aside holds only the empty init DB).
-Any failure before step 6 leaves the live DB untouched and removes the staging dir, so the import can simply be retried.
+3. Create a staged DB under `<data>/staging/` (staging DSN `mode=rwc`); `Migrate`; copy `auth_state`, `api_tokens` and `db_generation` from the live DB.
+4. One transaction on the staged DB (R3-5 ordering):
+   a. insert the file's rows in dependency order (`ops`, `tasks`, `tags`, `task_tags`, `task_triage`, `log_entries`, `time_blocks`, `interruptions`, `focus` (update id 1), `events`, `undo_stack`), **preserving** their `ops.seq`, `events.id` and every `*_seq` reference; only known columns (unknown → error); titles/notes re-validated with `textsafe`; triggers maintain FTS; settings allowlist;
+   b. re-insert the live DB's bootstrap history (`token.*`/`auth.*` ops and their events, e.g. from `init --mcp-token` or `passwd --reset`) with **fresh** `seq`/`id` above the file's high-water marks, preserving their `op_id`s (`undo_stack` and `events` reference `op_id`);
+   c. `RaiseSequences(max(file, live))`; `system.import` op with a content-free event (row counts).
+5. Over the staged store: `ReplayLedger(live)` → `Reconcile` → `CheckAll`; `integrity_check`, `foreign_key_check`, FTS integrity-check; close; fsync.
+6. `Swap{Kind: import, Aside: <live>.pre-import-<ts>/}`.
+Any failure before step 6 leaves the live DB untouched; `CleanupTemps` removes the staging copy, so the import can simply be retried.
 
-### 12.6 Purge (`service/purge.go`, `backup/ledger.go`)
+### 12.6 Purge — offline only (`offline/purge.go`, `service/purge.go`, `backup/ledger.go`; S4)
 
 ```go
 type LedgerRecord struct {
@@ -2817,43 +2894,47 @@ type LedgerRecord struct {
 	Entries []domain.EntryID `json:"entries,omitempty"`
 	Sum     string           `json:"sum"`   // hex SHA-256 of this record's JSON encoding with Sum = ""
 }
+type LedgerHealth struct { Damaged bool; DroppedLines []int }
 type Ledger struct{ Path string; mu sync.Mutex }
-func OpenLedger(path string) (*Ledger, error)
-	// Under the instance lock: verify every line's Sum. A final line that is incomplete
-	// (no trailing \n) or fails its Sum is truncated back to the end of the last valid
-	// line and the file fsynced, before any append. A bad line before the last valid
-	// one → error (startup and purge refuse; intents are never dropped silently).
-func (l *Ledger) Append(r LedgerRecord) error     // O_APPEND 0600, one line, fsync file + dir
-func (l *Ledger) Records() ([]LedgerRecord, error)
+func OpenLedger(path string) (*Ledger, LedgerHealth, error)
+	// Under the instance lock. A final line WITHOUT a terminating newline is a torn
+	// append: truncated back to the end of the last complete line, fsynced, before any
+	// append. A complete (newline-terminated) line that fails to parse or whose Sum is
+	// wrong — anywhere in the file — is corruption: Damaged = true, the line is kept on
+	// disk and skipped; all valid records still replay (R2-8).
+func (l *Ledger) Append(r LedgerRecord) error     // refused while Damaged; O_APPEND 0600, one line, fsync file + dir
+func (l *Ledger) Records() ([]LedgerRecord, error) // valid records only
+func (l *Ledger) Repair() ([]int, error)          // rewrite from valid records (temp+fsync+rename+dir fsync); returns dropped line numbers
 ```
-1. Authz `destroy`; verify the password through the gate (outside any transaction).
-2. `run` (one writer transaction held from here to commit; op `purge.task`/`purge.entry`, not revertible, idempotency-exempt):
-   a. validate the target (exists, tombstoned — else `conflict` "delete it first");
-   b. select the exact set: task + its `complete` entries + (`with_entries`) all linked entries; or the entry; `LinkedNotIncluded` = linked entries left out;
-   c. **ledger first**: `Append` a `pending` record with that set (fsync file + dir) — while still holding the writer;
-   d. `ScrubEntities` (one UPDATE per row, §12.0) + content-free `purge` events;
-   e. `purge_checkpoint_pending = 1` (same transaction);
-   f. commit. If anything fails after (c), the service immediately runs `ReapplyLedger`; a crash is completed at the next startup.
-3. `wal_checkpoint(TRUNCATE)` with backoff for up to 30 s; on confirmed truncation set `purge_checkpoint_pending = 0`; otherwise leave it for the background job and report it.
-4. `Append` a `complete` record.
-5. `Inventory` (≤ 60 s) of every snapshot and `*.pre-restore-*`/`*.pre-import-*` set, each through `Stage`: `contains` / `clean` / `unchecked`. The result tells the user to run `tkr scrub-backups`.
-- Re-running on an already-purged item changes nothing (no events) and ensures a ledger record covers it.
-- `ReapplyLedger(ctx)` = `ReplayLedger` over all records (pending or complete) through `run` as a system op, then a `complete` line for pending records. It never clears `purge_checkpoint_pending`; only a confirmed truncation does. Runs at startup and inside every staged copy (restore, import, scrub).
+`tkr purge task|entry ID [--with-entries] [-y]` (owner, offline; D§5.11 as amended by S4):
+1. Acquire the instance lock; if held: "the server is running — `systemctl --user stop taskronin.socket taskronin.service` first". Refuse if a swap journal exists (resume it first). `CleanupTemps`.
+2. Prompt for the password (TTY only, refuse otherwise) and verify against `auth_state` with `auth.VerifyPassword` (1 s delay after a failure, 3 attempts).
+3. `OpenLedger`; `Damaged` → refuse ("run `tkr purge --repair-ledger`").
+4. Open the live DB (`mode=rw`) with a temporary `service.Service`; `ReplayLedger(live)` (completes any earlier intent) + confirmed checkpoint (R3-2).
+5. `service.PurgeLive(ctx, m, in)` through `run` (actor `owner`, channel `cli`, op `purge.task`/`purge.entry`, not revertible, no idempotency), one writer transaction: validate the target (exists, tombstoned — else `conflict` "delete it first"; for a live entry of a deleted task the message says to use `tkr purge task <id> --with-entries`, which is how a deleted task's entries, incl. its completion entry, are purged); select the exact set (task + its `complete` entries + with `--with-entries` all linked entries; or the entry; report linked entries left out); **`Append` the `pending` record (fsync) while holding the writer** — skipped when an existing record already covers exactly this set and every row in it is already purged (a re-run); `ScrubEntities`; content-free `purge` events; commit. A failure after the append is completed by `ReplayLedger` (immediately, or by the next startup/offline command after a crash). A `pending` line can therefore outlive a rolled-back scrub; that is harmless — the next replay performs the scrub it describes.
+6. `PRAGMA wal_checkpoint(TRUNCATE)`, confirmed — no other connection exists, so it truncates; otherwise fail loudly (the record stays `pending`; every later start or offline command checkpoints unconditionally, R3-2).
+7. Scrub every snapshot and `*.pre-restore-*`/`*.pre-import-*` set exactly as `tkr scrub-backups` (§12.7, steps 4–6).
+8. If step 7 finished every set, `Append` the `complete` record; otherwise leave it `pending` and tell the user to run `tkr scrub-backups` (which completes it).
+9. Print: scrubbed IDs, linked entries left alone, per-set results, and that earlier exports and log lines are out of reach.
+- Re-running on an already-purged item changes nothing and appends no new record if one already covers the set.
+- `tkr purge --repair-ledger` (lock + password): `Repair()`, prints the dropped lines, then `ReplayLedger(live)` + checkpoint.
+- `ReapplyLedger(ctx)` = `ReplayLedger(live)` over all valid records; it never writes `complete` lines (only purge step 8 and scrub-backups step 7 do). Runs at server startup (then checkpoint before listeners) and in every staged copy. While a record is `pending` the dashboard shows a `purge_incomplete` banner; a damaged ledger shows `purge_ledger_damaged`.
 
-### 12.7 Scrub backups — offline only (`offline/scrub.go`, S1)
+### 12.7 Scrub backups — offline (`offline/scrub.go`)
 
-`tkr scrub-backups [--check] [--resume] [-y]`:
-1. Acquire the instance lock (server stopped); with `--resume` → `ResumeSwap` on `<backupdir>/scrub.journal` and continue; otherwise refuse if any journal exists.
-2. Prompt for the password (TTY only) and verify against `auth_state` with `auth.VerifyPassword` (1 s delay after a failure, 3 attempts).
-3. `OpenLedger`; load records.
-4. Unless `--check`: take a fresh verified snapshot of the live DB (kind `prescrub`).
-5. For each other snapshot and each `*.pre-restore-*`/`*.pre-import-*` set: `Stage` it → `ReplayLedger` on the staged copy → nothing changed: `clean` (discard) → `--check`: report `contains` and discard → else `CheckStructural`, `integrity_check`, FTS check → `VACUUM INTO` a new temp file next to the target → `Verify` → `Swap{Kind: scrub, Aside: <quarantine dir>, DeleteAside: true}`.
-6. Print per-set results; a failure on one set does not stop the others. Snapshots are never deleted, only rewritten.
+`tkr scrub-backups [--check] [--resume] [-y]` — the standalone and resumable form of purge step 7:
+1. Acquire the instance lock (server stopped). With an existing `<backupdir>/scrub.journal`: `ResumeSwap` it first (always, `--resume` just makes it explicit). `CleanupTemps`.
+2. Prompt for the password (TTY only) and verify as in §12.6.
+3. `OpenLedger` (a damaged ledger is allowed here: valid records are still applied, but `complete` lines cannot be appended while it is damaged — step 7 then tells the user to run `tkr purge --repair-ledger`); load records.
+4. On the live DB: `ReplayLedger(live)` + confirmed checkpoint (R2-12, R3-2). Unless `--check`: take a fresh verified snapshot (kind `prescrub`).
+5. For each other snapshot and each `*.pre-restore-*`/`*.pre-import-*` set: `Stage` it → `Migrate` the staged copy to the binary's schema (an old-schema snapshot must replay with current columns, R3-6) → `ReplayLedger(historical)` → nothing changed: `clean`, discard → `--check`: report `contains`, discard → else `CheckStructural`, `integrity_check`, FTS check → `VACUUM INTO` a `.tkr-tmp-` file next to the target → `Verify` → `Swap{Kind: scrub, Aside: <.tkr-tmp- quarantine dir>, DeleteAside: true}`.
+6. Stop at the first failure that leaves a journal (the next run resumes that swap first, R2-7); failures without a journal are reported and the batch continues. Snapshots are never deleted, only rewritten.
+7. If every set is clean or rewritten and the ledger is not damaged, `Append` `complete` lines for all `pending` records; print per-set results.
 
 ### 12.8 Offline password reset (`offline/passwd.go`)
 
 `tkr passwd --reset [--password-stdin]`:
-1. Acquire the lock (server stopped); open the live DB (`mode=rw`).
+1. Acquire the lock (server stopped); `CleanupTemps`; open the live DB (`mode=rw`).
 2. Read the new password (twice on a TTY); `ValidateNewPassword`; mint a new owner token secret in memory.
 3. One transaction through `run` as a system op (`auth.password`, actor `system`, channel `system`, not revertible): update `auth_state` (hash, `password_changed_at`, `web_login_disabled = 0`); revoke every token (`revoked_at = now`, `token:revoke` events); delete all web sessions; insert the new owner token row (`token:insert`); `auth:update` event (content-free).
 4. Write `owner.token` with `fsutil.WriteFileAtomic` (temp, fsync, rename, fsync dir).
@@ -2899,8 +2980,8 @@ func NewScenario(t testing.TB) *Scenario
 |---|---|---|
 | Unit | `civil`, `datespec`, `textsafe`, `auth`, `api`, `editor`, `report` | tables + fuzz; DST gaps/overlaps; grammar; sanitizer properties; golden report output |
 | Store | `store` | migrations (empty and every prior version), CHECKs and triggers (overlap, append-only, kind/link immutability, no-delete), FTS sync incl. purge, sequences, export rows, `ScrubEntities` |
-| Service | `service` (bulk of tests) | every scenario in the behavior catalog (`2026-10-25-taskronin-behavior-catalog.md`, IDs kept as test names, e.g. `TestBLK27`) plus D§12's service list, as `Scenario` tables: triage reasons/order; reconcile across downtime, DST, midnight; derivation and recompute over before/after pairs; slip table row by row (incl. AI-log revert re-slip); continue rule; lifecycle effects; defer/block exclusivity; due/overdue incl. timed due and daily re-fire; rank incl. renormalization; revert of **every** op kind incl. invariant refusals and net-zero pairs; undo/redo/undo incl. committed pops and revert of a per-op revert; idempotency replay/mismatch incl. stored no-ops; rate cap; **reason added by reconcile → task ETag changes → stale placement gets 412** (R-i); tag change bumps the version; token `AddTask` with placement → 403; purge incl. crash between ledger append and commit (hook) and checkpoint-pending persistence; domain-aware ledger replay onto an older store |
-| Backup | `backup`, `offline` | snapshot/verify/rotate incl. concurrent snapshot requests (mutex, unique temps); `Stage` recovers a WAL-only change; restore and staged import round-trips incl. auth + sequence carry-over, unreadable current DB, historical focus (reconcile before `CheckAll`); crash at every swap step for restore, import and scrub (hooks in `export_test.go`) then `--resume`/`--rollback`; ledger torn tail truncated, mid-file corruption refused; `scrub-backups` on a pre-restore set with a WAL; init interrupted before publish; `passwd --reset` crash between commit and token write |
+| Service | `service` (bulk of tests) | every scenario in the behavior catalog (`2026-10-25-taskronin-behavior-catalog.md`, IDs kept as test names, e.g. `TestBLK27`) plus D§12's service list, as `Scenario` tables: triage reasons/order; reconcile across downtime, DST, midnight; derivation and recompute over before/after pairs; slip table row by row (incl. AI-log revert re-slip); continue rule; lifecycle effects; defer/block exclusivity; due/overdue incl. timed due and daily re-fire; rank incl. renormalization; revert of **every** op kind incl. invariant refusals and net-zero pairs; undo/redo/undo incl. committed pops and revert of a per-op revert; idempotency replay/mismatch incl. stored no-ops; rate cap; **reason added by reconcile → task ETag changes → stale placement gets 412** (R-i); tag change bumps the version; token `AddTask` with placement → 403; `PurgeLive` incl. crash between ledger append and commit (hook); domain-aware ledger replay onto an older store, and a historical replay that leaves blocks/focus/triage untouched; **revert of a backdated AI log after a placement re-slips the block (`slipped_seq` = revert seq) and re-adds `slipped`; with a second entry that day no block/triage event is written** (R2-1); eventless undo/redo still moves the stack and records an ops row (R2-4); a retried committed pop replays the same 409 and leaves the next entry untouched (R2-5); state chain T0/R/U/D after revert → undo → redo (R2-11); `Opt` `omitzero`: `{}` vs `{"project":null}` give different `Idem.Body` hashes and a partial PATCH leaves other fields alone (R2-3); `Undelete` clears a future defer; I4 with two purged completion entries; purged entities refuse undelete/update/relink while `Reopen` still flags a purged completion entry (R3-4); any mutation with a stale `Taskronin-Generation` → 412 `generation_mismatch`, incl. undo (R3-3); `MarkAIReviewed` bound excludes the current op's seq |
+| Backup | `backup`, `offline` | snapshot/verify/rotate incl. concurrent snapshot requests (mutex, unique temps); `Stage` recovers a WAL-only change; restore and staged import round-trips incl. auth + sequence carry-over, unreadable current DB, historical focus (reconcile before `CheckAll`); crash at every swap step for restore, import and scrub (hooks in `export_test.go`) then `--resume`/`--rollback`; ledger: torn final line (no newline) truncated, complete-but-bad and mid-file lines → damaged (valid records still replay, new purges refused, `--repair-ledger` rewrites); offline `purge` end to end and crashed at each step (ledger append, live scrub commit, checkpoint, each backup swap, `complete` append) then rerun/resume; leftover `staging/` and `.tkr-tmp-*` files removed at startup and before scrub unless a journal references them; batch scrub stops on a failure that leaves a journal and the next run resumes it first; `scrub-backups` on a pre-restore set with a WAL and on a `schema_v1` fixture snapshot (migrated before replay, R3-6); **sequential purges leave no secret in any event: complete with a secret `--as` retitle → `reopen --remove-entry` → purge the entry → delete + purge the task** (R3-1); crash after the live scrub commit but before the checkpoint → next start/offline command truncates the WAL (R3-2); import into a DB initialized with `--mcp-token` keeps the file's seq/ids and renumbers the bootstrap history (R3-5); a pending request saved before a restore is refused (R3-3); init interrupted before publish; `passwd --reset` crash between commit and token write |
 | API | `server` (via `StartServer`) | route-class invariant; socket peer-UID and `Forwarded`/`X-Forwarded-*`/`Via` refusal; owner token over TCP refused; scope matrix generated from `server.Routes()` (the same table the router uses); ETag/generation; idempotency; strict JSON; problem mapping for every `Code` |
 | CLI | `cli` | golden tests running `cli.Main` in-process against `StartServer` (stdout, stderr, exit code); `log` arg table; unreachable echo; `status --short` |
 | MCP | `mcpserver` | in-memory transports (`mcp.NewInMemoryTransports`) + SDK client; schema goldens; owner-token refusal; 429 mapping |
@@ -2929,7 +3010,7 @@ from the fake clock are already deterministic).
 | `FuzzParseETag`, `FuzzCursor` | api | no panic; round-trip |
 | `FuzzDecodeRequests` | server | strict decoders never panic |
 | `FuzzFTSQuery` | service | built query never errors in FTS5 (run against a temp DB) |
-| `FuzzLedgerLines` | backup | arbitrary file tails: `OpenLedger` never panics, keeps every valid prefix record, truncates only an invalid final line |
+| `FuzzLedgerLines` | backup | arbitrary file contents: `OpenLedger` never panics, keeps every valid record, truncates only a final line lacking `\n`, flags any complete bad line as damaged |
 
 ### 13.4 Lint (`.golangci.yml`, golangci-lint v2)
 
@@ -3063,7 +3144,7 @@ Done includes a green `make check`.
 | 5 | Continue rule (D§5.6): removal "to missed/done" is undefined when a task has several blocks. | Symmetric to the slip rule: `continue` stays while some block is `worked` with `resolved_seq > last_placed_seq`; `resolved_*` update on every status change (§4.5). |
 | 6 | Reconcile "before every op" as a separate transaction leaves a window (e.g. midnight) between reconcile and op, and timestamp comparisons (`slipped_at > last_placed_at`) are ambiguous within a millisecond and wrong after clock corrections. | Reconcile runs inside the op's `BEGIN IMMEDIATE` transaction before a savepoint; one `now` per transaction; acknowledgement compares `ops.seq` values (§4.2, §4.3). |
 | 7 | `VACUUM INTO` from the `query_only` reader pool may be refused. | Dedicated snapshot pool without `query_only` (§4.1). |
-| 8 | MCP's per-token mutation cap (D§9.4) enforced inside `tkr mcp` is bypassable by calling the socket with the same token. | Server-enforced `api_tokens.mutations_per_hour`, counted from `ops` in the op transaction (§4.3 step 9). |
+| 8 | MCP's per-token mutation cap (D§9.4) enforced inside `tkr mcp` is bypassable by calling the socket with the same token. | Server-enforced `api_tokens.mutations_per_hour`, counted from `ops` in the op transaction (§4.3 step 10). |
 | 9 | Owner token is "named owner" and names are unique, but `passwd --reset` must mint a new owner token. | Owner tokens named `owner.<ts>` (CHECK), at most one unrevoked; actor key always `owner`; token names unique forever so `token:<name>` in history stays unambiguous. |
 | 10 | `WriteTimeout` 60 s (D§10.2) vs backup, scrub, export over the API. | Per-route deadline extension via `ResponseController` (§6.1). |
 | 11 | htmx defaults conflict with D§10.4: indicator styles inject inline `<style>` (blocked by `style-src 'self'`); the history cache stores rendered pages (task text) in `localStorage`. | `includeIndicatorStyles:false`, `historyCacheSize:0`, `refreshOnHistoryMiss:true` added to the D§9.3 config; htmx pinned to 2.0.11 (4.x renamed config). |
@@ -3116,7 +3197,8 @@ Done includes a green `make check`.
 | D33 | Owner token over the socket with channel `mcp` is refused (defence in depth; `tkr mcp` also refuses it). |
 | D34 | `offline` may build a temporary `service.Service` over a staged/offline store (ledger replay, reconcile, `CheckAll`, system ops) — edge `offline → service` in §1.3. |
 | D35 | Interruptions (former round-2 Q2, accepted as an engineering call; catalog A22): `tkr add … --now` records an interruption against the current block's task if a block of another task is current, else against the previous focus (if set and different), else none. `tkr now ID` (`SetFocus`) records one only when a **different task's block is current**, or with `--interrupt` (then against the current block's task, else the previous focus). Switching to the current block's own task never records one. |
-| D36 | Design deltas (vs. the design text), all intentional: `ops` table holds actor/channel/at/revertible/state (events reference it); `focus`, `interruptions`, `auth_state` tables (password hash and idempotency key out of `settings`); FTS external content via live-row views; `*_seq` ordering columns and `purged_at`; retention in DB settings; v1 API on the socket only; backup scrubbing is the offline `tkr scrub-backups`, not `purge --scrub-backups` (D§5.11); restore journal generalized to a swap journal also used by staged import and scrub; extra commands/endpoints (`tkr pending`, `outcome`, `entry …`, `entries`, `priority`, `revert`, `GET /upcoming`, `GET /days/{date}`, `/redo`, `/whoami`, `POST /ai-changes/review`); owner tokens named `owner.<ts>`. |
+| D36 | Design deltas (vs. the design text), all intentional: `ops` table holds actor/channel/at/revertible/state (events reference it); `focus`, `interruptions`, `auth_state` tables (password hash and idempotency key out of `settings`); FTS external content via live-row views; `*_seq` ordering columns and `purged_at`; retention in DB settings; v1 API on the socket only; backup scrubbing is the offline `tkr scrub-backups`, not `purge --scrub-backups`, and purge itself is offline (D37; D§5.11); restore journal generalized to a swap journal also used by staged import and scrub; extra commands/endpoints (`tkr pending`, `outcome`, `entry …`, `entries`, `priority`, `revert`, `GET /upcoming`, `GET /days/{date}`, `/redo`, `/whoami`, `POST /ai-changes/review`); owner tokens named `owner.<ts>`. |
+| D37 | **Purge is an offline command (S4; design D§5.11 described an API op).** `tkr purge` needs the server stopped (instance lock) and the password on a TTY, then in one run appends the ledger intent, scrubs the live DB, checkpoints the WAL (guaranteed offline), scrubs every snapshot and pre-restore/pre-import set via the journaled swap, and marks the intent complete. Reason: purge is a rare emergency tool; running it online required a checkpoint-pending flag, background worker, long request budgets and shutdown accounting that reviews kept finding races in. Online API/web/MCP purge is removed; `destroy` still covers drop/delete/entry edits. |
 
 ### 14.3 Behavior-catalog rulings (catalog §16, A1–A24) as applied
 
@@ -3178,6 +3260,41 @@ Reviews: Fable (3 HIGH), Codex (9 HIGH), agy (3 HIGH); fixes per the lead's ruli
 | R-p | Scrub-then-tombstone could leave secrets in FTS (agy HIGH) | One `UPDATE` per row sets `deleted_at`, `purged_at`, title, notes together (§12.0) |
 | R-q | modernc DSN keys (agy) | The underscore keys are accepted (verified in modernc source and by Fable on v1.60.1 — agy's claim is incorrect); added a connection hook that verifies every pragma (§4.1) |
 | R-r | Remaining MEDIUM/LOW | `defer none` never touches blocks (§3.2); `duePhase` defined (§4.2); `web` may import `datespec`, renders `service.Report` (§1.3, §3.7); key-required fields are `Opt[T]` with `!Set` rejected (§6.5); triage conflict key per `(task, reason)` (§4.6); `slipOnCancel` false for `task_closed` (§4.5); staging DSN only for copies (§4.1); revert scopes resolved before the tx (§4.3); host allowlist from `web.listen` (§6.2); `completed_at = now` when backdated (§3.2); `AIChanges` shape (§3.6); `undo_stack.seq` defined (§4.6); `/clock` any scope (§3.7, §6.4); `tz_last_seen` UPDATE (§4.10, §8.5); design deltas listed (D36); list orderings (§3.7); htmx hash re-verified as 64 hex (agy's 65 was a miscount) with a length+value test (§13.2); `ParseScopes("")` (§2.5); I7 per-task check (§4.7); login CSRF exemption (§6.2, §7.5); full ETags in web forms (§7.5, §11.2); `Today.TriageTop` and `GET /upcoming` (§3.7, §6.4, §6.5); `civil.EndMinute` allows `24:00` in MCP schemas (§2.2, §6.5, §10); bounded `from`/`to` (§3.7, §6.4); `EntryView` (§2.6) |
+
+### 14.5 Review round 2 changes
+
+Round 2: Fable no CRITICAL/HIGH (3 MEDIUM, 4 LOW); agy 3 HIGH; Codex 5 HIGH. C2 pushback and the R-j superset were accepted.
+
+| Ref | Finding (source) | Fix (where) |
+|---|---|---|
+| S4 | Online purge machinery: checkpoint-flag race, purge outliving shutdown, post-commit phases outside the drain (Codex H6/H9, Fable) | Purge is offline only (D37): lock + password; ledger intent → live scrub → guaranteed checkpoint → backup scrub via swap → `complete`. Removed: purge endpoints, `PurgeRequest`/`PurgeResult`, `purge_checkpoint_pending` and its worker, purge budgets and shutdown accounting, web purge (§3.8, §4.9–4.11, §5.2, §6, §7.3, §9.3, §11.2, §12.6) |
+| R2-1 | Reverting an entry op restores derived block state, so the block never re-slips (agy HIGH) | `events.derived`; revert skips derived events and re-derives through normal `setBlock`; tests incl. the second-entry case (§2.7, §4.5, §4.6, §5.2, §13.2) |
+| R2-2 | Ledger replay on historical copies reconciles them to today (agy HIGH, Codex) | `ReplayLedger(historical)`: `opSpec{noReconcile, structuralOnly}`; restore/import keep `live` + reconcile (§4.3, §12.0, §12.7) |
+| R2-3 | `Opt[T]` without `omitzero` breaks partial PATCH and `Idem.Body` (agy HIGH) | `,omitzero` on optional `Opt` fields; `IsZero`/`MarshalJSON`/`UnmarshalJSON` defined; canonicalization test (§6.5) |
+| R2-4 | Eventless undo leaves the stack stuck (Codex HIGH) | Revert/undo/redo with no domain events still finalize state and stack movement and keep the ops row (§4.3 step 14) |
+| R2-5 | Retried committed pop can undo another op; undo replay order (Codex HIGH + MEDIUM, Fable LOW) | Idempotency lookup before target selection/authz; committed pops store their terminal 409 error (`idempotency.error_code`/`error_detail`) (§4.3 steps 1/6/7/17, §4.9, §5.2) |
+| R2-6 | Interrupted staging leaves secret copies outside scrubbing (Codex HIGH) | One staging dir + `.tkr-tmp-` prefix; journal-referenced; `CleanupTemps` at startup and every offline command (§12.0, §8.1) |
+| R2-7 | Batch scrub can overwrite an outstanding journal (Codex) | Stop at the first failure that leaves a journal; next run resumes it first (§12.7) |
+| R2-8 | Ledger corruption handling (Codex, Fable) | Torn (no newline) → truncate; complete bad line anywhere → damaged: replay valid records, banner, refuse new purges, `tkr purge --repair-ledger` (§12.6, §4.10) |
+| R2-9 | Triage payloads lack `seq` (Codex, agy) | `seq` in triage add/remove payloads, restored verbatim (§2.7, §4.6) |
+| R2-10 | Pending requests outlive deduplication (Codex) | `tkr pending retry` refuses requests older than 7 days (§9.6) |
+| R2-11 | `ops.state` wrong after redo of an undone revert (Fable) | State chain walked transitively down `reverts_op_id`; T0/R/U/D test (§4.6 step 7, §13.2) |
+| R2-12 | agy MEDIUMs | `ScrubEntities` filters unscrubbed rows and is a true no-op otherwise; offline backup/scrub replay the ledger on the live DB first; `Redo` pops non-revertible targets/reversals; `worked` hook requires not deleted; `Undelete` clears a future defer; I4 accepts ≥ 1 purged completion entries and `Reopen{RemoveEntry}` sets `reopened=1` (§3.2, §4.5, §4.6, §4.7, §12) |
+| R2-13 | LOWs | ops INSERT carries `via`+`reverts_op_id` together; CLI exit codes for 400/428/413/415; the step-11 re-read is gone (selection is inside the tx); owner token names with ms + random suffix; `ftsQuery` bare `*`; import emptiness on user-data tables only; web `Origin` derived from the host allowlist; read-path `Reconcile` registers in the WaitGroup (§4.3, §5.3, §7.2, §7.5, §9.6, §12.5) |
+
+### 14.6 Review round 3 changes
+
+Round 3: Fable and agy no CRITICAL/HIGH; Codex 3 HIGH (two overlapping Fable/agy MEDIUMs).
+
+| Ref | Finding (source) | Fix (where) |
+|---|---|---|
+| R3-1 | Sequential purges leave secrets in events because scrubbing skipped ops already marked `purged` (Codex HIGH, agy) | Event scrubbing is content-aware per event (payload check), independent of `ops.purged`; regression test (§12.0, §13.2) |
+| R3-2 | Restart can skip the WAL truncation of a committed scrub (Codex HIGH, Fable, agy) | Startup and every offline command checkpoint (TRUNCATE) unconditionally after replay and confirm it; offline snapshots only after; online snapshots are logical copies (§4.10, §12.0, §12.1, §12.6, §12.7) |
+| R3-3 | A pending undo can hit unrelated work after a restore (Codex HIGH) | Every mutation carries `Taskronin-Generation` (web `_gen`); mismatch → 412 `generation_mismatch`; `tkr pending` stores the generation and refuses across a change; `/clock` and `/whoami` return it (§2.8, §3.1, §3.9, §4.3, §6.3, §6.5, §7.5, §9.1, §9.6) |
+| R3-4 | Purged records can become mutable again (Codex, agy) | Undelete/update/relink of purged entities → `conflict`; `Reopen` may still set `reopened=1` on a purged completion entry without touching content (§3.2, §3.4, §3.9) |
+| R3-5 | Import collides with bootstrap history (Codex, Fable, agy) | File ops/events inserted first with their seq/ids; the destination's `token.*`/`auth.*` history re-inserted above the high-water mark, op_ids preserved (§12.5) |
+| R3-6 | Historical scrub never migrates the staged copy (Fable) | `Migrate` the staged copy before `ReplayLedger(historical)`; `schema_v1` fixture test (§12.7) |
+| R3-7 | LOWs/MEDIUMs | Damaged ledger blocks `complete` lines and the CLI points to `--repair-ledger`; committed pops store the full problem as `error_json` (conflicts replay too); a purge re-run skips the redundant ledger append; deleted-task entries are purged via `purge task --with-entries` (hint in the entry error); a `pending` line outliving a rolled-back scrub is harmless; empty-stack codes defined once in §3.9; init stages under `<data>/staging/`; `AcceptNew` rejects empty/duplicate items; `MarkAIReviewed` bound uses `seq < o.rec.Seq` (§3.2, §3.6, §3.9, §4.9, §5.2, §8.5, §12.6, §12.7) |
 
 ---
 
