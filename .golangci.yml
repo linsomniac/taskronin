@@ -1,0 +1,84 @@
+version: "2"
+run:
+  timeout: 5m
+  go: "1.26"
+  tests: true
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - copyloopvar
+    - depguard
+    - durationcheck
+    - errorlint
+    - exhaustive
+    - forbidigo
+    - gocritic
+    - gosec
+    - misspell
+    - nilerr
+    - noctx
+    - nolintlint
+    - revive
+    - rowserrcheck
+    - sqlclosecheck
+    - unconvert
+    - usestdlibvars
+  settings:
+    depguard:
+      rules:
+        main:
+          list-mode: lax
+          deny:
+            - pkg: "math/rand"
+              desc: "use crypto/rand"
+            - pkg: "log$"
+              desc: "use log/slog"
+            - pkg: "github.com/mattn/go-sqlite3"
+              desc: "cgo driver; use modernc.org/sqlite"
+            - pkg: "io/ioutil"
+              desc: "deprecated"
+    exhaustive:
+      default-signifies-exhaustive: true
+    forbidigo:
+      analyze-types: true
+      forbid:
+        - pattern: '^time\.Now$'
+          msg: "inject clock.Clock"
+        - pattern: '^time\.Local$'
+          msg: "use the configured civil.Zone"
+        - pattern: '^os\.Exit$'
+          msg: "return an error; only cmd/tkr/main.go exits"
+        - pattern: '^(fmt\.Print(f|ln)?|print|println)$'
+          msg: "write to an injected io.Writer"
+    gosec:
+      config:
+        G301: "0700"
+        G302: "0600"
+        G306: "0600"
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+  exclusions:
+    generated: lax
+    presets:
+      - std-error-handling
+    rules:
+      - path: internal/clock/
+        linters: [forbidigo]
+        text: "time.Now"
+      - path: cmd/tkr/main.go
+        linters: [forbidigo]
+        text: "os.Exit"
+      # Tests deliberately use loose permissions, fixed temp paths and exec; gosec stays
+      # strict for all non-test code (incl. internal/testutil).
+      - path: '_test\.go'
+        linters: [gosec]
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - taskronin
