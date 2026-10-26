@@ -82,11 +82,11 @@ Makefile derives it with `go list -m`).
 | `internal/fsutil` | `WriteFileAtomic` (temp→fsync→rename→fsync dir), `FsyncDir`, `CheckPrivate` (mode/owner), `EnsureDir0700`, umask. | `atomic.go`, `perms.go` |
 | `internal/lock` | Exclusive `flock` on `<datadir>/taskronin.lock`. | `flock.go` |
 | `internal/config` | XDG paths, server/client TOML schema, defaults, validation, writing. | `paths.go`, `server.go`, `client.go`, `load.go`, `write.go` |
-| `internal/store` | SQLite only: DSNs, open, migrations, typed CRUD/queries returning domain types, FTS, scrub, export rows, sequences. **No business rules, no events.** | `open.go`, `dsn.go`, `migrate.go`, `q.go`, `tasks.go`, `triage.go`, `entries.go`, `blocks.go`, `tags.go`, `focus.go`, `interruptions.go`, `ops.go`, `events.go`, `idem.go`, `undo.go`, `tokens.go`, `sessions.go`, `settings.go`, `fts.go`, `scrub.go`, `export.go`, `sequences.go`, `migrations/0001_init.sql` |
+| `internal/store` | SQLite only: DSNs, open, migrations, typed CRUD/queries returning domain types, FTS, scrub, export file format types + rows (`export.go`, shared by `service.Export` and `offline.Import`), sequences. **No business rules, no events.** | `open.go`, `dsn.go`, `migrate.go`, `q.go`, `tasks.go`, `triage.go`, `entries.go`, `blocks.go`, `tags.go`, `focus.go`, `interruptions.go`, `ops.go`, `events.go`, `idem.go`, `undo.go`, `tokens.go`, `sessions.go`, `settings.go`, `fts.go`, `scrub.go`, `export.go`, `sequences.go`, `migrations/0001_init.sql` |
 | `internal/auth` | Token format/parse/hash, argon2id, `PasswordGate`, session id + CSRF secrets. | `token.go`, `password.go`, `gate.go`, `session.go` |
 | `internal/backup` | File-level procedures: snapshot, verify, rotate, list, inventory, staging, journaled swap, purge ledger. | `snapshot.go`, `verify.go`, `rotate.go`, `inventory.go`, `stage.go`, `swap.go`, `ledger.go` |
 | `internal/service` | **All rules and all authorization.** Op runner, reconcile, derivation/slip/continue, rank, revert/undo/redo, idempotency, invariants, views, report, search, tokens, settings, password, sessions, purge, backup/export orchestration. | `service.go`, `op.go`, `reconcile.go`, `derive.go`, `slip.go`, `rank.go`, `revert.go`, `undo.go`, `idem.go`, `invariants.go`, `effects.go`, `tasks.go`, `place.go`, `blocks.go`, `entries.go`, `focus.go`, `aichanges.go`, `views.go`, `report.go`, `search.go`, `tokens.go`, `settings.go`, `password.go`, `sessions.go`, `purge.go`, `backup.go`, `export.go` |
-| `internal/api` | Wire DTOs (JSON), request types, problem codes, header names, ETag/cursor codecs, domain→wire converters, export file format. | `types.go`, `requests.go`, `problem.go`, `headers.go`, `etag.go`, `cursor.go`, `convert.go`, `export.go` |
+| `internal/api` | Wire DTOs (JSON), request types, problem codes, header names, ETag/cursor codecs, domain→wire converters. | `types.go`, `requests.go`, `problem.go`, `headers.go`, `etag.go`, `cursor.go`, `convert.go` |
 | `internal/systemd` | `LISTEN_FDS`/`LISTEN_FDNAMES` parsing, `sd_notify`, unit templates. | `listen.go`, `notify.go`, `units.go`, `units/*.tmpl` |
 | `internal/server` | Listeners, peer creds, middleware, `/api/v1` adapters (decode → one service call → encode), schedulers, startup/shutdown. | `server.go`, `listeners.go`, `peercred.go`, `middleware.go`, `routes.go`, `decode.go`, `respond.go`, `h_tasks.go`, `h_entries.go`, `h_blocks.go`, `h_ops.go`, `h_admin.go`, `h_views.go`, `schedulers.go`, `lifecycle.go` |
 | `internal/markdown` | goldmark (no raw HTML; images rendered as links) → bluemonday policy. | `render.go` |
@@ -128,9 +128,9 @@ as listed). Anything not listed is forbidden.
 | `web` | `service`, `domain`, `civil`, `datespec`, `auth`, `markdown`, `textsafe`, `clock`, `buildinfo` (reports are rendered from `service.Report` by templates) | — |
 | `systemd` | — | `x/sys/unix` |
 | `server` | `service`, `api`, `auth`, `web`, `store`, `backup`, `config`, `lock`, `fsutil`, `systemd`, `clock`, `civil`, `domain`, `buildinfo` | `x/sys/unix` |
-| `client` | `api`, `domain`, `civil`, `config`, `fsutil` | — |
+| `client` | `api`, `domain`, `civil`, `config`, `fsutil`, `clock` | — |
 | `report` | `api`, `civil`, `textsafe` | — |
-| `editor` | `fsutil`, `config` | — |
+| `editor` | `fsutil`, `config`, `clock` | — |
 | `offline` | `store`, `backup`, `auth`, `config`, `lock`, `fsutil`, `systemd`, `domain`, `civil`, `clock`, `textsafe`, `service` (only to build a temporary `service.Service` over a staged or offline store for `ReplayLedger`, `Reconcile`, `CheckAll` and system ops through `run`, §14 D34) | `x/term` |
 | `tui` | `client`, `api`, `domain`, `civil`, `datespec`, `textsafe`, `editor`, `config` | bubbletea, bubbles, lipgloss |
 | `mcpserver` | `client`, `api`, `domain`, `civil`, `datespec`, `config`, `buildinfo` | go-sdk, jsonschema-go |
@@ -499,6 +499,7 @@ type TaskDetail struct {
 type BlockView struct {
 	TimeBlock
 	TaskTitle    string
+	TaskVersion  Version // the task's version, for reblock's task precondition (R4-7)
 	Current      bool // planned and [start,end) contains now
 	Started      bool // start instant ≤ now
 	Ended        bool // end instant ≤ now
@@ -735,7 +736,7 @@ derived block/triage events from §4.5).
 | `Defer` | `Until *Moment` (nil = clear defer: `defer ID none`, A24) | write | ✓ | ✓ | ✓ | Set: task:update(defer_*); rank never changes; blocks via `closeForDefer` (`cancelled/deferred`, slip if today unstarted & outside grace); focus cleared if focused. `validation` if the defer moment ≤ now, the task is overdue ("change the due date first"), or defer ≥ due (D§5.7). **`nil`**: only clears `defer_*` and places (= `Place{keep}`); never touches blocks or focus. |
 | `MarkManual` | — | write | — | ✓ | ✓ | triage:add `manual`; task:update(defer cleared) if deferred (§14 D4). |
 | `Complete` | `As *string; Date civil.Date (zero=today); LogTitle, LogNotes string` | write | ✓ | ✓ | ✓ | task:update(title if As, status=done, completed_*); entry:insert kind=complete (title = LogTitle else final title); blocks per D§5.6 `done --date`; triage:remove all; focus:set nil if focused. Date ≤ today; `completed_date = Date`, `completed_at = now` even when backdated. From `open` only. |
-| `Reopen` | `RemoveEntry bool` | write; **+destroy** if `RemoveEntry` | — | ✓ | ✓ | task:update(status=open, completed_*=NULL, due_ack=none, due_ack_date=NULL); entry:update(reopened=1) on the task's `complete` entry with `reopened=0` — also when that entry is purged (content untouched, never re-tombstoned) — and with `RemoveEntry` also entry:tombstone unless already tombstoned; triage:add `reopened`. From `done` or `dropped`. With `RemoveEntry` the recompute may re-derive the completion day's block to `missed` → slip + `slipped` reason (kept as specified, A23; the CLI echoes it). |
+| `Reopen` | `RemoveEntry bool` | write; **+destroy** if `RemoveEntry` | — | ✓ | ✓ | task:update(status=open, completed_*=NULL, due_ack=none, due_ack_date=NULL); entry:update(reopened=1) on the task's **non-deleted** `complete` entry with `reopened=0`, or if none exists the newest (`ORDER BY id DESC LIMIT 1`) purged `complete` entry with `reopened=0` (content untouched, never re-tombstoned) — and with `RemoveEntry` also entry:tombstone unless already tombstoned; triage:add `reopened`. From `done` or `dropped`. With `RemoveEntry` the recompute may re-derive the completion day's block to `missed` → slip + `slipped` reason (kept as specified, A23; the CLI echoes it). |
 | `Drop` | — | destroy | ✓ | ✓ | ✓ | task:update(status=dropped); blocks per D§5.6; triage:remove all; focus cleared. From `open` only. |
 | `Delete` | — | destroy | — | ✓ | ✓ | task:tombstone; blocks per D§5.6 (`drop`/`delete`); triage:remove all; focus cleared. |
 | `Undelete` | — | **write** (A18) | — | ✓ | ✓ | Purged task → `conflict` ("purged", R3-4). task:untombstone; if open: triage:add `manual` and clear a future defer (like `MarkManual`, D4); not open: no reason (A3). Blocks stay as they are; focus untouched. |
@@ -1125,6 +1126,9 @@ re-derives instead (R2-1).
    Monday's block back to `missed`, slips it with `slipped_seq` = this op's seq
    and re-adds `slipped` even if the task was placed since; with a second
    Monday entry still present nothing changes and no event is written.
+   Then, for every task whose block this revert restored out of `slipped=1` or out
+   of `status='worked'`, run the §4.5 removal checks (remove `slipped` / `continue`
+   unless another qualifying block remains), so no reason is orphaned (R4-6).
    `checkInvariants`; violation → `conflict` (whole op rolled back).
 7. State chain (R2-11): `target.state = 'reverted'`, `o.rec.RevertsOpID = target.ID`;
    then walk down `reverts_op_id` from the target: each next op's state is the
@@ -1851,6 +1855,7 @@ type Block struct {
 	ID            int64        `json:"id"`
 	TaskID        int64        `json:"task_id"`
 	TaskTitle     string       `json:"task_title"`
+	TaskETag      string       `json:"task_etag"` // send as ReblockRequest.task_etag / web `task_etag`
 	Date          civil.Date   `json:"date"`
 	Start         civil.Minute `json:"start"`
 	End           civil.EndMinute `json:"end"`
@@ -2111,6 +2116,195 @@ type Conflict   struct {
 HTTP status per code is the table in §2.8; `server/respond.go` owns the mapping
 (`func statusFor(domain.Code) int`), and a test asserts every `Code` maps.
 `internal` problems never include `Err` text.
+
+### 6.7 `client` package API and client-side helpers
+
+Used by `cli`, `tui` and `mcpserver`; the only way they reach data (R2, §1.3).
+
+```go
+package client
+
+type Options struct {
+	Socket     string        // unix socket path (config.Client.Socket)
+	TokenFile  string        // checked by New: regular file, owned by the euid, no group/other bits
+	Channel    string        // "cli" | "tui" | "mcp" → X-Taskronin-Channel
+	Timeout    time.Duration // per request; default 20 s (§4.11); long calls use their own budget
+	Pending    *PendingStore // nil disables saving outcome-unknown requests (TUI/MCP pass nil)
+	NewKey     func() string // idempotency key; default 32 hex chars from crypto/rand (tests inject)
+	Clock      clock.Clock
+}
+func New(o Options) (*Client, error) // reads + checks the token; no network I/O
+func NewFromConfig(cfg *config.Client, channel string, pending *PendingStore) (*Client, error)
+
+// Generation is fetched lazily from GET /whoami and cached for the process; every mutation
+// sends it as Taskronin-Generation. A generation_mismatch reply refreshes the cache (the
+// failed mutation is never resent).
+func (c *Client) Generation(ctx context.Context) (string, error)
+func (c *Client) RefreshGeneration(ctx context.Context) (string, error)
+func (c *Client) Actor(ctx context.Context) (string, error) // WhoAmI.Actor, cached with the generation
+
+// Mut carries per-mutation preconditions. Every mutation also sends Authorization,
+// X-Taskronin-Channel, Taskronin-Generation and Content-Type: application/json.
+type Mut struct {
+	IfMatch string // entity ETag "<gen>-<version>"; required where §6.4 says IfM, else ""
+	Key     string // Idempotency-Key; "" → Options.NewKey(); a resend passes the saved key
+}
+
+// Queries
+type PageQuery   struct{ Limit int; Cursor string }
+type TaskQuery   struct{ View, Tag, Project string; PageQuery }
+type EntryQuery  struct{ From, To *civil.Date; Task *int64; Standalone, IncludeDeleted bool; PageQuery }
+type BlockQuery  struct{ From, To *civil.Date; Task *int64 }
+type ReportQuery struct{ From, To civil.Date; Tag, Project string; Todo, Upcoming bool }
+type SearchQuery struct{ Q, Kind string; PageQuery }
+type OpsQuery    struct{ Actor string; SinceSeq int64; PageQuery }
+
+// Reads (GET). Entity ETags come back in the representation's ETag field.
+func (c *Client) Health(ctx context.Context) error
+func (c *Client) Clock(ctx context.Context) (*api.Clock, error)
+func (c *Client) WhoAmI(ctx context.Context) (*api.WhoAmI, error)
+func (c *Client) Today(ctx context.Context, ifNoneMatch string) (t *api.Today, etag string, notModified bool, err error)
+func (c *Client) Status(ctx context.Context, ifNoneMatch string) (s *api.Status, etag string, notModified bool, err error)
+func (c *Client) Day(ctx context.Context, d civil.Date) (*api.Day, error)
+func (c *Client) Upcoming(ctx context.Context) (*api.Upcoming, error)
+func (c *Client) Report(ctx context.Context, q ReportQuery) (*api.Report, error)
+func (c *Client) Search(ctx context.Context, q SearchQuery) (*api.Page[api.SearchHit], error)
+func (c *Client) Tags(ctx context.Context) ([]api.TagCount, error)
+func (c *Client) ListTasks(ctx context.Context, q TaskQuery) (*api.Page[api.Task], error)
+func (c *Client) GetTask(ctx context.Context, id int64) (*api.TaskDetail, error)
+func (c *Client) TaskHistory(ctx context.Context, id int64, p PageQuery) (*api.Page[api.EventView], error)
+func (c *Client) ListEntries(ctx context.Context, q EntryQuery) (*api.Page[api.Entry], error)
+func (c *Client) GetEntry(ctx context.Context, id int64) (*api.Entry, error)
+func (c *Client) ListBlocks(ctx context.Context, q BlockQuery) ([]api.Block, error)
+func (c *Client) GetBlock(ctx context.Context, id int64) (*api.Block, error)
+func (c *Client) ListOps(ctx context.Context, q OpsQuery) (*api.Page[api.OpSummary], error)
+func (c *Client) GetOp(ctx context.Context, opID string) (*api.OpDetail, error)
+func (c *Client) AIChanges(ctx context.Context, all bool, p PageQuery) (*api.AIChanges, error)
+func (c *Client) Settings(ctx context.Context) (*api.Settings, error)
+func (c *Client) Tokens(ctx context.Context) ([]api.TokenInfo, error)
+func (c *Client) Backups(ctx context.Context) (*api.BackupStatus, error)
+func (c *Client) Export(ctx context.Context, w io.Writer) error // streams; 11 min budget
+
+// Mutations (POST/PATCH, idempotency-keyed). All return *api.OpResponse.
+func (c *Client) AddTask(ctx context.Context, m Mut, r api.AddTaskRequest) (*api.OpResponse, error)
+func (c *Client) UpdateTask(ctx context.Context, m Mut, id int64, r api.UpdateTaskRequest) (*api.OpResponse, error) // PATCH
+func (c *Client) SetDue(ctx context.Context, m Mut, id int64, r api.DueRequest) (*api.OpResponse, error)
+func (c *Client) PlaceTask(ctx context.Context, m Mut, id int64, r api.PlaceRequest) (*api.OpResponse, error)
+func (c *Client) DeferTask(ctx context.Context, m Mut, id int64, r api.DeferRequest) (*api.OpResponse, error)
+func (c *Client) BlockTask(ctx context.Context, m Mut, id int64, r api.BlockRequest) (*api.OpResponse, error)
+func (c *Client) MarkManual(ctx context.Context, m Mut, id int64) (*api.OpResponse, error)        // POST …/triage
+func (c *Client) CompleteTask(ctx context.Context, m Mut, id int64, r api.CompleteRequest) (*api.OpResponse, error)
+func (c *Client) ReopenTask(ctx context.Context, m Mut, id int64, r api.ReopenRequest) (*api.OpResponse, error)
+func (c *Client) DropTask(ctx context.Context, m Mut, id int64) (*api.OpResponse, error)
+func (c *Client) DeleteTask(ctx context.Context, m Mut, id int64) (*api.OpResponse, error)
+func (c *Client) UndeleteTask(ctx context.Context, m Mut, id int64) (*api.OpResponse, error)
+func (c *Client) AcceptNew(ctx context.Context, m Mut, r api.AcceptNewRequest) (*api.OpResponse, error) // per-item etags; m.IfMatch unused
+func (c *Client) AddEntry(ctx context.Context, m Mut, r api.AddEntryRequest) (*api.OpResponse, error)
+func (c *Client) UpdateEntry(ctx context.Context, m Mut, id int64, r api.UpdateEntryRequest) (*api.OpResponse, error) // PATCH
+func (c *Client) RelinkEntry(ctx context.Context, m Mut, id int64, r api.RelinkRequest) (*api.OpResponse, error)
+func (c *Client) DeleteEntry(ctx context.Context, m Mut, id int64) (*api.OpResponse, error)
+func (c *Client) UndeleteEntry(ctx context.Context, m Mut, id int64) (*api.OpResponse, error)
+func (c *Client) Reblock(ctx context.Context, m Mut, blockID int64, r api.ReblockRequest) (*api.OpResponse, error)
+func (c *Client) Unblock(ctx context.Context, m Mut, blockID int64) (*api.OpResponse, error)
+func (c *Client) SetOutcome(ctx context.Context, m Mut, blockID int64, r api.OutcomeRequest) (*api.OpResponse, error)
+func (c *Client) SetFocus(ctx context.Context, m Mut, r api.FocusRequest) (*api.OpResponse, error)
+func (c *Client) Revert(ctx context.Context, m Mut, opID string) (*api.OpResponse, error)
+func (c *Client) Undo(ctx context.Context, m Mut) (*api.OpResponse, error)
+func (c *Client) Redo(ctx context.Context, m Mut) (*api.OpResponse, error)
+func (c *Client) ReviewAIChanges(ctx context.Context, m Mut, r api.ReviewRequest) (*api.OpResponse, error)
+func (c *Client) RevokeToken(ctx context.Context, m Mut, id int64) (*api.TokenInfo, error)
+// Idempotency-exempt (no key; never saved as pending; still send Taskronin-Generation):
+func (c *Client) UpdateSettings(ctx context.Context, r api.SettingsRequest) (*api.Settings, error)
+func (c *Client) CreateToken(ctx context.Context, r api.CreateTokenRequest) (*api.TokenCreated, error)
+func (c *Client) ChangePassword(ctx context.Context, r api.PasswordRequest) error
+func (c *Client) RunBackup(ctx context.Context) (*api.Snapshot, error) // 11 min budget
+
+// Errors
+type ProblemError struct{ Status int; Problem api.Problem } // any non-2xx with problem+json
+func (e *ProblemError) Error() string
+func (e *ProblemError) Code() domain.Code
+func (e *ProblemError) Is(target error) bool // matches ErrGenerationMismatch for code generation_mismatch
+var (
+	ErrNotSent            = errors.New("request not sent")             // dial failed / no byte written: safe to re-run
+	ErrOutcomeUnknown     = errors.New("request outcome unknown")      // written, no complete response after retries
+	ErrGenerationMismatch = errors.New("database generation changed")  // restored since the generation was read
+	ErrTokenFile          = errors.New("token file unusable")          // missing, wrong owner or mode
+	ErrPendingExpired     = errors.New("pending request older than 7 days")
+	ErrActorMismatch      = errors.New("pending request belongs to another actor")
+)
+type OutcomeUnknownError struct{ Key string; Saved bool; Err error } // errors.Is(err, ErrOutcomeUnknown); Saved = written to Pending
+func IsCode(err error, code domain.Code) bool
+
+// Pending requests (§9.6)
+type PendingRequest struct {
+	Key, Method, Path, IfMatch, Generation string
+	Actor     string // WhoAmI.Actor at save time ("owner" | "token:<name>") (R4-2)
+	Body      json.RawMessage
+	CreatedAt time.Time
+	LastError     string    // problem code + detail of the last unsuccessful resend (M1); "" if none
+	LastAttemptAt time.Time
+}
+type PendingStore struct{ Dir string; Clock clock.Clock } // <state>/pending, 0700; files 0600 via fsutil.WriteFileAtomic
+func (s *PendingStore) Save(p PendingRequest) error
+func (s *PendingStore) List() ([]PendingRequest, error)
+func (s *PendingStore) MarkFailed(key, lastError string) error // keeps the file, records the error
+func (s *PendingStore) Discard(key string) error              // explicit user discard, or after success
+func (c *Client) Resend(ctx context.Context, p PendingRequest) (*api.OpResponse, error)
+	// refuses with ErrPendingExpired (> 7 d), ErrGenerationMismatch (saved ≠ current generation)
+	// or ErrActorMismatch (saved Actor ≠ the current token's WhoAmI.Actor);
+	// only a success (incl. an idempotent replay of a success) lets the caller Discard the file;
+	// an unsuccessful definitive answer → MarkFailed (the body is kept until `tkr pending discard`)
+```
+
+Behaviour: retries per §9.6 (transport errors ×2, `503` once, same key); a
+mutation that ends as outcome-unknown is saved to `Pending` (if set and not
+password-bearing) and returned as `*OutcomeUnknownError`; `412` returns
+`*ProblemError` with `Problem.Current` holding the current representation; the
+client never re-sends a stale edit by itself.
+
+Client-side helpers:
+
+```go
+package textsafe
+func ValidateTitle(s string) (string, error)   // strip BOM, trim, UTF-8, no C0/C1/newline/bidi/U+2028-9, 1..500 runes
+func ValidateNotes(s string) (string, error)   // CRLF→LF, ≤ 65536 bytes, C0 only \n \t, no C1/bidi/U+2028-9
+func ValidateName(s string, max int) error     // tags, projects, token names: [A-Za-z0-9._-]{1,max}
+func Sanitize(s string) string                  // terminal/log: non-printable → U+FFFD (keeps \n, \t, ZWJ/ZWNJ)
+func SanitizeLine(s string) string              // Sanitize + \n, \t → U+FFFD
+func Width(s string) int                        // display width (x/ansi)
+func Truncate(s string, width int, tail string) string
+
+package editor
+func Command(configured string, getenv func(string) string) ([]string, error) // config editor, $VISUAL, $EDITOR, "vi"; SplitWords
+func SplitWords(s string) ([]string, error)    // '…', "…" (\ escapes \ " $ `), \ outside quotes; unbalanced → error; no expansion, never a shell
+type Drafts struct{ Dir string; Clock clock.Clock } // <state>/drafts, 0700
+type Draft struct{ Path string }
+func (d Drafts) New(initial string) (*Draft, error) // <ts>-<rand>.md, 0600, written before the editor opens
+func Edit(ctx context.Context, argv []string, d *Draft, stdin io.Reader, stdout, stderr io.Writer) (string, error)
+func (d *Draft) Discard() error                   // only after the server confirmed
+
+package config
+type Paths struct {
+	ConfigDir, DataDir, StateDir, RuntimeDir string
+	ServerConfig, ClientConfig, Socket, OwnerToken, TokensDir string
+	DraftsDir, PendingDir, StagingDir, BackupDir, LedgerFile, DB string
+}
+func DefaultPaths(getenv func(string) string, home string) (Paths, error) // XDG rules of §8.1
+type Server struct{ /* §8.2 */ }
+type Client struct {
+	Socket, TokenFile      string
+	Timeout, StatusTimeout time.Duration
+	Editor, Color          string
+	MCP                    struct{ TokenFile string }
+}
+func LoadServer(path string) (*Server, error)            // strict (unknown keys → error) + ValidateServer
+func LoadClient(path string, p Paths) (*Client, error)   // missing file → defaults from p; + ValidateClient
+func ValidateServer(s *Server) error
+func ValidateClient(c *Client) error
+func WriteServer(path string, s *Server) error           // 0600, fsutil.WriteFileAtomic
+func WriteClient(path string, c *Client) error
+```
+(`datespec` signatures are in §9.2.)
 
 ---
 
@@ -2463,9 +2657,9 @@ func ParseClock(s string, allow2400 bool) (civil.Minute, error)
 | `tkr delete ID` / `tkr undelete ID` | `-y` | `POST …/delete` / `…/undelete` | |
 | `tkr undo` / `tkr redo` | — | `POST /undo` / `/redo` | Prints the reverted op's effects. |
 | `tkr revert OPID` | — | `POST /ops/{op}/revert` | |
-| `tkr purge task\|entry ID` / `tkr purge --repair-ledger` | `--with-entries`, `-y` | `offline.Purge` | **Offline** (S4, §12.6): needs the server stopped; password prompt (TTY only). Scrubs the live DB and every backup set; prints scrubbed IDs, linked entries left alone, per-set results, and that earlier exports/log lines are out of reach (D§5.11). |
-| `tkr scrub-backups` | `--check`, `--resume`, `-y` | `offline.ScrubBackups` | Offline (S1, §12.7): the standalone/resumable form of purge step 7; password prompt on a TTY. |
-| `tkr pending` / `tkr pending retry [KEY]` / `tkr pending drop KEY` | — | resends saved requests with their original idempotency key | §9.6 |
+| `tkr purge task\|entry ID` / `tkr purge --repair-ledger` | `--with-entries`, `--keep-recovery-files`, `-y` | `offline.Purge` | **Offline** (S4, §12.6): needs the server stopped; password prompt (TTY only). Scrubs the live DB and every backup set, then (unless `--keep-recovery-files`) deletes this host's pending requests and drafts after confirmation; prints scrubbed IDs, linked entries left alone, per-set results, and that earlier exports/log lines are out of reach (D§5.11). |
+| `tkr scrub-backups` | `--check`, `--resume`, `--keep-recovery-files`, `-y` | `offline.ScrubBackups` | Offline (S1, §12.7): the standalone/resumable form of purge steps 7–9; password prompt on a TTY. |
+| `tkr pending` / `tkr pending retry [KEY]` / `tkr pending discard KEY` | — | lists (with last error) / resends with the original idempotency key / deletes a saved request | §9.6 |
 | `tkr plan` | — | TUI Plan mode | |
 | `tkr recap` | `--date D` | TUI Recap mode | |
 | `tkr triage` | `-i`, `--manual ID`, `--accept-new` | `GET /tasks?view=triage`; `-i` → TUI; `POST …/triage`; `POST /triage/accept-new` | |
@@ -2579,15 +2773,19 @@ without ID/`-N` → usage error. The API request always carries explicit `task_i
   request byte was written) → the message above ("nothing was saved", exit 3).
   **Outcome unknown** (`client.ErrOutcomeUnknown`: written, no complete
   response, after retries) → the CLI saves `<state>/pending/<key>.json` (0600:
-  method, path, If-Match, generation, body, created_at) and prints "outcome unknown — saved
+  method, path, If-Match, generation, actor, body, created_at) and prints "outcome unknown — saved
   as pending request <key>; run `tkr pending retry`" (exit 3). `tkr pending retry`
-  resends with the same key and deletes the file on any definitive answer.
+  resends with the same key; only a success (or an idempotent replay of a
+  success) deletes the file. An unsuccessful definitive answer (any 4xx/5xx
+  problem) keeps the file and records the error in it (`last_error`); the user
+  removes it explicitly with `tkr pending discard KEY` (M1).
   Password-bearing requests are never saved. A pending request older than the
   7-day idempotency window is never resent automatically: `tkr pending retry`
   refuses it and tells the user to check the outcome manually (`tkr show`,
-  `tkr entries`) and then `tkr pending drop` it (R2-10). It likewise refuses a
+  `tkr entries`) and then `tkr pending discard` it (R2-10). It likewise refuses a
   request whose saved generation differs from the server's current one (the DB
-  was restored since; R3-3).
+  was restored since; R3-3), or whose saved actor differs from the token now in
+  use (R4-2).
 - Drafts (`editor.Draft`): `-e`/`edit` write `<state>/drafts/<ts>-<rand>.md`
   (0600) before the editor opens; deleted only after the server confirms;
   otherwise the path is printed.
@@ -2768,7 +2966,8 @@ drag-and-drop. Markdown notes via `markdown.Render` (D§10.4).
   	OwnerTokenPending bool   // restore only: a new owner token was minted (secret never journaled)
   	StartedAt         time.Time
   }
-  func Swap(ctx context.Context, journalPath string, j *SwapJournal) error // idempotent per step
+  func Swap(ctx context.Context, journalPath string, j *SwapJournal, onInstalled func() error) error
+  	// idempotent per step; onInstalled (may be nil) runs after "installed", before the journal is removed
   func ResumeSwap(ctx context.Context, journalPath string) error
   func RollbackSwap(ctx context.Context, journalPath string) error           // restore/import only, before "aside-deleted"
   ```
@@ -2833,23 +3032,23 @@ type InventoryItem struct { Path string; Status string /* contains | clean */; E
 5. `settings`: `last_backup_at`, `last_backup_attempt_at`, `last_backup_error=''` (no events).
 6. Rotate (only after success): keep the newest snapshot per day for the last `Daily` days, newest per ISO week for the last `Weekly` weeks, everything < 24 h old, and the newest 3 overall; delete only files matching the name pattern. Never touches `*.pre-restore-*`/`*.pre-import-*`.
 On failure: delete the temp, set `last_backup_error`, keep older snapshots; banner (D§7.3).
-`offline.Backup` (server down): lock → `CleanupTemps` → `ReapplyLedger` (live) + confirmed checkpoint → the same steps with an offline writer.
+`offline.Backup` (server down): lock → refuse if any swap journal exists (R4-8) → `CleanupTemps` → `ReapplyLedger` (live) + confirmed checkpoint → the same steps with an offline writer.
 
 ### 12.2 Restore (`offline/restore.go`)
 
 0. Acquire the lock (server stopped; the message names both units); refuse if a swap journal exists; `CleanupTemps`; confirm (`-y`).
-1. `Verify(snapshot)`; `schema ≤ binary`.
-2. `Stage` the snapshot; `Migrate` the staged copy to the binary schema.
+1. `Stage` the snapshot file set (the original is only read, never opened read-write, R4-5).
+2. `Verify` the staged copy; `schema ≤ binary`; `Migrate` it to the binary schema.
 3. Open the current DB if possible (`mode=rw`, `quick_check`): read `auth_state`, `api_tokens`, sequences.
 4. In the staged copy: replace `auth_state` and `api_tokens` with the current ones; `RaiseSequences(max)`; new `db_generation`; `DELETE FROM web_sessions`; `DELETE FROM idempotency`; record a `system.restore` op + content-free event.
    Current DB unreadable: revoke every token, mint a new owner token, set `web_login_disabled=1`, sequences = max over snapshot and all readable snapshots + 10 000; print a loud notice.
 5. Over the staged store (a temporary `service.Service`): `ReplayLedger(live)` → `Reconcile` (real clock) → `CheckAll`; `integrity_check`; FTS integrity-check; close; assert no sidecars; fsync.
-6. `Swap{Kind: restore, Aside: <live>.pre-restore-<ts>/}`; after `installed`, write `owner.token` if minted.
+6. `Swap(ctx, <data>/swap.journal, &SwapJournal{Kind: restore, Aside: <live>.pre-restore-<ts>/}, onInstalled)` where `onInstalled` writes `owner.token` if one was minted — it runs after `installed` and **before** the journal is removed (R4-10).
 - `tkr restore --resume` / `--rollback` drive `ResumeSwap`/`RollbackSwap` on `<data>/swap.journal` (also for an interrupted import). If `OwnerTokenPending` and the token file was not written, `--resume` tells the user to run `tkr passwd --reset`.
 
 ### 12.3 Migrate (`offline/migrate.go`)
 
-Lock → `CleanupTemps` → open (`mode=rw`) → `SchemaStatus` (`--status` prints and
+Lock → refuse if any swap journal exists (R4-8) → `CleanupTemps` → open (`mode=rw`) → `SchemaStatus` (`--status` prints and
 exits) → pre-migrate snapshot (§12.1) → `Migrate`. `serve` does the same at
 startup (§4.10).
 
@@ -2873,11 +3072,12 @@ settings. The client writes `-o` via temp + fsync + rename, mode 0600.
 
 1. Lock; `CleanupTemps`; no swap journal; the live DB must exist (`tkr init`) and hold no user data — no rows in `tasks`, `log_entries`, `time_blocks`, `tags`, `interruptions` (ops/events from `init --mcp-token` or `passwd --reset` are fine).
 2. Parse the header: `format`, `version ≤ 1`, `schema_version ≤ binary`.
-3. Create a staged DB under `<data>/staging/` (staging DSN `mode=rwc`); `Migrate`; copy `auth_state`, `api_tokens` and `db_generation` from the live DB.
+3. Create a staged DB under `<data>/staging/` (staging DSN `mode=rwc`); `Migrate`; copy `auth_state` and `api_tokens` from the live DB; **mint a new `db_generation`** (like restore, R4-3).
 4. One transaction on the staged DB (R3-5 ordering):
    a. insert the file's rows in dependency order (`ops`, `tasks`, `tags`, `task_tags`, `task_triage`, `log_entries`, `time_blocks`, `interruptions`, `focus` (update id 1), `events`, `undo_stack`), **preserving** their `ops.seq`, `events.id` and every `*_seq` reference; only known columns (unknown → error); titles/notes re-validated with `textsafe`; triggers maintain FTS; settings allowlist;
-   b. re-insert the live DB's bootstrap history (`token.*`/`auth.*` ops and their events, e.g. from `init --mcp-token` or `passwd --reset`) with **fresh** `seq`/`id` above the file's high-water marks, preserving their `op_id`s (`undo_stack` and `events` reference `op_id`);
-   c. `RaiseSequences(max(file, live))`; `system.import` op with a content-free event (row counts).
+   b. `RaiseSequences(max(file, live))` (R4-10);
+   c. re-insert the live DB's bootstrap history (`token.*`/`auth.*` ops and their events, e.g. from `init --mcp-token` or `passwd --reset`) with **fresh** `seq`/`id` allocated by AUTOINCREMENT above the raised marks, preserving their `op_id`s (`undo_stack` and `events` reference `op_id`). An op whose `op_id` is already in the file is skipped after checking it is identical (kind, actor, channel, at, scopes, and its events); a difference → error (R4-4);
+   d. `system.import` op with a content-free event (row counts).
 5. Over the staged store: `ReplayLedger(live)` → `Reconcile` → `CheckAll`; `integrity_check`, `foreign_key_check`, FTS integrity-check; close; fsync.
 6. `Swap{Kind: import, Aside: <live>.pre-import-<ts>/}`.
 Any failure before step 6 leaves the live DB untouched; `CleanupTemps` removes the staging copy, so the import can simply be retried.
@@ -2892,6 +3092,7 @@ type LedgerRecord struct {
 	State   string           `json:"state"` // "pending" | "complete"
 	Tasks   []domain.TaskID  `json:"tasks,omitempty"`
 	Entries []domain.EntryID `json:"entries,omitempty"`
+	RecoveryFiles string     `json:"recovery_files,omitempty"` // complete lines only: "deleted" | "kept" (--keep-recovery-files) | "none" (H1)
 	Sum     string           `json:"sum"`   // hex SHA-256 of this record's JSON encoding with Sum = ""
 }
 type LedgerHealth struct { Damaged bool; DroppedLines []int }
@@ -2914,27 +3115,30 @@ func (l *Ledger) Repair() ([]int, error)          // rewrite from valid records 
 5. `service.PurgeLive(ctx, m, in)` through `run` (actor `owner`, channel `cli`, op `purge.task`/`purge.entry`, not revertible, no idempotency), one writer transaction: validate the target (exists, tombstoned — else `conflict` "delete it first"; for a live entry of a deleted task the message says to use `tkr purge task <id> --with-entries`, which is how a deleted task's entries, incl. its completion entry, are purged); select the exact set (task + its `complete` entries + with `--with-entries` all linked entries; or the entry; report linked entries left out); **`Append` the `pending` record (fsync) while holding the writer** — skipped when an existing record already covers exactly this set and every row in it is already purged (a re-run); `ScrubEntities`; content-free `purge` events; commit. A failure after the append is completed by `ReplayLedger` (immediately, or by the next startup/offline command after a crash). A `pending` line can therefore outlive a rolled-back scrub; that is harmless — the next replay performs the scrub it describes.
 6. `PRAGMA wal_checkpoint(TRUNCATE)`, confirmed — no other connection exists, so it truncates; otherwise fail loudly (the record stays `pending`; every later start or offline command checkpoints unconditionally, R3-2).
 7. Scrub every snapshot and `*.pre-restore-*`/`*.pre-import-*` set exactly as `tkr scrub-backups` (§12.7, steps 4–6).
-8. If step 7 finished every set, `Append` the `complete` record; otherwise leave it `pending` and tell the user to run `tkr scrub-backups` (which completes it).
-9. Print: scrubbed IDs, linked entries left alone, per-set results, and that earlier exports and log lines are out of reach.
+8. **Client recovery files (R4-1, H1)** — `offline.CleanRecoveryFiles(ctx, paths, keep, assumeYes, prompt) (mode string, err error)`, shared with §12.7: with `--keep-recovery-files` → mode `kept`; no files → `none`; otherwise list this host's `<state>/pending/` and `<state>/drafts/` files (request bodies and editor drafts may hold the purged text), show the counts, and delete them on confirmation (default yes; `-y` skips the prompt) → `deleted`. Answering "no" returns no mode: the records stay `pending` and the CLI says to re-run with `--keep-recovery-files` to complete without deleting. Purge itself never creates pending or draft files; recovery files on other hosts are out of reach (v1 is single-host).
+9. **Completion** — only if step 7 left every set clean or rewritten, step 8 returned a mode, and the ledger is not damaged: `Append` `complete` lines for **all** still-`pending` records, each carrying `recovery_files = mode` (the durable record of the cleanup or opt-out). Otherwise leave them `pending` and tell the user to run `tkr scrub-backups`.
+10. Print: scrubbed IDs, linked entries left alone, per-set results, and that earlier exports and log lines are out of reach.
 - Re-running on an already-purged item changes nothing and appends no new record if one already covers the set.
 - `tkr purge --repair-ledger` (lock + password): `Repair()`, prints the dropped lines, then `ReplayLedger(live)` + checkpoint.
-- `ReapplyLedger(ctx)` = `ReplayLedger(live)` over all valid records; it never writes `complete` lines (only purge step 8 and scrub-backups step 7 do). Runs at server startup (then checkpoint before listeners) and in every staged copy. While a record is `pending` the dashboard shows a `purge_incomplete` banner; a damaged ledger shows `purge_ledger_damaged`.
+- `ReapplyLedger(ctx)` = `ReplayLedger(live)` over all valid records; it never writes `complete` lines (only purge step 9 and scrub-backups step 7 do, after the recovery-file step). Runs at server startup (then checkpoint before listeners) and in every staged copy. While a record is `pending` the dashboard shows a `purge_incomplete` banner; a damaged ledger shows `purge_ledger_damaged`.
 
 ### 12.7 Scrub backups — offline (`offline/scrub.go`)
 
-`tkr scrub-backups [--check] [--resume] [-y]` — the standalone and resumable form of purge step 7:
-1. Acquire the instance lock (server stopped). With an existing `<backupdir>/scrub.journal`: `ResumeSwap` it first (always, `--resume` just makes it explicit). `CleanupTemps`.
-2. Prompt for the password (TTY only) and verify as in §12.6.
+`tkr scrub-backups [--check] [--resume] [--keep-recovery-files] [-y]` — the standalone and resumable form of purge steps 7–9:
+1. Acquire the instance lock (server stopped); refuse if `<data>/swap.journal` exists (R4-8).
+2. Prompt for the password (TTY only) and verify as in §12.6 — before touching any file.
+   Then, with an existing `<backupdir>/scrub.journal`, `ResumeSwap` it first (always;
+   `--resume` just makes it explicit); then `CleanupTemps`.
 3. `OpenLedger` (a damaged ledger is allowed here: valid records are still applied, but `complete` lines cannot be appended while it is damaged — step 7 then tells the user to run `tkr purge --repair-ledger`); load records.
 4. On the live DB: `ReplayLedger(live)` + confirmed checkpoint (R2-12, R3-2). Unless `--check`: take a fresh verified snapshot (kind `prescrub`).
 5. For each other snapshot and each `*.pre-restore-*`/`*.pre-import-*` set: `Stage` it → `Migrate` the staged copy to the binary's schema (an old-schema snapshot must replay with current columns, R3-6) → `ReplayLedger(historical)` → nothing changed: `clean`, discard → `--check`: report `contains`, discard → else `CheckStructural`, `integrity_check`, FTS check → `VACUUM INTO` a `.tkr-tmp-` file next to the target → `Verify` → `Swap{Kind: scrub, Aside: <.tkr-tmp- quarantine dir>, DeleteAside: true}`.
 6. Stop at the first failure that leaves a journal (the next run resumes that swap first, R2-7); failures without a journal are reported and the batch continues. Snapshots are never deleted, only rewritten.
-7. If every set is clean or rewritten and the ledger is not damaged, `Append` `complete` lines for all `pending` records; print per-set results.
+7. If every set is clean or rewritten, the ledger is not damaged and `pending` records exist (including after `--resume`): run `offline.CleanRecoveryFiles` exactly as purge step 8 (same flags, confirmation and opt-out); only when it returns a mode, `Append` `complete` lines carrying `recovery_files = mode`. Print per-set results.
 
 ### 12.8 Offline password reset (`offline/passwd.go`)
 
 `tkr passwd --reset [--password-stdin]`:
-1. Acquire the lock (server stopped); `CleanupTemps`; open the live DB (`mode=rw`).
+1. Acquire the lock (server stopped); refuse if any swap journal exists (R4-8); `CleanupTemps`; open the live DB (`mode=rw`).
 2. Read the new password (twice on a TTY); `ValidateNewPassword`; mint a new owner token secret in memory.
 3. One transaction through `run` as a system op (`auth.password`, actor `system`, channel `system`, not revertible): update `auth_state` (hash, `password_changed_at`, `web_login_disabled = 0`); revoke every token (`revoked_at = now`, `token:revoke` events); delete all web sessions; insert the new owner token row (`token:insert`); `auth:update` event (content-free).
 4. Write `owner.token` with `fsutil.WriteFileAtomic` (temp, fsync, rename, fsync dir).
@@ -3295,6 +3499,38 @@ Round 3: Fable and agy no CRITICAL/HIGH; Codex 3 HIGH (two overlapping Fable/agy
 | R3-5 | Import collides with bootstrap history (Codex, Fable, agy) | File ops/events inserted first with their seq/ids; the destination's `token.*`/`auth.*` history re-inserted above the high-water mark, op_ids preserved (§12.5) |
 | R3-6 | Historical scrub never migrates the staged copy (Fable) | `Migrate` the staged copy before `ReplayLedger(historical)`; `schema_v1` fixture test (§12.7) |
 | R3-7 | LOWs/MEDIUMs | Damaged ledger blocks `complete` lines and the CLI points to `--repair-ledger`; committed pops store the full problem as `error_json` (conflicts replay too); a purge re-run skips the redundant ledger append; deleted-task entries are purged via `purge task --with-entries` (hint in the entry error); a `pending` line outliving a rolled-back scrub is harmless; empty-stack codes defined once in §3.9; init stages under `<data>/staging/`; `AcceptNew` rejects empty/duplicate items; `MarkAIReviewed` bound uses `seq < o.rec.Seq` (§3.2, §3.6, §3.9, §4.9, §5.2, §8.5, §12.6, §12.7) |
+
+### 14.7 Post-review additions
+
+| Ref | Gap (source) | Addition (where) |
+|---|---|---|
+| P-1 | `client` methods and client-side helper signatures were undefined (TUI planner) | §6.7: `Client` options/constructor, generation caching, `Mut` (If-Match + key), one method per §6.4 endpoint (incl. `Today`/`Status` with If-None-Match), `ProblemError`/`ErrNotSent`/`ErrOutcomeUnknown`/`ErrGenerationMismatch`, `PendingStore`/`Resend`; `textsafe`, `editor`, `config` signatures; `client` and `editor` may import `clock` (§1.3) |
+
+### 14.8 Review round 4 changes
+
+Round 4: agy no CRITICAL/HIGH; Codex 1 HIGH. Every changed signature, field and procedure, for patching plans:
+
+| Ref | Change | Where |
+|---|---|---|
+| R4-1 | **Procedure:** `tkr purge` gains step 8a — list this host's `<state>/pending/` and `<state>/drafts/` files, show counts, delete on confirmation (default yes). **New flag** `tkr purge --keep-recovery-files`. Purge never writes pending/draft files. | §12.6, §9.3 |
+| R4-2 | **Field** `client.PendingRequest.Actor string` (WhoAmI.Actor at save time). **New method** `(*Client).Actor(ctx) (string, error)` (cached with the generation). **New error** `client.ErrActorMismatch`; `Resend` refuses a different actor. Pending file JSON gains `actor`. | §6.7, §9.6 |
+| R4-3 | **Procedure:** import mints a new `db_generation` (no longer copied from the live DB). | §12.5 step 3 |
+| R4-4 | **Procedure:** import step 4c skips a bootstrap op whose `op_id` is already in the file after an equality check (kind, actor, channel, at, scopes, events); mismatch → error. | §12.5 |
+| R4-5 | **Procedure:** restore stages the snapshot file set first, then verifies/migrates the staged copy; the original is never opened read-write. | §12.2 steps 1–2 |
+| R4-6 | **Procedure:** `revertTx` step 6 runs the slipped/continue removal checks for tasks whose restored block left `slipped=1` or `status='worked'`. | §4.6 |
+| R4-7 | **Fields** `domain.BlockView.TaskVersion Version`; `api.Block.TaskETag string` (`json:"task_etag"`). | §2.6, §6.5 |
+| R4-8 | **Procedure:** `migrate`, `passwd --reset`, offline `backup` refuse when any swap journal exists; `scrub-backups` refuses on `<data>/swap.journal`, verifies the password **before** `ResumeSwap`/`CleanupTemps`. | §12.1, §12.3, §12.7, §12.8 |
+| R4-9 | **Rule:** `Reopen` updates the non-deleted `complete` entry with `reopened=0`, else the newest purged one (`ORDER BY id DESC LIMIT 1`). | §3.2 |
+| R4-10 | **Signature** `backup.Swap(ctx, journalPath, j, onInstalled func() error) error` (import/scrub pass `nil`; restore writes `owner.token` in `onInstalled`, before the journal is removed). **Move:** export file format types from `internal/api/export.go` to `internal/store/export.go` (`api` no longer has `export.go`). **Procedure:** import calls `RaiseSequences` between inserting the file rows (4a) and the bootstrap history (now 4c, AUTOINCREMENT allocates); purge step 8 appends `complete` for all still-pending records when every set is clean (same rule as scrub-backups). | §12.0, §12.2, §12.5, §12.6, §1.2 |
+
+### 14.9 Review round 5 changes
+
+Final round: agy no CRITICAL/HIGH; Codex 1 HIGH + 1 MEDIUM.
+
+| Ref | Change | Where |
+|---|---|---|
+| H1 | **Procedure:** recovery-file cleanup (or the explicit `--keep-recovery-files` opt-out) is a prerequisite for any `complete` ledger line. Purge steps reordered: 8 = recovery files, 9 = completion, 10 = print. `scrub-backups` (incl. `--resume`) runs the same step before completing. **New helper** `offline.CleanRecoveryFiles(ctx, paths, keep, assumeYes, prompt) (mode string, err error)`. **New field** `backup.LedgerRecord.RecoveryFiles` (`json:"recovery_files,omitempty"`: `deleted`/`kept`/`none`) on complete lines. **New flag** `tkr scrub-backups --keep-recovery-files`. Declining the prompt leaves records pending. | §12.6, §12.7, §9.3 |
+| M1 | **Procedure:** a pending request is deleted only after a success (or an idempotent replay of one); an unsuccessful definitive answer keeps it and records `last_error`. **Fields** `client.PendingRequest.LastError string`, `LastAttemptAt time.Time`. **Methods** `PendingStore.MarkFailed(key, lastError)`; `PendingStore.Drop` renamed `Discard`. **Command** `tkr pending drop` renamed `tkr pending discard KEY`. | §6.7, §9.3, §9.6 |
 
 ---
 
