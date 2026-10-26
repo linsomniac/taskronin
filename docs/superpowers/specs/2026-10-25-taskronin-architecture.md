@@ -720,7 +720,10 @@ Every method first checks `a.Scopes.Has(required)` (403 `forbidden`) before touc
 Column legend for the tables below — **Scope**: required scopes. **Pl**: placement
 (D§5.5; `o.place`, §4.5: deletes all reason rows, sets `last_placed_at`/`last_placed_seq`,
 `due_ack = duePhase`, `due_ack_date = today`, and suppresses `slipped`/`continue`
-additions for that task within the op). **IfM**: `Expect` required (412 on mismatch).
+additions for that task within the op). **Every placement clears a pending defer**
+(`defer_date`/`defer_min` → NULL) — `Place`, `AcceptNew`, `Block`, `Reblock`,
+`Complete`, `Drop`, `Defer(nil)`, `AddTask` with a placement — except `Defer` with a
+moment, which sets one (P-3). **IfM**: `Expect` required (412 on mismatch).
 **Idem**: `Meta.Idem` required. **Events**: entity:action written (besides
 derived block/triage events from §4.5).
 
@@ -1129,6 +1132,12 @@ re-derives instead (R2-1).
    Then, for every task whose block this revert restored out of `slipped=1` or out
    of `status='worked'`, run the §4.5 removal checks (remove `slipped` / `continue`
    unless another qualifying block remains), so no reason is orphaned (R4-6).
+   Conversely, when reversing the target's events removes a `slipped`/`continue`
+   reason that the target added, re-evaluate it from the post-revert state and
+   keep (re-add) it if another block still justifies it — `slipped`: a block with
+   `slipped=1 AND slipped_seq > COALESCE(last_placed_seq, 0)`; `continue`: per the
+   continue rule of §4.5 (task open, a block `worked` with `resolved_seq >
+   COALESCE(last_placed_seq, 0)`, no later planned block) (P-2).
    `checkInvariants`; violation → `conflict` (whole op rolled back).
 7. State chain (R2-11): `target.state = 'reverted'`, `o.rec.RevertsOpID = target.ID`;
    then walk down `reverts_op_id` from the target: each next op's state is the
@@ -3159,7 +3168,7 @@ func Store(t testing.TB) *store.Store              // t.TempDir DB, migrated; Cl
 func Service(t testing.TB, opts ...SvcOpt) (*service.Service, *clock.Fake)
 func Owner() domain.Actor
 func TokenActor(name string, s domain.Scopes) domain.Actor
-func Meta(a domain.Actor) service.Meta             // fresh random idempotency key
+func Meta(a domain.Actor, gen domain.Generation) service.Meta // fresh random idempotency key + the store's generation
 type Server struct {
 	Client  *client.Client // owner token
 	Clock   *clock.Fake
@@ -3291,6 +3300,10 @@ linters:
       - path: cmd/tkr/main.go
         linters: [forbidigo]
         text: "os.Exit"
+      # Tests deliberately use loose permissions, fixed temp paths and exec; gosec stays
+      # strict for all non-test code (incl. internal/testutil).
+      - path: '_test\.go'
+        linters: [gosec]
 formatters:
   enable:
     - gofmt
@@ -3301,6 +3314,13 @@ formatters:
         - taskronin
 ```
 Layering (§1.3) is enforced by `internal/archtest`, not depguard.
+
+gosec policy for production code: G304 (reading a configured path), G204
+(exec of `$EDITOR`/`systemctl`) and G302/G306 (the 0644 systemd unit files) are
+legitimate only at specific call sites, and each such site is silenced
+individually with `//nolint:gosec // <reason>` — `nolintlint` enforces a
+specific linter and an explanation. No path- or rule-wide gosec exclusions exist
+for non-test code.
 
 ### 13.5 Makefile
 
@@ -3531,6 +3551,15 @@ Final round: agy no CRITICAL/HIGH; Codex 1 HIGH + 1 MEDIUM.
 |---|---|---|
 | H1 | **Procedure:** recovery-file cleanup (or the explicit `--keep-recovery-files` opt-out) is a prerequisite for any `complete` ledger line. Purge steps reordered: 8 = recovery files, 9 = completion, 10 = print. `scrub-backups` (incl. `--resume`) runs the same step before completing. **New helper** `offline.CleanRecoveryFiles(ctx, paths, keep, assumeYes, prompt) (mode string, err error)`. **New field** `backup.LedgerRecord.RecoveryFiles` (`json:"recovery_files,omitempty"`: `deleted`/`kept`/`none`) on complete lines. **New flag** `tkr scrub-backups --keep-recovery-files`. Declining the prompt leaves records pending. | §12.6, §12.7, §9.3 |
 | M1 | **Procedure:** a pending request is deleted only after a success (or an idempotent replay of one); an unsuccessful definitive answer keeps it and records `last_error`. **Fields** `client.PendingRequest.LastError string`, `LastAttemptAt time.Time`. **Methods** `PendingStore.MarkFailed(key, lastError)`; `PendingStore.Drop` renamed `Discard`. **Command** `tkr pending drop` renamed `tkr pending discard KEY`. | §6.7, §9.3, §9.6 |
+
+### 14.10 Plan A follow-ups
+
+| Ref | Change | Where |
+|---|---|---|
+| P-2 | **Rule:** revert re-evaluates a `slipped`/`continue` reason it would remove (because the target added it) and keeps it when another block still justifies it — the converse of R4-6. | §4.6 step 6 |
+| P-3 | **Rule:** every placement clears a pending defer (`Place`, `AcceptNew`, `Block`, `Reblock`, `Complete`, `Drop`, `Defer(nil)`, `AddTask` with a placement); `Defer` with a moment sets one. | §3.1 (placement legend) |
+| P-4 | **Signature** `testutil.Meta(a domain.Actor, gen domain.Generation) service.Meta` (every mutation needs `Meta.Gen`). | §13.1 |
+| P-5 | **Lint config:** `linters.exclusions.rules` gains `{path: '_test\.go', linters: [gosec]}`; production G304/G204/G302/G306 sites use explicit `//nolint:gosec // <reason>` only (validated against the golangci-lint v2.14 schema). | §13.4 |
 
 ---
 
