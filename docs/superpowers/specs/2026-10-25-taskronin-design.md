@@ -396,36 +396,38 @@ Every change writes an event. Downtime of any length is handled.
   slip rule); the recompute and reconcile that follow apply it normally. A
   restored `planned` block on a past date resolves at the next reconcile.
 
-### 5.11 Purge
-For secrets pasted by mistake. `tkr purge task|entry ID [--with-entries]`
-(API op, `destroy` scope **and** the password re-entered — a human-only check,
-§10.5; exempt from idempotency storage, §7.5):
+### 5.11 Purge (offline command)
+For secrets pasted by mistake. `tkr purge task|entry ID [--with-entries]` is an
+**offline** command like `restore` (changed from an API op during architecture
+review: running it online created races with checkpoints, shutdown and
+timeouts that bought nothing for a rare emergency tool). It requires the
+instance lock (server stopped — it says how to stop it), prompts for the
+password on a TTY (refuses without one — a human-only check, §10.5), and in one
+run:
 - target must be tombstoned first;
-- **ledger first**: before scrubbing, append a content-free intent record to
+- **ledger first**: append a checksummed, content-free intent record to
   `<datadir>/purge-ledger` (0600) listing the **exact set** of entity IDs to be
   scrubbed (task, its `complete` entries, and every entry included by
-  `--with-entries`), then fsync file and dir. Startup, `restore`, and `import`
-  re-apply every ledger record (pending or complete); scrubbing is idempotent,
-  so a crash anywhere leaves the purge either finished on restart or re-applied.
-  Re-running purge on an already-purged item ensures its ledger record exists;
-- in one transaction (SQLite `secure_delete` on; FTS5 tables created with the
-  FTS5 `secure-delete` option): scrub title/notes of the target (for a task:
-  its `complete` entries, and with `--with-entries` all its linked entries;
-  without it the CLI lists linked entry IDs) to `[purged]`/empty; scrub those
-  content fields in every event row for those entities (their FTS rows were
-  already removed when they were tombstoned);
-  mark ops touching them non-revertible; record a content-free `purge` event;
-- then `wal_checkpoint(TRUNCATE)`, retried with backoff until it truncates; if
-  it cannot within 30 s, report loudly and retry in the background
-  (`purge_checkpoint_pending` banner);
-- mark the ledger record complete (records are never removed, so purged
-  content never silently returns from an older snapshot or export);
-- print which backup snapshots (and `*.pre-restore-*` dirs) still contain the
-  content; `--scrub-backups` (same password check) first takes a fresh verified
-  backup, then rewrites each older snapshot (copy → apply the purge →
-  `VACUUM INTO` → integrity-check → atomic replace). Backups are never simply
-  deleted by purge. Log lines and exports made earlier are out of reach and the
-  CLI says so.
+  `--with-entries`; without it the CLI lists linked entry IDs), then fsync file
+  and dir. Startup, `restore`, and `import` re-apply every ledger record
+  (pending or complete), domain-aware; scrubbing is idempotent, so a crash
+  anywhere leaves the purge re-applied on the next run;
+- scrub the live DB in one transaction (SQLite `secure_delete` on; FTS5 tables
+  with the FTS5 `secure-delete` option): tombstone and scrub title/notes in a
+  single UPDATE per row (so FTS triggers see the old content); scrub those
+  content fields in every event row; mark ops touching them non-revertible;
+  record a content-free `purge` event;
+- `wal_checkpoint(TRUNCATE)` (succeeds offline — no readers);
+- scrub every backup snapshot and `*.pre-restore-*`/`*.pre-import-*` set: stage
+  a copy (WAL recovered), apply the ledger without reconciling, verify, and
+  replace via the journaled swap used by restore. `tkr scrub-backups` is the
+  resumable/standalone form of this step. Backups are never simply deleted;
+- mark the ledger record complete (records are never removed, so purged content
+  never silently returns from an older snapshot or export).
+Log lines and exports made earlier are out of reach and the CLI says so. A
+damaged ledger (complete record with a bad checksum, or a bad line mid-file)
+starts the server with a banner and blocks new purges until `tkr purge
+--repair-ledger`.
 
 ### 5.12 Time and dates
 - Server timezone is **explicit config** (IANA). `init` detects it from
@@ -546,8 +548,8 @@ record the neighbor. Drives history, undo/revert, AI-changes review.
 created_at)` — kept 7 days. `request_hash` = HMAC-SHA256 with a server-held
 key (in `settings`, never exported) over actor | method | path | canonical body.
 **No response bodies stored**: a replay returns the current representation of
-the referenced entities. **Credential-bearing requests** (web login, `passwd`,
-password re-entry for purge/scrub) are exempt from idempotency storage
+the referenced entities. **Credential-bearing requests** (web login,
+`passwd`) are exempt from idempotency storage
 entirely; a test asserts no stored row or log line depends on a password.
 
 ### 7.6 Schema sketch
@@ -580,8 +582,8 @@ tasks_fts, log_entries_fts  -- FTS5 external content, 'secure-delete' on; trigge
 
 - REST + JSON under `/api/v1`; errors RFC 9457 problem+json; no CORS headers.
 - Resources: `tasks`, `entries`, `blocks`, `tags`, `events`, `ops`.
-- Actions: `POST /tasks/{id}/complete|reopen|drop|delete|undelete|purge|move|defer|place|triage`,
-  `POST /entries/{id}/purge`, `POST /blocks/{id}/reblock`, `POST /focus`,
+- Actions: `POST /tasks/{id}/complete|reopen|drop|delete|undelete|move|defer|place|triage`,
+  `POST /blocks/{id}/reblock`, `POST /focus`,
   `POST /ops/{op_id}/revert`, `POST /undo`.
 - Aggregates: `GET /today`, `GET /status`, `GET /report`, `GET /clock`,
   `GET /ai-changes`. Aggregate `ETag` = hash of the response body computed after
@@ -605,7 +607,7 @@ tkr add TITLE [--top|--bottom|--after N|--before N|--defer D|--block T|--now] [-
 tkr log [ID] TEXT [-N] [--date D] [--at HH:MM] [-e] [-m NOTE]
 tkr done ID [--as TITLE] [--date D] [--log TEXT] [-m NOTE]
 tkr reopen ID [--remove-entry] | drop ID | delete ID | undelete ID | undo | redo
-tkr purge task|entry ID [--with-entries] [--scrub-backups]
+tkr purge task|entry ID [--with-entries]    tkr scrub-backups    (offline; server stopped)
 tkr plan | recap [--date D] | triage [-i] [--manual ID]
 tkr move ID top|bottom|before N|after N | keep ID
 tkr defer ID D            tkr due ID D|none
@@ -708,9 +710,9 @@ complete and edit, the AI-changes banner is prominent in the dashboard and
   `read` · `capture` (add task → triage; add `work` entry) · `write` (move,
   place, defer, block, focus, complete, reopen, update, relink, revert of own
   ops) · `destroy` (drop, delete, edit/delete existing entries,
-  `reopen --remove-entry`, purge*) · `admin` (tokens, settings, backup,
-  export). Revert requires the scopes of the reverted op. *Purge also requires
-  the password (§10.5).
+  `reopen --remove-entry`) · `admin` (tokens, settings, backup,
+  export). Revert requires the scopes of the reverted op. Purge and backup
+  scrub are offline commands, not API ops (§5.11).
 - **Web session** = owner with all scopes, except that token management is
   refused for web-session auth (CLI only).
 - **Tokens**: `tkr_<id>_<base64url 32 bytes>`; lookup by id; SHA-256 of the
@@ -744,11 +746,11 @@ complete and edit, the AI-changes banner is prominent in the dashboard and
 Server-enforced scopes; MCP token always required; mutation cap; AI-created
 tasks always land in triage; every op audited and listed in AI changes with
 revert. Tool descriptions and structured outputs keep user text as data, but
-that is not relied on as a control. **Password re-entry** is required (CLI
-prompt on a TTY, or web form; sent in the request body field `password`,
-verified through the rate-limited path, never stored or logged) for purge and
-backup scrub — the only ops that cannot be reverted — so an agent acting as Sean
-cannot do irrecoverable damage through Taskronin's API.
+that is not relied on as a control. The only ops that cannot be reverted —
+purge and backup scrub — are offline commands that prompt for the password on
+a TTY (never stored or logged), so an agent acting as Sean cannot do
+irrecoverable damage through Taskronin. Lowering backup retention also requires
+the password.
 
 ### 10.6 Text safety
 - **Input**: valid UTF-8; strip BOM; titles: no C0, C1, or newline; notes: C0
