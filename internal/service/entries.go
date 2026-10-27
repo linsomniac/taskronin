@@ -48,9 +48,15 @@ type EntryRef struct {
 // UpdateEntry edits work entries, or just the notes of completion entries.
 func (s *Service) UpdateEntry(ctx context.Context, m Meta, in UpdateEntryIn) (*OpResult, error) {
 	return s.run(ctx, m, opSpec{kind: domain.OpEntryUpdate, class: classForward, scopes: domain.ScopeDestroy, idem: true, revertible: true}, func(o *op) error {
-		e, err := o.loadEntry(in.ID, &in.Expect, false)
+		e, err := o.loadEntry(in.ID, &in.Expect, true)
 		if err != nil {
 			return err
+		}
+		if e.PurgedAt.Valid {
+			return domain.Errorf(domain.CodeConflict, "entry #%d is purged", e.ID)
+		}
+		if e.DeletedAt.Valid {
+			return domain.Errorf(domain.CodeDeleted, "entry #%d is deleted", e.ID)
 		}
 		if e.Kind == domain.EntryComplete && (in.Title != nil || in.WorkDate != nil || in.At != nil) {
 			return domain.Errorf(domain.CodeValidation, "only notes of a complete entry are editable")
@@ -86,9 +92,15 @@ func (s *Service) UpdateEntry(ctx context.Context, m Meta, in UpdateEntryIn) (*O
 // RelinkEntry attaches a work entry to a task or makes it standalone.
 func (s *Service) RelinkEntry(ctx context.Context, m Meta, in RelinkEntryIn) (*OpResult, error) {
 	return s.run(ctx, m, opSpec{kind: domain.OpEntryRelink, class: classForward, scopes: domain.ScopeWrite, idem: true, revertible: true}, func(o *op) error {
-		e, err := o.loadEntry(in.ID, &in.Expect, false)
+		e, err := o.loadEntry(in.ID, &in.Expect, true)
 		if err != nil {
 			return err
+		}
+		if e.PurgedAt.Valid {
+			return domain.Errorf(domain.CodeConflict, "entry #%d is purged", e.ID)
+		}
+		if e.DeletedAt.Valid {
+			return domain.Errorf(domain.CodeDeleted, "entry #%d is deleted", e.ID)
 		}
 		if e.Kind == domain.EntryComplete {
 			return domain.Errorf(domain.CodeValidation, "complete entries cannot be relinked")
@@ -132,6 +144,9 @@ func (s *Service) UndeleteEntry(ctx context.Context, m Meta, in EntryRef) (*OpRe
 		e, err := o.loadEntry(in.ID, &in.Expect, true)
 		if err != nil {
 			return err
+		}
+		if e.PurgedAt.Valid {
+			return domain.Errorf(domain.CodeConflict, "entry #%d is purged", e.ID)
 		}
 		if !e.DeletedAt.Valid {
 			o.ref(domain.EntityRef{Entity: domain.EntEntry, ID: int64(e.ID)})

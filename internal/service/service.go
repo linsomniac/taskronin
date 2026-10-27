@@ -52,6 +52,8 @@ type Service struct {
 	usage       usage
 	tzChanged   atomic.Bool
 	backupHook  func(context.Context) error // installed only by export_test.go
+
+	purgeAfterAppendHook func() error // installed only by export_test.go
 }
 
 // New loads the database identity and initializes the service.

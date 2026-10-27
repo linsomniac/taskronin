@@ -70,3 +70,7 @@ func (s *Service) TokenUsageForTest() map[domain.TokenID]time.Time {
 // SetBackupHook installs a hook after attempt recording and before Snapshot.
 // Configure it before starting a backup; it must not be changed concurrently.
 func SetBackupHook(s *Service, fn func(ctx context.Context) error) { s.backupHook = fn }
+
+// SetPurgeAfterAppendHook installs a hook after the pending append and before scrubbing.
+// Configure it before purging; it must not be changed concurrently.
+func SetPurgeAfterAppendHook(s *Service, fn func() error) { s.purgeAfterAppendHook = fn }

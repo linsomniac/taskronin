@@ -139,6 +139,17 @@ func (s *Scenario) Exec(query string, args ...any) {
 	}
 }
 
+// SeqFloor raises a table's sequence so its next row ID is at least next.
+func (s *Scenario) SeqFloor(table string, next int64) {
+	s.T.Helper()
+	if next < 1 {
+		s.T.Fatal("sequence floor must be positive")
+	}
+	if err := store.RaiseSequences(s.Ctx(), s.Store.Writer, map[string]int64{table: next - 1}); err != nil {
+		s.T.Fatal(err)
+	}
+}
+
 // Expect returns the task's current version in the live database generation.
 func (s *Scenario) Expect(id domain.TaskID) domain.Expect {
 	s.T.Helper()
