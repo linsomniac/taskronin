@@ -462,6 +462,34 @@ func (s *Scenario) Reopen(id domain.TaskID, removeEntry bool) {
 	s.Must(s.Svc.Reopen(s.Ctx(), s.Meta(), service.ReopenIn{ID: id, Expect: s.Expect(id), RemoveEntry: removeEntry}))
 }
 
+// Drop closes an open task using its current precondition.
+func (s *Scenario) Drop(id domain.TaskID) {
+	s.T.Helper()
+	s.Must(s.Svc.Drop(s.Ctx(), s.Meta(), service.TaskRef{ID: id, Expect: s.Expect(id)}))
+}
+
+// Delete tombstones a task using its current precondition.
+func (s *Scenario) Delete(id domain.TaskID) {
+	s.T.Helper()
+	s.Must(s.Svc.Delete(s.Ctx(), s.Meta(), service.TaskRef{ID: id, Expect: s.Expect(id)}))
+}
+
+// Undelete restores a task using its current precondition.
+func (s *Scenario) Undelete(id domain.TaskID) {
+	s.T.Helper()
+	s.Must(s.Svc.Undelete(s.Ctx(), s.Meta(), service.TaskRef{ID: id, Expect: s.Expect(id)}))
+}
+
+// Update edits a task using its current precondition and input modifiers.
+func (s *Scenario) Update(id domain.TaskID, mods ...func(*service.UpdateTaskIn)) {
+	s.T.Helper()
+	in := service.UpdateTaskIn{ID: id, Expect: s.Expect(id)}
+	for _, mod := range mods {
+		mod(&in)
+	}
+	s.Must(s.Svc.UpdateTask(s.Ctx(), s.Meta(), in))
+}
+
 // Task returns the current task view through GetTask.
 func (s *Scenario) Task(id domain.TaskID) domain.TaskView {
 	s.T.Helper()

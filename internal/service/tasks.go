@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 
 	"taskronin/internal/civil"
@@ -29,6 +30,128 @@ type AddPlacement struct {
 	Ref   domain.TaskID
 	Defer domain.Moment
 	Block domain.BlockSpan
+}
+
+// UpdateTaskIn supplies optional task fields and case-insensitive tag changes.
+type UpdateTaskIn struct {
+	ID                    domain.TaskID
+	Expect                domain.Expect
+	Title, Notes, Project *string          // Nil leaves unchanged; empty Project clears.
+	Priority              *domain.Priority // PriorityNone clears.
+	TagsAdd, TagsRemove   []string
+}
+
+// UpdateTask edits a task's content and tags without placing it.
+func (s *Service) UpdateTask(ctx context.Context, m Meta, in UpdateTaskIn) (*OpResult, error) {
+	return s.run(ctx, m, opSpec{kind: domain.OpTaskUpdate, class: classForward, scopes: domain.ScopeWrite, idem: true, revertible: true}, func(o *op) error {
+		// AIDEV-NOTE: Include tombstones to distinguish immutable purged
+		// content (R3-4 conflict) from ordinary deleted tasks.
+		t, err := o.loadTask(in.ID, &in.Expect, true)
+		if err != nil {
+			return err
+		}
+		if t.PurgedAt.Valid {
+			return domain.Errorf(domain.CodeConflict, "task #%d is purged", t.ID)
+		}
+		if t.DeletedAt.Valid {
+			return domain.Errorf(domain.CodeDeleted, "task #%d is deleted", t.ID)
+		}
+		before := t
+		if in.Title != nil {
+			t.Title, err = textsafe.ValidateTitle(*in.Title)
+			if err != nil {
+				return validation("title", err)
+			}
+		}
+		if in.Notes != nil {
+			t.Notes, err = textsafe.ValidateNotes(*in.Notes)
+			if err != nil {
+				return validation("notes", err)
+			}
+		}
+		if in.Project != nil {
+			if *in.Project != "" {
+				if err := textsafe.ValidateName(*in.Project, 100); err != nil {
+					return validation("project", err)
+				}
+			}
+			t.Project = *in.Project
+		}
+		if in.Priority != nil {
+			if !in.Priority.Valid() {
+				return validation("priority", errors.New("must be H, M, L or empty"))
+			}
+			t.Priority = *in.Priority
+		}
+		if err := store.UpdateTask(o.ctx, o.tx, t); err != nil {
+			return err
+		}
+		if err := o.recordTaskUpdate(before, t); err != nil {
+			return err
+		}
+		if err := o.updateTaskTags(t.ID, in.TagsAdd, in.TagsRemove); err != nil {
+			return err
+		}
+		o.ref(domain.EntityRef{Entity: domain.EntTask, ID: int64(t.ID)})
+		return nil
+	})
+}
+
+func (o *op) updateTaskTags(id domain.TaskID, add, remove []string) error {
+	for _, names := range [][]string{add, remove} {
+		for _, name := range names {
+			if err := textsafe.ValidateName(name, 64); err != nil {
+				return validation("tags", err)
+			}
+		}
+	}
+	before, err := store.TaskTags(o.ctx, o.tx, id)
+	if err != nil {
+		return err
+	}
+	names := make(map[string]string, len(before)+len(add))
+	for _, name := range before {
+		names[strings.ToLower(name)] = name
+	}
+	for _, name := range add {
+		key := strings.ToLower(name)
+		if _, exists := names[key]; !exists {
+			names[key] = name
+		}
+	}
+	for _, name := range remove {
+		delete(names, strings.ToLower(name))
+	}
+	after := make([]string, 0, len(names))
+	for _, name := range names {
+		after = append(after, name)
+	}
+	slices.SortFunc(after, func(a, b string) int { return strings.Compare(strings.ToLower(a), strings.ToLower(b)) })
+	if slices.Equal(before, after) {
+		return nil
+	}
+	if err := store.SetTaskTags(o.ctx, o.tx, id, after, o.now); err != nil {
+		return err
+	}
+	// AIDEV-NOTE: NOCASE tag identity preserves the first spelling globally.
+	// Read it back for sorted, canonical event images; empty sets encode [].
+	after, err = store.TaskTags(o.ctx, o.tx, id)
+	if err != nil {
+		return err
+	}
+	bj, err := json.Marshal(map[string]any{"tags": append([]string{}, before...)})
+	if err != nil {
+		return err
+	}
+	aj, err := json.Marshal(map[string]any{"tags": append([]string{}, after...)})
+	if err != nil {
+		return err
+	}
+	if err := o.record(domain.Event{Entity: domain.EntTaskTags, EntityID: int64(id), Action: domain.ActSet, Before: bj, After: aj}); err != nil {
+		return err
+	}
+	o.markTaskDirty(id)
+	return nil
 }
 
 // MarkManualIn identifies a task and its expected version.

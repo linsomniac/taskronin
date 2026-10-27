@@ -30,6 +30,148 @@ type ReopenIn struct {
 	RemoveEntry bool
 }
 
+// TaskRef identifies a task and its expected version.
+type TaskRef struct {
+	ID     domain.TaskID
+	Expect domain.Expect
+}
+
+// Drop closes and places an open task without logging completion.
+func (s *Service) Drop(ctx context.Context, m Meta, in TaskRef) (*OpResult, error) {
+	return s.run(ctx, m, opSpec{kind: domain.OpTaskDrop, class: classForward, scopes: domain.ScopeDestroy, idem: true, revertible: true}, func(o *op) error {
+		t, err := o.loadTask(in.ID, &in.Expect, false)
+		if err != nil {
+			return err
+		}
+		if t.Status != domain.StatusOpen {
+			return domain.Errorf(domain.CodeConflict, "task #%d is not open", t.ID)
+		}
+		before := t
+		t.Status = domain.StatusDropped
+		if err := store.UpdateTask(o.ctx, o.tx, t); err != nil {
+			return err
+		}
+		if err := o.recordTaskUpdate(before, t); err != nil {
+			return err
+		}
+		if err := o.closeForDropOrDelete(t); err != nil {
+			return err
+		}
+		if err := o.place(t.ID); err != nil {
+			return err
+		}
+		if err := o.clearFocusIf(t.ID); err != nil {
+			return err
+		}
+		o.ref(domain.EntityRef{Entity: domain.EntTask, ID: int64(t.ID)})
+		return nil
+	})
+}
+
+// Delete tombstones a task, closing planned blocks and clearing triage and focus.
+func (s *Service) Delete(ctx context.Context, m Meta, in TaskRef) (*OpResult, error) {
+	return s.run(ctx, m, opSpec{kind: domain.OpTaskDelete, class: classForward, scopes: domain.ScopeDestroy, idem: true, revertible: true}, func(o *op) error {
+		t, err := o.loadTask(in.ID, &in.Expect, false)
+		if err != nil {
+			return err
+		}
+		if err := o.setTaskDeleted(&t, true); err != nil {
+			return err
+		}
+		if err := o.closeForDropOrDelete(t); err != nil {
+			return err
+		}
+		if err := o.clearReasons(t.ID); err != nil {
+			return err
+		}
+		if err := o.clearFocusIf(t.ID); err != nil {
+			return err
+		}
+		o.ref(domain.EntityRef{Entity: domain.EntTask, ID: int64(t.ID)})
+		return nil
+	})
+}
+
+// Undelete restores a tombstoned task and requests manual triage if it is open.
+func (s *Service) Undelete(ctx context.Context, m Meta, in TaskRef) (*OpResult, error) {
+	return s.run(ctx, m, opSpec{kind: domain.OpTaskUndelete, class: classForward, scopes: domain.ScopeWrite, idem: true, revertible: true}, func(o *op) error {
+		t, err := o.loadTask(in.ID, &in.Expect, true)
+		if err != nil {
+			return err
+		}
+		if t.PurgedAt.Valid {
+			return domain.Errorf(domain.CodeConflict, "task #%d is purged", t.ID)
+		}
+		o.ref(domain.EntityRef{Entity: domain.EntTask, ID: int64(t.ID)})
+		if !t.DeletedAt.Valid {
+			return nil
+		}
+		if err := o.setTaskDeleted(&t, false); err != nil {
+			return err
+		}
+		if t.Status == domain.StatusOpen {
+			if err := o.addReason(t.ID, domain.ReasonManual); err != nil {
+				return err
+			}
+			if t.DeferDate.Valid && s.zone.DeferMoment(t.DeferDate.V, t.DeferMin).After(o.now) {
+				if err := o.setDefer(t.ID, nil); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
+}
+
+func (o *op) setTaskDeleted(t *domain.Task, deleted bool) error {
+	before, err := json.Marshal(map[string]any{"deleted_at": instantCol(t.DeletedAt)})
+	if err != nil {
+		return err
+	}
+	action := domain.ActUntombstone
+	t.DeletedAt = sql.Null[time.Time]{}
+	if deleted {
+		action = domain.ActTombstone
+		t.DeletedAt = sql.Null[time.Time]{V: o.now, Valid: true}
+	}
+	if err := store.UpdateTask(o.ctx, o.tx, *t); err != nil {
+		return err
+	}
+	after, err := json.Marshal(map[string]any{"deleted_at": instantCol(t.DeletedAt)})
+	if err != nil {
+		return err
+	}
+	if err := o.record(domain.Event{Entity: domain.EntTask, EntityID: int64(t.ID), Action: action, Before: before, After: after}); err != nil {
+		return err
+	}
+	o.markTaskDirty(t.ID)
+	return nil
+}
+
+func (o *op) closeForDropOrDelete(t domain.Task) error {
+	// AIDEV-NOTE: Drop/Delete persist status/tombstone before closing blocks,
+	// so derivation records slips without adding slipped/continue reasons.
+	blocks, err := store.PlannedOfTask(o.ctx, o.tx, t.ID)
+	if err != nil {
+		return err
+	}
+	unslipped := false
+	for _, b := range blocks {
+		started, err := o.started(b)
+		if err != nil {
+			return err
+		}
+		if started {
+			if err := o.resolveByDerivation(&b); err != nil {
+				return err
+			}
+		} else if err := o.setBlock(&b, blockChange{Status: domain.BlockCancelled, Cancel: domain.CancelTaskClosed, Slipped: &unslipped}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Complete closes and places an open task, logging its completion on Date.
 func (s *Service) Complete(ctx context.Context, m Meta, in CompleteIn) (*OpResult, error) {
 	return s.run(ctx, m, opSpec{kind: domain.OpTaskComplete, class: classForward, scopes: domain.ScopeWrite, idem: true, revertible: true}, func(o *op) error {
