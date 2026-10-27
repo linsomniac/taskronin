@@ -332,6 +332,15 @@ func (s *Service) loadResult(ctx context.Context, r *OpResult) error {
 					return err
 				}
 				r.Block = &v
+			case domain.EntToken:
+				// AIDEV-NOTE: Token results, including replays, share run's
+				// original deadline and shutdown registration. Return no hash.
+				token, err := store.GetToken(ctx, q, domain.TokenID(ref.ID))
+				if err != nil {
+					return err
+				}
+				token.SecretHash = [32]byte{}
+				r.Token = &token
 			default:
 				// Settings and other event-only refs have no result representation.
 			}

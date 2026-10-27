@@ -123,6 +123,7 @@ type OpResult struct {
 	Task                        *domain.TaskView
 	Entry                       *domain.LogEntry
 	Block                       *domain.BlockView
+	Token                       *domain.Token
 	Tasks                       []domain.TaskView
 	Effects                     []Effect
 	Warnings                    []string

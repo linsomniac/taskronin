@@ -157,19 +157,10 @@ func (s *Service) RevokeToken(ctx context.Context, m Meta, in RevokeTokenIn) (do
 	if err != nil {
 		return domain.Token{}, err
 	}
-	// A replay uses the persisted ref, just like other current representations.
-	if len(r.Refs) != 1 || r.Refs[0].Entity != domain.EntToken {
+	if r.Token == nil {
 		return domain.Token{}, domain.Errorf(domain.CodeInternal, "missing token result reference")
 	}
-	// Preserve run's detached-request contract while loading the committed result.
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), OpBudget)
-	defer cancel()
-	token, err := store.GetToken(ctx, s.store.Reader, domain.TokenID(r.Refs[0].ID))
-	if err != nil {
-		return domain.Token{}, serviceError(err)
-	}
-	token.SecretHash = [32]byte{}
-	return token, nil
+	return *r.Token, nil
 }
 
 func (o *op) recordToken(token domain.Token, action domain.Action) error {

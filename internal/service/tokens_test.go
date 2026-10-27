@@ -3,7 +3,9 @@ package service_test
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -321,5 +323,138 @@ func TestRevokeTokenDetachedContext(t *testing.T) {
 		if err != nil || row.ID != created.Token.ID || !row.RevokedAt.Valid {
 			t.Fatalf("detached revoke/replay failed to return its committed result: %v", err)
 		}
+	}
+}
+
+type tokenReadContext struct {
+	current, operation context.Context
+}
+
+// tokenReadConnector pauses the real SQLite token query without production hooks.
+type tokenReadConnector struct {
+	driver  driver.Driver
+	dsn     string
+	started chan<- tokenReadContext
+	release <-chan struct{}
+}
+
+func (c *tokenReadConnector) Driver() driver.Driver { return c.driver }
+
+func (c *tokenReadConnector) Connect(ctx context.Context) (driver.Conn, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	conn, err := c.driver.Open(c.dsn)
+	if err != nil {
+		return nil, err
+	}
+	return &tokenReadConn{Conn: conn, observer: c}, nil
+}
+
+type tokenReadConn struct {
+	driver.Conn
+	observer *tokenReadConnector
+	opCtx    context.Context
+}
+
+func (c *tokenReadConn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
+	if c.opCtx == nil {
+		c.opCtx = ctx
+	}
+	return c.Conn.(driver.ConnBeginTx).BeginTx(ctx, opts)
+}
+
+func (c *tokenReadConn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
+	if strings.Contains(query, "FROM api_tokens") {
+		c.observer.started <- tokenReadContext{current: ctx, operation: c.opCtx}
+		select {
+		case <-c.observer.release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return c.Conn.(driver.QueryerContext).QueryContext(ctx, query, args)
+}
+
+func TestRevokeTokenShutdownResult(t *testing.T) {
+	for _, mode := range []string{"first", "no change", "replay", "no-change replay"} {
+		t.Run(mode, func(t *testing.T) {
+			s := testutil.NewScenario(t)
+			created := createTestToken(t, s, "shutdown")
+			in, m := service.RevokeTokenIn{ID: created.Token.ID}, s.Meta()
+			if mode == "no change" || mode == "no-change replay" {
+				if _, err := s.Svc.RevokeToken(s.Ctx(), s.Meta(), in); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if mode == "replay" || mode == "no-change replay" {
+				if _, err := s.Svc.RevokeToken(s.Ctx(), m, in); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			started, release := make(chan tokenReadContext, 1), make(chan struct{})
+			var releaseOnce sync.Once
+			unblock := func() { releaseOnce.Do(func() { close(release) }) }
+			originalReader := s.Store.Reader
+			reader := sql.OpenDB(&tokenReadConnector{driver: originalReader.Driver(),
+				dsn: store.DSN(s.Store.Path, store.PoolReader), started: started, release: release})
+			reader.SetMaxOpenConns(1)
+			s.Store.Reader = reader
+			t.Cleanup(func() {
+				s.Store.Reader = originalReader
+				if err := reader.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			var got domain.Token
+			var revokeErr error
+			done := make(chan struct{})
+			go func() {
+				got, revokeErr = s.Svc.RevokeToken(s.Ctx(), m, in)
+				close(done)
+			}()
+			t.Cleanup(func() { unblock(); <-done })
+
+			var read tokenReadContext
+			select {
+			case read = <-started:
+			case <-done:
+				t.Fatalf("revocation returned before token result loading: %v", revokeErr)
+			case <-s.Ctx().Done():
+				t.Fatal(s.Ctx().Err())
+			}
+			// The write has committed; only loading its representation is paused.
+			persisted, err := store.GetToken(s.Ctx(), s.Store.Writer, created.Token.ID)
+			if err != nil || !persisted.RevokedAt.Valid {
+				t.Fatalf("revocation has not committed: %v", err)
+			}
+			if read.operation == nil {
+				t.Fatal("runner did not start a result transaction")
+			}
+			originalDeadline, originalOK := read.operation.Deadline()
+			resultDeadline, resultOK := read.current.Deadline()
+			if !originalOK || !resultOK || !resultDeadline.Equal(originalDeadline) || read.operation.Err() != nil {
+				t.Error("token result loading lost the runner's live context or original deadline")
+			}
+			s.Svc.BeginShutdown()
+			drainCtx, cancel := context.WithTimeout(s.Ctx(), 50*time.Millisecond)
+			defer cancel()
+			if err := s.Svc.Drain(drainCtx); !errors.Is(err, context.DeadlineExceeded) {
+				t.Errorf("Drain finished before token result loading: %v", err)
+			}
+			unblock()
+			if err := s.Svc.Drain(s.Ctx()); err != nil {
+				t.Fatal(err)
+			}
+			if err := reader.Close(); err != nil {
+				t.Fatal(err)
+			}
+			<-done
+			persisted.SecretHash = [32]byte{}
+			if revokeErr != nil || got != persisted {
+				t.Fatalf("revocation did not return its redacted current representation: %v", revokeErr)
+			}
+		})
 	}
 }
