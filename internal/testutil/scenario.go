@@ -161,6 +161,36 @@ func Due(m string) func(*service.AddTaskIn) {
 	return func(in *service.AddTaskIn) { moment := Moment(m); in.Due = &moment }
 }
 
+// Top places a new task at the top of the global task order.
+func Top() func(*service.AddTaskIn) {
+	return func(in *service.AddTaskIn) { in.Place = &service.AddPlacement{How: "top"} }
+}
+
+// Bottom places a new task at the bottom of the global task order.
+func Bottom() func(*service.AddTaskIn) {
+	return func(in *service.AddTaskIn) { in.Place = &service.AddPlacement{How: "bottom"} }
+}
+
+// After places a new task immediately after id in the global task order.
+func After(id domain.TaskID) func(*service.AddTaskIn) {
+	return func(in *service.AddTaskIn) { in.Place = &service.AddPlacement{How: "after", Ref: id} }
+}
+
+// Before places a new task immediately before id in the global task order.
+func Before(id domain.TaskID) func(*service.AddTaskIn) {
+	return func(in *service.AddTaskIn) { in.Place = &service.AddPlacement{How: "before", Ref: id} }
+}
+
+// Place acknowledges triage and positions a task using its current precondition.
+func (s *Scenario) Place(id domain.TaskID, how domain.PlaceHow, ref ...domain.TaskID) {
+	s.T.Helper()
+	in := service.PlaceIn{ID: id, Expect: s.Expect(id), How: how}
+	if len(ref) > 0 {
+		in.Ref = ref[0]
+	}
+	s.Must(s.Svc.Place(s.Ctx(), s.Meta(), in))
+}
+
 // MarkManual requests manual triage using the task's current precondition.
 func (s *Scenario) MarkManual(id domain.TaskID) {
 	s.T.Helper()

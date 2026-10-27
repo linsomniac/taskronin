@@ -13,9 +13,6 @@ import (
 	"taskronin/internal/textsafe"
 )
 
-// Gap is the default spacing between task ranks.
-const Gap int64 = 1 << 16
-
 // AddTaskIn supplies a new task's content and optional placement.
 type AddTaskIn struct {
 	Title, Notes string
@@ -40,19 +37,17 @@ type MarkManualIn struct {
 	Expect domain.Expect
 }
 
-// AddTask captures a task in triage with the new reason.
+// AddTask captures a task in triage, or applies an owner-requested placement.
 func (s *Service) AddTask(ctx context.Context, m Meta, in AddTaskIn) (*OpResult, error) {
 	scopes := domain.ScopeCapture
 	if in.Place != nil {
 		scopes |= domain.ScopeWrite
 	}
-	return s.run(ctx, m, opSpec{kind: domain.OpTaskAdd, class: classForward, scopes: scopes, idem: true, revertible: true}, func(o *op) error {
+	return s.run(ctx, m, opSpec{kind: domain.OpTaskAdd, class: classForward, scopes: scopes, idem: true, revertible: true, ownerOnly: in.Place != nil}, func(o *op) error {
 		if in.Place != nil {
-			if m.Actor.Kind == domain.ActorToken {
-				return domain.Errorf(domain.CodeForbidden, "tokens cannot place new tasks")
+			if err := validateAddPlacement(*in.Place); err != nil {
+				return validation("place", err)
 			}
-			// AIDEV-TODO: Tasks 19/22/26/27 implement AddPlacement's individual modes.
-			return validation("place", errors.New("placement is not supported yet"))
 		}
 		title, err := textsafe.ValidateTitle(in.Title)
 		if err != nil {
@@ -96,7 +91,11 @@ func (s *Service) AddTask(ctx context.Context, m Meta, in AddTaskIn) (*OpResult,
 			}
 			t.DueDate, t.DueMin = sql.Null[civil.Date]{V: in.Due.Date, Valid: true}, in.Due.Min
 		}
-		t.Rank, err = o.rankBottom()
+		if in.Place == nil {
+			t.Rank, err = o.rankBottom()
+		} else {
+			t.Rank, err = o.placementRank(domain.PlaceHow(in.Place.How), in.Place.Ref)
+		}
 		if err != nil {
 			return err
 		}
@@ -114,8 +113,14 @@ func (s *Service) AddTask(ctx context.Context, m Meta, in AddTaskIn) (*OpResult,
 		if err := o.record(domain.Event{Entity: domain.EntTask, EntityID: int64(t.ID), Action: domain.ActInsert, After: after}); err != nil {
 			return err
 		}
-		if err := o.addReason(t.ID, domain.ReasonNew); err != nil {
-			return err
+		if in.Place == nil {
+			if err := o.addReason(t.ID, domain.ReasonNew); err != nil {
+				return err
+			}
+		} else {
+			if err := o.place(t.ID); err != nil {
+				return err
+			}
 		}
 		if len(tags) > 0 {
 			if err := store.SetTaskTags(o.ctx, o.tx, t.ID, tags, o.now); err != nil {
@@ -157,15 +162,30 @@ func (s *Service) MarkManual(ctx context.Context, m Meta, in MarkManualIn) (*OpR
 	})
 }
 
-func (o *op) rankBottom() (int64, error) {
-	_, hi, err := store.RankBounds(o.ctx, o.tx)
-	if err != nil {
-		return 0, err
+func validateAddPlacement(p AddPlacement) error {
+	if p.Ref != 0 && p.How != "before" && p.How != "after" {
+		return errors.New("reference only belongs to before/after placement")
 	}
-	if !hi.Valid {
-		return Gap, nil
+	if p.Defer != (domain.Moment{}) && p.How != "defer" {
+		return errors.New("defer only belongs to defer placement")
 	}
-	return hi.V + Gap, nil
+	if p.Block != (domain.BlockSpan{}) && p.How != "block" {
+		return errors.New("block only belongs to block placement")
+	}
+	switch p.How {
+	case "top", "bottom":
+		return nil
+	case "before", "after":
+		if p.Ref == 0 {
+			return errors.New("placement reference is required")
+		}
+		return nil
+	case "defer", "block", "now":
+		// AIDEV-TODO: Tasks 22/26/27 implement AddPlacement's remaining modes.
+		return errors.New("unsupported placement")
+	default:
+		return errors.New("unknown placement")
+	}
 }
 
 func (o *op) loadTask(id domain.TaskID, exp *domain.Expect, allowDeleted bool) (domain.Task, error) {
