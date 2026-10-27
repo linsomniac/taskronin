@@ -68,14 +68,48 @@ func (s *Service) run(ctx context.Context, m Meta, spec opSpec, fn func(*op) err
 		(spec.ownerOnly && m.Actor.Kind != domain.ActorOwner) || (spec.notWeb && m.Actor.Channel == domain.ChanWeb) {
 		return nil, domain.Errorf(domain.CodeForbidden, "operation is not permitted")
 	}
-	// AIDEV-TODO: Task 18 adds request identity, lifecycle, replay and rate checks;
-	// Tasks 30–31 add reversal target selection and stack transitions.
+	// AIDEV-NOTE: Task 18 supplies identity, lifecycle, replay and rate checks below.
+	// AIDEV-TODO: Tasks 30–31 add reversal target selection and stack transitions.
+	if spec.idem {
+		if err := validateIdemKey(m.Idem.Key); err != nil {
+			return nil, err
+		}
+	}
+	if m.Gen == "" {
+		return nil, domain.Errorf(domain.CodePreconditionReq, "database generation is required")
+	}
+	if m.Gen != s.gen {
+		return nil, domain.Errorf(domain.CodeGenerationMismatch, "database generation does not match")
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), OpBudget)
+	defer cancel()
+	leave, err := s.enter()
+	if err != nil {
+		return nil, err
+	}
+	defer leave()
 	tx, err := s.store.Writer.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, serviceError(err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	now := s.clock.Now().Truncate(time.Millisecond)
+	// AIDEV-NOTE: Idempotency lookup precedes target selection (R2-5),
+	// reconcile and the rate cap; a retry must never act on the next target.
+	var hash [32]byte
+	if spec.idem {
+		hash = idemHash(s.idemHMACKey, m.Actor.Key(), m.Idem)
+		row, err := s.lookupIdem(ctx, tx, m, hash, now)
+		if err != nil {
+			return nil, serviceError(err)
+		}
+		if row != nil {
+			if err := tx.Rollback(); err != nil {
+				return nil, serviceError(err)
+			}
+			return s.replayIdem(ctx, *row)
+		}
+	}
 	if !spec.noReconcile {
 		if err := s.reconcileTx(ctx, tx, now); err != nil {
 			return nil, serviceError(err)
@@ -95,6 +129,16 @@ func (s *Service) run(ctx context.Context, m Meta, spec opSpec, fn func(*op) err
 			return nil, &domain.Error{Code: domain.CodeInternal, Err: errors.Join(cause, err)}
 		}
 		return nil, serviceError(cause)
+	}
+	if m.Actor.MutationsPerHour > 0 {
+		n, oldest, err := store.CountOpsSince(ctx, tx, m.Actor.Key(), now.Add(-time.Hour))
+		if err != nil {
+			return fail(err)
+		}
+		if n >= m.Actor.MutationsPerHour {
+			return fail(&domain.Error{Code: domain.CodeRateLimited, Detail: "hourly mutation limit reached",
+				RetryAfter: oldest.V.Add(time.Hour).Sub(now)})
+		}
 	}
 	o := s.newOp(ctx, tx, m.Actor, spec, now)
 	if err := store.InsertOp(ctx, tx, &o.rec); err != nil {
@@ -125,6 +169,19 @@ func (s *Service) run(ctx context.Context, m Meta, spec opSpec, fn func(*op) err
 			return fail(err)
 		}
 		if err := store.TrimStack(ctx, tx, m.Actor.Key(), store.StackUndo, s.undoDepth); err != nil {
+			return fail(err)
+		}
+	}
+	if spec.idem {
+		row := store.IdemRow{Actor: m.Actor.Key(), Key: m.Idem.Key, Hash: hash,
+			Status: 200, Refs: o.refs, CreatedAt: now}
+		if !noChange {
+			row.OpID = sql.Null[domain.OpID]{V: o.rec.ID, Valid: true}
+			if o.created {
+				row.Status = 201
+			}
+		}
+		if err := store.PutIdem(ctx, tx, row); err != nil {
 			return fail(err)
 		}
 	}

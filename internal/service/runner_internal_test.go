@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -226,7 +227,11 @@ func runnerFixture(t *testing.T) (*Service, Meta) {
 	}
 	s := &Service{store: st, clock: clock.NewFake(time.Date(2026, 10, 28, 16, 0, 0, 123456789, time.UTC)), zone: z,
 		gen: domain.NewGeneration(), undoDepth: 2}
-	return s, Meta{Actor: domain.Actor{Kind: domain.ActorOwner, Scopes: domain.AllScopes, Channel: domain.ChanCLI}, Gen: s.gen}
+	if _, err := rand.Read(s.idemHMACKey[:]); err != nil {
+		t.Fatal(err)
+	}
+	return s, Meta{Actor: domain.Actor{Kind: domain.ActorOwner, Scopes: domain.AllScopes, Channel: domain.ChanCLI}, Gen: s.gen,
+		Idem: Idem{Key: domain.NewOpID().String(), Method: "POST", Route: "test"}}
 }
 
 func fixtureTask(t *testing.T, s *Service, rank int64) domain.Task {
@@ -917,6 +922,154 @@ func TestReconcileReaderCheckAndWriterRecheck(t *testing.T) {
 			}
 			if checks != wantChecks || runs != wantRuns || n != wantRuns {
 				t.Fatalf("checks/runs/ops = %d/%d/%d, want %d/%d/%d", checks, runs, n, wantChecks, wantRuns, wantRuns)
+			}
+		})
+	}
+}
+
+func TestReplayStoredConflict(t *testing.T) {
+	s, m := runnerFixture(t)
+	conflict := domain.RevertConflict{OpID: domain.NewOpID(), Kind: domain.OpTaskManual,
+		Actor: "owner", At: s.clock.Now().Truncate(time.Millisecond), Entity: domain.EntTask, EntityID: 42}
+	problem, err := json.Marshal(map[string]any{
+		"code": domain.CodeRevertConflict, "detail": "task changed", "status": 409,
+		"conflicts": []map[string]any{{"op_id": conflict.OpID, "kind": conflict.Kind, "actor": conflict.Actor,
+			"at": conflict.At, "entity": conflict.Entity, "entity_id": conflict.EntityID}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := store.IdemRow{Actor: m.Actor.Key(), Key: m.Idem.Key, Hash: idemHash(s.idemHMACKey, m.Actor.Key(), m.Idem),
+		Status: 409, ErrorJSON: problem, CreatedAt: s.clock.Now()}
+	if err := store.PutIdem(t.Context(), s.store.Writer, row); err != nil {
+		t.Fatal(err)
+	}
+	old := reconcileSteps
+	t.Cleanup(func() { reconcileSteps = old })
+	reconcileSteps = []reconcileStep{{need: func(context.Context, store.Q, time.Time, civil.Date) (bool, error) {
+		t.Fatal("replay ran reconcile")
+		return false, nil
+	}}}
+	for range 2 {
+		_, err := s.run(t.Context(), m, opSpec{class: classUndo, idem: true}, func(*op) error {
+			t.Fatal("replay selected or changed a target")
+			return nil
+		})
+		requireRunnerCode(t, err, domain.CodeRevertConflict)
+		de, _ := domain.AsError(err)
+		if de.Detail != "task changed" || !reflect.DeepEqual(de.Conflicts, []domain.RevertConflict{conflict}) {
+			t.Fatalf("replayed error = %+v", de)
+		}
+	}
+	var n int
+	if err := s.store.Reader.QueryRowContext(t.Context(), `SELECT (SELECT COUNT(*) FROM ops) + (SELECT COUNT(*) FROM events)`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatal("terminal replay wrote operations or events")
+	}
+}
+
+func TestReplayBeforeReconcile(t *testing.T) {
+	s, m := runnerFixture(t)
+	first, err := s.AddTask(t.Context(), m, AddTaskIn{Title: "A"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := reconcileSteps
+	t.Cleanup(func() { reconcileSteps = old })
+	reconcileSteps = []reconcileStep{{need: func(context.Context, store.Q, time.Time, civil.Date) (bool, error) {
+		t.Fatal("replay or mismatch ran reconcile")
+		return false, nil
+	}}}
+	replay, err := s.AddTask(t.Context(), m, AddTaskIn{Title: "A"})
+	if err != nil || !replay.Replayed || replay.OpID != first.OpID {
+		t.Fatalf("replay = %+v, %v", replay, err)
+	}
+	m.Idem.Route = "another route"
+	_, err = s.AddTask(t.Context(), m, AddTaskIn{Title: "A"})
+	requireRunnerCode(t, err, domain.CodeIdemMismatch)
+}
+
+func TestShutdownContextAndBudget(t *testing.T) {
+	s, m := runnerFixture(t)
+	if OpBudget != 15*time.Second || IdemTTL != 7*24*time.Hour {
+		t.Fatal("incorrect operation budget or idempotency TTL")
+	}
+	type valueKey struct{}
+	ctx := context.WithValue(t.Context(), valueKey{}, "kept")
+	ctx, cancel := context.WithDeadline(ctx, time.Unix(0, 0))
+	defer cancel()
+	_, err := s.run(ctx, m, opSpec{class: classForward, kind: "test.context"}, func(o *op) error {
+		deadline, ok := o.ctx.Deadline()
+		if !ok || o.ctx.Err() != nil || o.ctx.Value(valueKey{}) != "kept" || deadline.Equal(time.Unix(0, 0)) {
+			t.Fatalf("detached context: deadline = %v, error = %v", deadline, o.ctx.Err())
+		}
+		if remaining := time.Until(deadline); remaining <= 0 || remaining > OpBudget {
+			t.Fatalf("remaining budget = %v", remaining)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stop := s.stopCtx()
+	s.BeginShutdown()
+	if !errors.Is(stop.Err(), context.Canceled) || stop.Done() != s.Stopping() {
+		t.Fatal("shutdown context was not canceled or shared with Stopping")
+	}
+	err = s.read(t.Context(), m.Actor, 0, true, func(store.Q, time.Time, civil.Date) error {
+		t.Fatal("reconciling read admitted during shutdown")
+		return nil
+	})
+	requireRunnerCode(t, err, domain.CodeBusy)
+}
+
+func TestShutdownReconcileAndWriteTxDrain(t *testing.T) {
+	for _, job := range []string{"reconcile", "writeTx"} {
+		t.Run(job, func(t *testing.T) {
+			s, _ := runnerFixture(t)
+			started, release := make(chan struct{}), make(chan struct{})
+			done := make(chan error, 1)
+			if job == "reconcile" {
+				old := reconcileSteps
+				t.Cleanup(func() { reconcileSteps = old })
+				checks := 0
+				reconcileSteps = []reconcileStep{{need: func(context.Context, store.Q, time.Time, civil.Date) (bool, error) {
+					checks++
+					if checks == 1 {
+						close(started)
+						<-release
+					}
+					return true, nil
+				}, run: func(o *op) error {
+					return o.record(domain.Event{Entity: domain.EntSetting, Action: domain.ActUpdate})
+				}}}
+				go func() { done <- s.Reconcile(t.Context()) }()
+			} else {
+				go func() {
+					done <- s.writeTx(t.Context(), func(*sql.Tx, time.Time) error {
+						close(started)
+						<-release
+						return nil
+					})
+				}()
+			}
+			<-started
+			s.BeginShutdown()
+			ctx, cancel := context.WithCancel(t.Context())
+			cancel()
+			err := s.Drain(ctx)
+			// Always release the job before assertions so cleanup cannot hang.
+			close(release)
+			if jobErr := <-done; jobErr != nil {
+				t.Fatal(jobErr)
+			}
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("drain did not wait for %s: %v", job, err)
+			}
+			if err := s.Drain(t.Context()); err != nil {
+				t.Fatal(err)
 			}
 		})
 	}

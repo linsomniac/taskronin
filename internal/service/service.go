@@ -46,6 +46,7 @@ type Service struct {
 	logger      *slog.Logger
 	gen         domain.Generation
 	idemHMACKey [32]byte
+	life        lifecycle
 }
 
 // New loads the database identity and initializes the service.
@@ -145,6 +146,16 @@ func (s *Service) read(ctx context.Context, a domain.Actor, scopes domain.Scopes
 }
 
 func (s *Service) writeTx(ctx context.Context, fn func(tx *sql.Tx, now time.Time) error) error {
+	leave, err := s.enter()
+	if err != nil {
+		return err
+	}
+	defer leave()
+	return s.writeTxEntered(ctx, fn)
+}
+
+// writeTxEntered is used only while the caller holds an in-flight registration.
+func (s *Service) writeTxEntered(ctx context.Context, fn func(tx *sql.Tx, now time.Time) error) error {
 	tx, err := s.store.Writer.BeginTx(ctx, nil)
 	if err != nil {
 		return serviceError(err)

@@ -100,7 +100,7 @@ func (s *Service) AddTask(ctx context.Context, m Meta, in AddTaskIn) (*OpResult,
 		if err != nil {
 			return err
 		}
-		if err := store.InsertTask(ctx, o.tx, &t); err != nil {
+		if err := store.InsertTask(o.ctx, o.tx, &t); err != nil {
 			return err
 		}
 		ref := domain.EntityRef{Entity: domain.EntTask, ID: int64(t.ID)}
@@ -118,10 +118,10 @@ func (s *Service) AddTask(ctx context.Context, m Meta, in AddTaskIn) (*OpResult,
 			return err
 		}
 		if len(tags) > 0 {
-			if err := store.SetTaskTags(ctx, o.tx, t.ID, tags, o.now); err != nil {
+			if err := store.SetTaskTags(o.ctx, o.tx, t.ID, tags, o.now); err != nil {
 				return err
 			}
-			stored, err := store.TaskTags(ctx, o.tx, t.ID)
+			stored, err := store.TaskTags(o.ctx, o.tx, t.ID)
 			if err != nil {
 				return err
 			}

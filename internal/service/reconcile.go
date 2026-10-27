@@ -22,8 +22,13 @@ var reconcileSteps []reconcileStep
 
 // Reconcile performs time-dependent maintenance only when the reader finds work.
 func (s *Service) Reconcile(ctx context.Context) error {
+	leave, err := s.enter()
+	if err != nil {
+		return err
+	}
+	defer leave()
 	var needed bool
-	err := s.read(ctx, domain.SystemActor(), 0, false, func(q store.Q, now time.Time, _ civil.Date) error {
+	err = s.read(ctx, domain.SystemActor(), 0, false, func(q store.Q, now time.Time, _ civil.Date) error {
 		var err error
 		needed, err = s.needsReconcile(ctx, q, now)
 		return err
@@ -31,7 +36,7 @@ func (s *Service) Reconcile(ctx context.Context) error {
 	if err != nil || !needed {
 		return err
 	}
-	return s.writeTx(ctx, func(tx *sql.Tx, now time.Time) error { return s.reconcileTx(ctx, tx, now) })
+	return s.writeTxEntered(ctx, func(tx *sql.Tx, now time.Time) error { return s.reconcileTx(ctx, tx, now) })
 }
 
 func (s *Service) needsReconcile(ctx context.Context, q store.Q, now time.Time) (bool, error) {
