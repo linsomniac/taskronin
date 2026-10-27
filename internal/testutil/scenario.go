@@ -182,6 +182,36 @@ func (s *Scenario) LogAt(task domain.TaskID, text, date, at string) domain.Entry
 	return r.Entry.ID
 }
 
+// EditEntry edits an entry using its current precondition and input modifiers.
+func (s *Scenario) EditEntry(id domain.EntryID, mods ...func(*service.UpdateEntryIn)) {
+	s.T.Helper()
+	in := service.UpdateEntryIn{ID: id, Expect: s.EntryExpect(id)}
+	for _, mod := range mods {
+		mod(&in)
+	}
+	s.Must(s.Svc.UpdateEntry(s.Ctx(), s.Meta(), in))
+}
+
+// Relink changes an entry's task using its current precondition; task 0 is standalone.
+func (s *Scenario) Relink(id domain.EntryID, task domain.TaskID) {
+	s.T.Helper()
+	s.Must(s.Svc.RelinkEntry(s.Ctx(), s.Meta(), service.RelinkEntryIn{
+		ID: id, Expect: s.EntryExpect(id), TaskID: sql.Null[domain.TaskID]{V: task, Valid: task != 0},
+	}))
+}
+
+// DeleteEntry tombstones an entry using its current precondition.
+func (s *Scenario) DeleteEntry(id domain.EntryID) {
+	s.T.Helper()
+	s.Must(s.Svc.DeleteEntry(s.Ctx(), s.Meta(), service.EntryRef{ID: id, Expect: s.EntryExpect(id)}))
+}
+
+// UndeleteEntry restores an entry using its current precondition.
+func (s *Scenario) UndeleteEntry(id domain.EntryID) {
+	s.T.Helper()
+	s.Must(s.Svc.UndeleteEntry(s.Ctx(), s.Meta(), service.EntryRef{ID: id, Expect: s.EntryExpect(id)}))
+}
+
 // Add captures a task after applying the supplied input modifiers.
 func (s *Scenario) Add(title string, mods ...func(*service.AddTaskIn)) domain.TaskID {
 	s.T.Helper()
