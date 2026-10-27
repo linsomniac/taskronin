@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"log/slog"
+	"sync/atomic"
 	"time"
 
 	"taskronin/internal/auth"
@@ -47,6 +48,7 @@ type Service struct {
 	gen         domain.Generation
 	idemHMACKey [32]byte
 	life        lifecycle
+	tzChanged   atomic.Bool
 }
 
 // New loads the database identity and initializes the service.

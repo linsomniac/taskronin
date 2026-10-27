@@ -51,3 +51,6 @@ func (s *Service) TestSetBlock(ctx context.Context, m Meta, id domain.BlockID, c
 		return o.setBlock(&b, ch)
 	})
 }
+
+// DecodeOffsetForTest exposes shared offset validation before Search is implemented.
+var DecodeOffsetForTest = decodeOffset
