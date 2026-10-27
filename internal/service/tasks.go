@@ -170,9 +170,12 @@ func (s *Service) AddTask(ctx context.Context, m Meta, in AddTaskIn) (*OpResult,
 			}
 			t.DueDate, t.DueMin = sql.Null[civil.Date]{V: in.Due.Date, Valid: true}, in.Due.Min
 		}
-		if in.Place == nil || in.Place.How == "block" {
+		switch {
+		case in.Place == nil || in.Place.How == "block":
 			t.Rank, err = o.rankBottom()
-		} else {
+		case in.Place.How == "now":
+			t.Rank, err = o.rankTop()
+		default:
 			t.Rank, err = o.placementRank(domain.PlaceHow(in.Place.How), in.Place.Ref)
 		}
 		if err != nil {
@@ -204,6 +207,14 @@ func (s *Service) AddTask(ctx context.Context, m Meta, in AddTaskIn) (*OpResult,
 			}
 			if err := o.place(t.ID); err != nil {
 				return err
+			}
+			if in.Place.How == "now" {
+				if err := o.interrupt(t.ID, true, false); err != nil {
+					return err
+				}
+				if err := o.setFocus(sql.Null[domain.TaskID]{V: t.ID, Valid: true}); err != nil {
+					return err
+				}
 			}
 		}
 		if len(tags) > 0 {
@@ -257,16 +268,16 @@ func validateAddPlacement(p AddPlacement) error {
 		return errors.New("block only belongs to block placement")
 	}
 	switch p.How {
-	case "top", "bottom", "block":
+	case "top", "bottom", "block", "now":
 		return nil
 	case "before", "after":
 		if p.Ref == 0 {
 			return errors.New("placement reference is required")
 		}
 		return nil
-	case "defer", "now":
+	case "defer":
 		// AIDEV-TODO: Tasks 22/26/27 implement AddPlacement's remaining modes.
-		// Block is implemented; Tasks 26/27 supply now/defer.
+		// Block and now are implemented; Task 27 supplies defer.
 		return errors.New("unsupported placement")
 	default:
 		return errors.New("unknown placement")

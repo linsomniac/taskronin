@@ -109,12 +109,12 @@ func TestTRI09(t *testing.T) {
 			}
 		})
 	}
-	for _, how := range []string{"defer", "block", "now", "keep", "unknown", "", "before", "after"} {
+	for _, how := range []string{"defer", "block", "keep", "unknown", "", "before", "after"} {
 		t.Run("unsupported_or_missing/"+how, func(t *testing.T) {
 			s := testutil.NewScenario(t)
 			_, err := s.Svc.AddTask(s.Ctx(), s.Meta(), service.AddTaskIn{Title: "B", Place: &service.AddPlacement{How: how}})
 			testutil.RequireCode(t, err, domain.CodeValidation)
-			if how == "defer" || how == "now" {
+			if how == "defer" {
 				de, _ := domain.AsError(err)
 				if len(de.Fields) != 1 || de.Fields[0].Field != "place" || de.Fields[0].Message != "unsupported placement" {
 					t.Fatalf("error = %v", err)

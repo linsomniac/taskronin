@@ -22,6 +22,22 @@ var reconcileSteps = []reconcileStep{
 	{name: "due", need: needDue, run: (*op).reconcileDue},
 	{name: "overdue", need: needOverdue, run: (*op).reconcileOverdue},
 	{name: "resolve", need: needResolve, run: (*op).reconcileBlocks},
+	{name: "focus", need: needFocus, run: (*op).reconcileFocus},
+}
+
+func needFocus(ctx context.Context, q store.Q, _ time.Time, today civil.Date) (bool, error) {
+	var needed bool
+	err := q.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM focus f JOIN tasks t ON t.id = f.task_id
+		WHERE f.date != ? OR t.status != 'open' OR t.deleted_at IS NOT NULL OR t.defer_date IS NOT NULL)`, today).Scan(&needed)
+	return needed, err
+}
+
+func (o *op) reconcileFocus() error {
+	needed, err := needFocus(o.ctx, o.tx, o.now, o.today)
+	if err != nil || !needed {
+		return err
+	}
+	return o.setFocus(sql.Null[domain.TaskID]{})
 }
 
 func needResolve(ctx context.Context, q store.Q, _ time.Time, today civil.Date) (bool, error) {

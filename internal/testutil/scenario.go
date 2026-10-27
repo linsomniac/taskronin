@@ -244,6 +244,39 @@ func Bottom() func(*service.AddTaskIn) {
 	return func(in *service.AddTaskIn) { in.Place = &service.AddPlacement{How: "bottom"} }
 }
 
+// Now places a new task at the top, focuses it and records any interruption.
+func Now() func(*service.AddTaskIn) {
+	return func(in *service.AddTaskIn) { in.Place = &service.AddPlacement{How: "now"} }
+}
+
+// SetFocus focuses task, or clears focus when task is zero.
+func (s *Scenario) SetFocus(task domain.TaskID, interrupt bool) {
+	s.T.Helper()
+	s.Must(s.Svc.SetFocus(s.Ctx(), s.Meta(), service.SetFocusIn{
+		TaskID: sql.Null[domain.TaskID]{V: task, Valid: task != 0}, Interrupt: interrupt,
+	}))
+}
+
+// Focus returns the persisted singleton focus without triggering reconcile.
+func (s *Scenario) Focus() domain.Focus {
+	s.T.Helper()
+	f, err := store.GetFocus(s.Ctx(), s.Store.Reader)
+	if err != nil {
+		s.T.Fatal(err)
+	}
+	return f
+}
+
+// Interruptions returns live interruptions on a catalog date.
+func (s *Scenario) Interruptions(date string) []domain.Interruption {
+	s.T.Helper()
+	rows, err := store.InterruptionsOn(s.Ctx(), s.Store.Reader, D(date))
+	if err != nil {
+		s.T.Fatal(err)
+	}
+	return rows
+}
+
 // After places a new task immediately after id in the global task order.
 func After(id domain.TaskID) func(*service.AddTaskIn) {
 	return func(in *service.AddTaskIn) { in.Place = &service.AddPlacement{How: "after", Ref: id} }
