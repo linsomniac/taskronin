@@ -304,6 +304,34 @@ func (s *Scenario) BlockExpect(id domain.BlockID) domain.Expect {
 	return domain.Expect{Gen: s.Svc.Generation(), Version: s.BlockView(id).Version}
 }
 
+// Unblock ends a planned block using its current precondition.
+func (s *Scenario) Unblock(b domain.BlockID) {
+	s.T.Helper()
+	s.Must(s.Svc.Unblock(s.Ctx(), s.Meta(), service.BlockRef{BlockID: b, Expect: s.BlockExpect(b)}))
+}
+
+// Reblock reschedules a block and returns the resulting planned block's ID.
+func (s *Scenario) Reblock(b domain.BlockID, span string) domain.BlockID {
+	s.T.Helper()
+	v := s.BlockView(b)
+	next := blockSpan(span)
+	if next.Date.IsZero() {
+		next.Date = Zone.DateOf(s.Clock.Now())
+	}
+	r := s.Must(s.Svc.Reblock(s.Ctx(), s.Meta(), service.ReblockIn{BlockID: b,
+		Expect: s.BlockExpect(b), TaskExpect: s.Expect(v.TaskID), Span: next}))
+	if r.Block == nil {
+		s.T.Fatal("Reblock returned no block")
+	}
+	return r.Block.ID
+}
+
+// Outcome sets a block's outcome policy using its current precondition.
+func (s *Scenario) Outcome(b domain.BlockID, o domain.UserOutcome) {
+	s.T.Helper()
+	s.Must(s.Svc.SetOutcome(s.Ctx(), s.Meta(), service.SetOutcomeIn{BlockID: b, Expect: s.BlockExpect(b), Outcome: o}))
+}
+
 // Place acknowledges triage and positions a task using its current precondition.
 func (s *Scenario) Place(id domain.TaskID, how domain.PlaceHow, ref ...domain.TaskID) {
 	s.T.Helper()

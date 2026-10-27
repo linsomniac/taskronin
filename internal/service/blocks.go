@@ -18,6 +18,26 @@ type BlockIn struct {
 	Span   domain.BlockSpan
 }
 
+// BlockRef identifies a block and its expected version.
+type BlockRef struct {
+	BlockID domain.BlockID
+	Expect  domain.Expect
+}
+
+// ReblockIn supplies a new span and preconditions for both the block and its task.
+type ReblockIn struct {
+	BlockID            domain.BlockID
+	Expect, TaskExpect domain.Expect
+	Span               domain.BlockSpan
+}
+
+// SetOutcomeIn identifies a block, its expected version, and an outcome policy.
+type SetOutcomeIn struct {
+	BlockID domain.BlockID
+	Expect  domain.Expect
+	Outcome domain.UserOutcome
+}
+
 // Block schedules an open task and acknowledges its triage reasons.
 func (s *Service) Block(ctx context.Context, m Meta, in BlockIn) (*OpResult, error) {
 	return s.run(ctx, m, opSpec{kind: domain.OpBlockCreate, class: classForward, scopes: domain.ScopeWrite, idem: true, revertible: true}, func(o *op) error {
@@ -35,6 +55,150 @@ func (s *Service) Block(ctx context.Context, m Meta, in BlockIn) (*OpResult, err
 		o.created = true
 		return nil
 	})
+}
+
+// Unblock ends a planned block without acknowledging the task's triage reasons.
+func (s *Service) Unblock(ctx context.Context, m Meta, in BlockRef) (*OpResult, error) {
+	return s.run(ctx, m, opSpec{kind: domain.OpBlockUnblock, class: classForward, scopes: domain.ScopeWrite, idem: true, revertible: true}, func(o *op) error {
+		b, err := o.loadBlock(in.BlockID, &in.Expect)
+		if err != nil {
+			return err
+		}
+		if b.Status != domain.BlockPlanned {
+			return domain.Errorf(domain.CodeConflict, "block #%d is not planned", b.ID)
+		}
+		if err := o.endEarly(&b, domain.CancelUser); err != nil {
+			return err
+		}
+		o.ref(domain.EntityRef{Entity: domain.EntBlock, ID: int64(b.ID)})
+		return nil
+	})
+}
+
+// Reblock reschedules a block and acknowledges its task's triage reasons.
+func (s *Service) Reblock(ctx context.Context, m Meta, in ReblockIn) (*OpResult, error) {
+	return s.run(ctx, m, opSpec{kind: domain.OpBlockReblock, class: classForward, scopes: domain.ScopeWrite, idem: true, revertible: true}, func(o *op) error {
+		b, err := o.loadBlock(in.BlockID, &in.Expect)
+		if err != nil {
+			return err
+		}
+		t, err := o.loadTask(b.TaskID, &in.TaskExpect, false)
+		if err != nil {
+			return err
+		}
+		if t.Status != domain.StatusOpen {
+			return domain.Errorf(domain.CodeConflict, "task #%d is not open", t.ID)
+		}
+		// AIDEV-NOTE: Reblock is a placement throughout the op (A§3.1).
+		// Suppress reason additions while ending the old block; place below
+		// still clears existing reasons and persists the acknowledgement.
+		o.placed[t.ID] = true
+		var inPlace bool
+		if b.Status == domain.BlockPlanned {
+			started, err := o.started(b)
+			if err != nil {
+				return err
+			}
+			inPlace = !started && in.Span.Date == b.Span.Date
+		}
+		if inPlace {
+			if err := o.checkSpan(in.Span, b.ID); err != nil {
+				return err
+			}
+			before := b
+			b.Span = in.Span
+			if err := store.UpdateBlock(o.ctx, o.tx, b); err != nil {
+				return err
+			}
+			if err := o.recordUpdate(domain.EntBlock, int64(b.ID), blockCols(before), blockCols(b)); err != nil {
+				return err
+			}
+			o.ref(domain.EntityRef{Entity: domain.EntBlock, ID: int64(b.ID)})
+		} else {
+			// AIDEV-NOTE: End the old planned row before checking overlap for its
+			// replacement. The runner rolls both changes back if creation fails.
+			if b.Status == domain.BlockPlanned {
+				if err := o.endEarly(&b, domain.CancelRescheduled); err != nil {
+					return err
+				}
+			}
+			if _, err := o.createBlock(t, in.Span); err != nil {
+				return err
+			}
+		}
+		if err := o.place(t.ID); err != nil {
+			return err
+		}
+		o.ref(domain.EntityRef{Entity: domain.EntTask, ID: int64(t.ID)})
+		return nil
+	})
+}
+
+// SetOutcome overrides a block's outcome or restores automatic resolution.
+func (s *Service) SetOutcome(ctx context.Context, m Meta, in SetOutcomeIn) (*OpResult, error) {
+	return s.run(ctx, m, opSpec{kind: domain.OpBlockOutcome, class: classForward, scopes: domain.ScopeWrite, idem: true, revertible: true}, func(o *op) error {
+		if !in.Outcome.Valid() {
+			return domain.Errorf(domain.CodeValidation, "unsupported block outcome")
+		}
+		b, err := o.loadBlock(in.BlockID, &in.Expect)
+		if err != nil {
+			return err
+		}
+		o.ref(domain.EntityRef{Entity: domain.EntBlock, ID: int64(b.ID)})
+		if b.Status == domain.BlockCancelled {
+			return domain.Errorf(domain.CodeConflict, "cannot set a cancelled block's outcome; use unblock for cancellation")
+		}
+		if in.Outcome == domain.SetAuto {
+			if b.Status == domain.BlockPlanned {
+				return nil
+			}
+			if b.Span.Date.Before(o.today) {
+				return o.resolveByDerivation(&b)
+			}
+			if b.Span.Date == o.today {
+				slipped := false
+				return o.setBlock(&b, blockChange{Status: domain.BlockPlanned, Slipped: &slipped})
+			}
+			return domain.Errorf(domain.CodeConflict, "cannot reset an outcome on a future block")
+		}
+		if b.Status == domain.BlockPlanned {
+			started, err := o.started(b)
+			if err != nil {
+				return err
+			}
+			if b.Span.Date != o.today || !started {
+				return domain.Errorf(domain.CodeConflict, "block has not started today; use unblock")
+			}
+		}
+		slipped := in.Outcome == domain.SetMissed
+		return o.setBlock(&b, blockChange{Status: domain.BlockStatus(in.Outcome), Source: domain.OutcomeUser, Slipped: &slipped})
+	})
+}
+
+func (o *op) started(b domain.TimeBlock) (bool, error) {
+	start, err := o.s.zone.Instant(b.Span.Date, b.Span.Start, civil.GapReject)
+	return !start.After(o.now), err
+}
+
+func (o *op) slipOnCancel(b domain.TimeBlock, c domain.CancelReason) bool {
+	if c == domain.CancelTaskClosed || b.Span.Date != o.today || o.now.Sub(b.CreatedAt) < o.s.slipGrace {
+		return false
+	}
+	// Persisted spans are valid; endEarly propagates any instant error first.
+	started, err := o.started(b)
+	return err == nil && !started
+}
+
+func (o *op) endEarly(b *domain.TimeBlock, c domain.CancelReason) error {
+	started, err := o.started(*b)
+	if err != nil {
+		return err
+	}
+	if started {
+		return o.resolveByDerivation(b)
+	}
+	slipped := o.slipOnCancel(*b, c)
+	return o.setBlock(b, blockChange{Status: domain.BlockCancelled, Cancel: c, Slipped: &slipped})
 }
 
 // GetBlock returns a block, including a tombstone, with its task and interval state.
