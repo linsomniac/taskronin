@@ -48,6 +48,7 @@ type Service struct {
 	gen         domain.Generation
 	idemHMACKey [32]byte
 	life        lifecycle
+	usage       usage
 	tzChanged   atomic.Bool
 }
 
@@ -64,6 +65,9 @@ func New(o Options) (*Service, error) {
 	}
 	if o.Logger == nil {
 		o.Logger = slog.New(slog.DiscardHandler)
+	}
+	if o.Passwords == nil {
+		o.Passwords = auth.NewPasswordGate(o.Clock)
 	}
 	tx, err := o.Store.Reader.BeginTx(context.Background(), &sql.TxOptions{ReadOnly: true})
 	if err != nil {
@@ -84,11 +88,16 @@ func New(o Options) (*Service, error) {
 	return &Service{store: o.Store, clock: o.Clock, zone: o.Zone, weekStart: o.WeekStart,
 		dueSoonDays: o.DueSoonDays, slipGrace: o.SlipGrace, undoDepth: o.UndoDepth,
 		backups: o.Backups, ledger: o.Ledger, passwords: o.Passwords, logger: o.Logger,
-		gen: domain.Generation(gen), idemHMACKey: a.IdemHMACKey}, nil
+		gen: domain.Generation(gen), idemHMACKey: a.IdemHMACKey,
+		usage: usage{tokens: make(map[domain.TokenID]time.Time), sessions: make(map[[32]byte]time.Time)}}, nil
 }
 
 // Generation returns the cached database generation without authorization.
 func (s *Service) Generation() domain.Generation { return s.gen }
+
+func (s *Service) systemMeta() Meta {
+	return Meta{Actor: domain.SystemActor(), Gen: s.Generation()}
+}
 
 // Zone returns the service's configured civil time zone.
 func (s *Service) Zone() civil.Zone { return s.zone }

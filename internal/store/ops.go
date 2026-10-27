@@ -73,6 +73,12 @@ func SetOpState(ctx context.Context, q Q, id domain.OpID, s domain.OpState) erro
 	return requireAffected(result, err)
 }
 
+// SetOpKind sets the kind of an operation whose classification depends on transactional state.
+func SetOpKind(ctx context.Context, q Q, id domain.OpID, kind domain.OpKind) error {
+	result, err := q.ExecContext(ctx, `UPDATE ops SET kind = ? WHERE op_id = ?`, kind, id)
+	return requireAffected(result, err)
+}
+
 // ActiveReversal returns the active operation reverting target, if one exists.
 func ActiveReversal(ctx context.Context, q Q, target domain.OpID) (sql.Null[domain.OpRecord], error) {
 	r, err := scanOp(q.QueryRowContext(ctx, `SELECT `+opColumns+` FROM ops

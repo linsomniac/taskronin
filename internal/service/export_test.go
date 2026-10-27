@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"maps"
+	"time"
 
 	"taskronin/internal/civil"
 	"taskronin/internal/domain"
@@ -57,3 +59,10 @@ var DecodeOffsetForTest = decodeOffset
 
 // FTSQueryForTest exposes the literal full-text query builder to external tests.
 func FTSQueryForTest(user string) (string, error) { return ftsQuery(user) }
+
+// TokenUsageForTest returns a snapshot of queued token usage without flushing it.
+func (s *Service) TokenUsageForTest() map[domain.TokenID]time.Time {
+	s.usage.mu.Lock()
+	defer s.usage.mu.Unlock()
+	return maps.Clone(s.usage.tokens)
+}
