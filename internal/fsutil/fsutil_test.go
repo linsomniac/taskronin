@@ -91,6 +91,9 @@ func TestEnsureDir0700(t *testing.T) {
 	}
 	requireMode(t, nested, 0o700)
 	requireMode(t, filepath.Dir(nested), 0o700)
+	if err := EnsureDir0700(nested); err != nil {
+		t.Fatalf("already-private directory: %v", err)
+	}
 	if err := os.Chmod(nested, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -105,6 +108,9 @@ func TestEnsureDir0700(t *testing.T) {
 	if err := EnsureDir0700(file); err == nil {
 		t.Fatal("accepted a regular file")
 	}
+	if err := os.Chmod(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	link := filepath.Join(dir, "link")
 	if err := os.Symlink(nested, link); err != nil {
 		t.Fatal(err)
@@ -112,6 +118,7 @@ func TestEnsureDir0700(t *testing.T) {
 	if err := EnsureDir0700(link); err == nil {
 		t.Fatal("accepted a symlink")
 	}
+	requireMode(t, nested, 0o755)
 }
 
 func TestForeignOwner(t *testing.T) {
