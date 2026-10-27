@@ -6,6 +6,8 @@ toolchain go1.26.8
 
 require (
 	github.com/charmbracelet/x/ansi v0.11.9
+	golang.org/x/crypto v0.58.0
+	golang.org/x/time v0.16.0
 	modernc.org/sqlite v1.60.1
 )
 
