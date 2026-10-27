@@ -114,7 +114,7 @@ func TestTRI09(t *testing.T) {
 			s := testutil.NewScenario(t)
 			_, err := s.Svc.AddTask(s.Ctx(), s.Meta(), service.AddTaskIn{Title: "B", Place: &service.AddPlacement{How: how}})
 			testutil.RequireCode(t, err, domain.CodeValidation)
-			if how == "defer" || how == "block" || how == "now" {
+			if how == "defer" || how == "now" {
 				de, _ := domain.AsError(err)
 				if len(de.Fields) != 1 || de.Fields[0].Field != "place" || de.Fields[0].Message != "unsupported placement" {
 					t.Fatalf("error = %v", err)

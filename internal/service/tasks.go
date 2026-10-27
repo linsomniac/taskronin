@@ -170,7 +170,7 @@ func (s *Service) AddTask(ctx context.Context, m Meta, in AddTaskIn) (*OpResult,
 			}
 			t.DueDate, t.DueMin = sql.Null[civil.Date]{V: in.Due.Date, Valid: true}, in.Due.Min
 		}
-		if in.Place == nil {
+		if in.Place == nil || in.Place.How == "block" {
 			t.Rank, err = o.rankBottom()
 		} else {
 			t.Rank, err = o.placementRank(domain.PlaceHow(in.Place.How), in.Place.Ref)
@@ -197,6 +197,11 @@ func (s *Service) AddTask(ctx context.Context, m Meta, in AddTaskIn) (*OpResult,
 				return err
 			}
 		} else {
+			if in.Place.How == "block" {
+				if _, err := o.createBlock(t, in.Place.Block); err != nil {
+					return err
+				}
+			}
 			if err := o.place(t.ID); err != nil {
 				return err
 			}
@@ -252,15 +257,16 @@ func validateAddPlacement(p AddPlacement) error {
 		return errors.New("block only belongs to block placement")
 	}
 	switch p.How {
-	case "top", "bottom":
+	case "top", "bottom", "block":
 		return nil
 	case "before", "after":
 		if p.Ref == 0 {
 			return errors.New("placement reference is required")
 		}
 		return nil
-	case "defer", "block", "now":
+	case "defer", "now":
 		// AIDEV-TODO: Tasks 22/26/27 implement AddPlacement's remaining modes.
+		// Block is implemented; Tasks 26/27 supply now/defer.
 		return errors.New("unsupported placement")
 	default:
 		return errors.New("unknown placement")

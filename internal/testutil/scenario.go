@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 
 	"taskronin/internal/civil"
@@ -188,6 +189,9 @@ func (s *Scenario) Add(title string, mods ...func(*service.AddTaskIn)) domain.Ta
 	for _, mod := range mods {
 		mod(&in)
 	}
+	if in.Place != nil && in.Place.How == "block" && in.Place.Block.Date.IsZero() {
+		in.Place.Block.Date = Zone.DateOf(s.Clock.Now())
+	}
 	r := s.Must(s.Svc.AddTask(s.Ctx(), s.Meta(), in))
 	if r.Task == nil {
 		s.T.Fatal("AddTask returned no task")
@@ -218,6 +222,86 @@ func After(id domain.TaskID) func(*service.AddTaskIn) {
 // Before places a new task immediately before id in the global task order.
 func Before(id domain.TaskID) func(*service.AddTaskIn) {
 	return func(in *service.AddTaskIn) { in.Place = &service.AddPlacement{How: "before", Ref: id} }
+}
+
+// BlockAt places a new task in a catalog span; an omitted date means the scenario's today.
+func BlockAt(span string) func(*service.AddTaskIn) {
+	return func(in *service.AddTaskIn) {
+		in.Place = &service.AddPlacement{How: "block", Block: blockSpan(span)}
+	}
+}
+
+func blockSpan(span string) domain.BlockSpan {
+	var b domain.BlockSpan
+	date, wall, hasDate := strings.Cut(span, " ")
+	if hasDate {
+		b.Date = D(date)
+	} else {
+		wall = span
+	}
+	start, end, ok := strings.Cut(wall, "-")
+	if !ok {
+		panic(fmt.Errorf("testutil: invalid block span %q", span))
+	}
+	var err error
+	b.Start, err = civil.ParseHHMM(start, false)
+	if err != nil {
+		panic(err)
+	}
+	e, err := civil.ParseHHMM(end, true)
+	if err != nil {
+		panic(err)
+	}
+	b.End = civil.EndMinute(e)
+	return b
+}
+
+// Block schedules a task using its current precondition; an omitted date means today.
+func (s *Scenario) Block(task domain.TaskID, span string) domain.BlockID {
+	s.T.Helper()
+	b := blockSpan(span)
+	if b.Date.IsZero() {
+		b.Date = Zone.DateOf(s.Clock.Now())
+	}
+	r := s.Must(s.Svc.Block(s.Ctx(), s.Meta(), service.BlockIn{TaskID: task, Expect: s.Expect(task), Span: b}))
+	if r.Block == nil {
+		s.T.Fatal("Block returned no block")
+	}
+	return r.Block.ID
+}
+
+// BlockView returns the current block view through GetBlock.
+func (s *Scenario) BlockView(id domain.BlockID) domain.BlockView {
+	s.T.Helper()
+	b, err := s.Svc.GetBlock(s.Ctx(), s.Actor, id)
+	if err != nil {
+		s.T.Fatal(err)
+	}
+	return b
+}
+
+// BlockState returns the catalog tuple {status, source, slipped, cancel}.
+func (s *Scenario) BlockState(id domain.BlockID) string {
+	s.T.Helper()
+	b := s.BlockView(id)
+	source, cancel := string(b.OutcomeSource), string(b.CancelReason)
+	if source == "" {
+		source = "–"
+	}
+	if cancel == "" {
+		cancel = "–"
+	}
+	slipped := 0
+	if b.Slipped {
+		slipped = 1
+	}
+	return fmt.Sprintf("{%s, %s, %d, %s}", b.Status, source, slipped, cancel)
+}
+
+// BlockExpect returns the block's current version in the live database generation.
+func (s *Scenario) BlockExpect(id domain.BlockID) domain.Expect {
+	s.T.Helper()
+	return domain.Expect{Gen: s.Svc.Generation(), Version: s.BlockView(id).Version}
 }
 
 // Place acknowledges triage and positions a task using its current precondition.
