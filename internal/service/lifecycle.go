@@ -12,6 +12,22 @@ import (
 // OpBudget bounds an ordinary operation, including writer admission and views.
 const OpBudget = 15 * time.Second
 
+// LongOpBudget bounds backups and exports, which also abort on caller cancellation or shutdown.
+const LongOpBudget = 10 * time.Minute
+
+func (s *Service) longOpContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithTimeout(ctx, LongOpBudget)
+	stop := s.stopCtx()
+	unregister := context.AfterFunc(stop, cancel)
+	if stop.Err() != nil {
+		cancel()
+	}
+	return ctx, func() {
+		unregister()
+		cancel()
+	}
+}
+
 type lifecycle struct {
 	mu       sync.Mutex
 	stopping bool

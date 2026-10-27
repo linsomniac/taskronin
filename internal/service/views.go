@@ -951,9 +951,9 @@ func (s *Service) readWarnings(ctx context.Context, q store.Q, now time.Time) (B
 	}
 	banners := make([]Banner, 0)
 	if health.LastError != "" {
-		banners = append(banners, Banner{Kind: "backup_failed", Message: "Backup failed: " + health.LastError})
+		banners = append(banners, Banner{Kind: "backup_failed", Message: backupWarning(health)})
 	} else if !health.Healthy {
-		banners = append(banners, Banner{Kind: "backup_stale", Message: "No successful backup in the last 48 hours."})
+		banners = append(banners, Banner{Kind: "backup_stale", Message: backupWarning(health)})
 	}
 	if ai > 0 {
 		banners = append(banners, Banner{Kind: "ai_changes", Message: fmt.Sprintf("%d unreviewed AI changes.", ai)})

@@ -66,3 +66,7 @@ func (s *Service) TokenUsageForTest() map[domain.TokenID]time.Time {
 	defer s.usage.mu.Unlock()
 	return maps.Clone(s.usage.tokens)
 }
+
+// SetBackupHook installs a hook after attempt recording and before Snapshot.
+// Configure it before starting a backup; it must not be changed concurrently.
+func SetBackupHook(s *Service, fn func(ctx context.Context) error) { s.backupHook = fn }
