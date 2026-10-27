@@ -18,7 +18,9 @@ func (s *Service) RecordSystemOp(ctx context.Context, kind domain.OpKind, after 
 	if err := json.Unmarshal(after, &object); err != nil || object == nil {
 		return nil, validation("after", errors.New("must be a JSON object"))
 	}
-	return s.run(ctx, s.systemMeta(), opSpec{kind: kind, class: classForward, noReconcile: true}, func(o *op) error {
+	// AIDEV-NOTE: Restore/import record history before their explicit reconcile;
+	// historical focus may still belong to an earlier day at this point.
+	return s.run(ctx, s.systemMeta(), opSpec{kind: kind, class: classForward, noReconcile: true, structuralOnly: true}, func(o *op) error {
 		return o.record(domain.Event{Entity: domain.EntSetting, Action: domain.ActUpdate, After: after})
 	})
 }

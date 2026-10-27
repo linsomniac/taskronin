@@ -37,6 +37,18 @@ func (s *Service) RunBackup(ctx context.Context, a domain.Actor, kind backup.Kin
 	}
 	ctx, cancel := s.longOpContext(ctx)
 	defer cancel()
+	// AIDEV-NOTE: Serialize the whole attempt, including outcome settings and
+	// rotation. Manager locks cover only individual calls. Canceled waiters
+	// have not attempted a snapshot and must not change the active outcome.
+	select {
+	case s.backupGate <- struct{}{}:
+		defer func() { <-s.backupGate }()
+	case <-ctx.Done():
+		return backup.SnapshotInfo{}, serviceError(ctx.Err())
+	}
+	if err := ctx.Err(); err != nil {
+		return backup.SnapshotInfo{}, serviceError(err)
+	}
 	fail := func(cause error) (backup.SnapshotInfo, error) {
 		err := s.backupMaint(ctx, func(ctx context.Context, tx *sql.Tx, _ time.Time) error {
 			return store.SetSetting(ctx, tx, "last_backup_error", cause.Error())

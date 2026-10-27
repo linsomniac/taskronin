@@ -194,7 +194,9 @@ func TestRecordSystemOp(t *testing.T) {
 			s := testutil.NewScenario(t)
 			id := s.Add("A")
 			block := s.Block(id, "11:00-12:00")
-			s.At("2026-10-28 13:00")
+			s.SetFocus(id, false)
+			focus := s.Focus()
+			s.At("2026-10-29 13:00")
 			before := s.OpCount()
 			after := json.RawMessage(`{"schema_version":1}`)
 			r, err := s.Svc.RecordSystemOp(s.Ctx(), kind, after)
@@ -217,6 +219,15 @@ func TestRecordSystemOp(t *testing.T) {
 			b, err := store.GetBlock(s.Ctx(), s.Store.Reader, block)
 			if err != nil || b.Status != domain.BlockPlanned {
 				t.Fatalf("system op reconciled historical block: %+v, %v", b, err)
+			}
+			if got := s.Focus(); !reflect.DeepEqual(got, focus) {
+				t.Fatalf("system op changed historical focus: %+v, want %+v", got, focus)
+			}
+			if err := s.Svc.Reconcile(s.Ctx()); err != nil {
+				t.Fatal(err)
+			}
+			if err := service.CheckAll(s.Ctx(), s.Store.Reader, s.Clock.Now(), testutil.Zone); err != nil {
+				t.Fatal(err)
 			}
 		})
 	}

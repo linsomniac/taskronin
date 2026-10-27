@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -288,5 +289,150 @@ func TestRunBackupCallerCancellation(t *testing.T) {
 	_, err := s.Svc.RunBackup(ctx, testutil.Owner(), backup.KindManual)
 	if !errors.Is(err, context.Canceled) || backupSetting(t, s, "last_backup_error") != context.Canceled.Error() {
 		t.Fatalf("caller cancellation = %v", err)
+	}
+}
+
+func startBackup(ctx context.Context, s *testutil.Scenario) <-chan error {
+	result := make(chan error, 1)
+	go func() {
+		_, err := s.Svc.RunBackup(ctx, testutil.Owner(), backup.KindManual)
+		result <- err
+	}()
+	return result
+}
+
+func awaitBackup(t *testing.T, result <-chan error) error {
+	t.Helper()
+	select {
+	case err := <-result:
+		return err
+	case <-time.After(5 * time.Second):
+		t.Fatal("backup did not return")
+		return nil
+	}
+}
+
+func TestRunBackupOverlappingOutcomes(t *testing.T) {
+	s := testutil.NewScenario(t)
+	firstEntered, secondEntered, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(func() { s.Svc.BeginShutdown(); unblock() })
+	var calls atomic.Int32
+	want := errors.New("later backup failed")
+	service.SetBackupHook(s.Svc, func(context.Context) error {
+		if calls.Add(1) == 1 {
+			close(firstEntered)
+			<-release
+			return nil
+		}
+		close(secondEntered)
+		return want
+	})
+	first := startBackup(s.Ctx(), s)
+	select {
+	case <-firstEntered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first backup never reached the hook")
+	}
+	s.Clock.Advance(time.Minute)
+	second := startBackup(s.Ctx(), s)
+	// Give the overlapping call a chance to fail before the first succeeds.
+	// With workflow serialization it stays queued until the first is released.
+	var secondErr error
+	overlapped := false
+	select {
+	case <-secondEntered:
+		overlapped = true
+		secondErr = awaitBackup(t, second)
+	case <-time.After(200 * time.Millisecond):
+	}
+	unblock()
+	if err := awaitBackup(t, first); err != nil {
+		t.Fatal(err)
+	}
+	if !overlapped {
+		secondErr = awaitBackup(t, second)
+	}
+	if !errors.Is(secondErr, want) {
+		t.Fatalf("second backup = %v, want %v", secondErr, want)
+	}
+	status, err := s.Svc.BackupStatus(s.Ctx(), testutil.Owner())
+	if err != nil || status.Healthy || status.LastError != want.Error() || status.Warning != "Backup failed: "+want.Error() ||
+		!status.LastSuccessAt.Valid || len(status.Snapshots) != 1 {
+		t.Fatalf("overlapping success erased the later failure: %+v, %v", status, err)
+	}
+	if backupSetting(t, s, "last_backup_attempt_at") != strconv.FormatInt(s.Clock.Now().UnixMilli(), 10) {
+		t.Fatal("latest attempt time was not recorded")
+	}
+	requireSQLCount(t, s, `SELECT COUNT(*) FROM events`, 0)
+}
+
+func TestRunBackupWaitingCancellation(t *testing.T) {
+	for _, reason := range []string{"caller", "deadline", "shutdown"} {
+		t.Run(reason, func(t *testing.T) {
+			s := testutil.NewScenario(t)
+			entered, release := make(chan struct{}), make(chan struct{})
+			unblock := sync.OnceFunc(func() { close(release) })
+			t.Cleanup(func() { s.Svc.BeginShutdown(); unblock() })
+			var calls atomic.Int32
+			service.SetBackupHook(s.Svc, func(context.Context) error {
+				if calls.Add(1) == 1 {
+					close(entered)
+					<-release
+				}
+				return nil
+			})
+			first := startBackup(s.Ctx(), s)
+			select {
+			case <-entered:
+			case <-time.After(5 * time.Second):
+				t.Fatal("first backup never reached the hook")
+			}
+			attempt := backupSetting(t, s, "last_backup_attempt_at")
+			s.Clock.Advance(time.Minute)
+			ctx, cancel := context.WithCancel(s.Ctx())
+			if reason == "deadline" {
+				cancel()
+				ctx, cancel = context.WithTimeout(s.Ctx(), 100*time.Millisecond)
+			}
+			defer cancel()
+			second := startBackup(ctx, s)
+			want := context.Canceled
+			switch reason {
+			case "caller":
+				cancel()
+			case "deadline":
+				want = context.DeadlineExceeded
+			case "shutdown":
+				s.Svc.BeginShutdown()
+			}
+			secondErr := awaitBackup(t, second)
+			if reason == "shutdown" {
+				// Shutdown may close lifecycle admission before the waiting call enters.
+				if de, ok := domain.AsError(secondErr); ok && de.Code == domain.CodeBusy {
+					secondErr = context.Canceled
+				}
+			}
+			if !errors.Is(secondErr, want) {
+				t.Errorf("waiting backup = %v, want %v", secondErr, want)
+			}
+			if calls.Load() != 1 || backupSetting(t, s, "last_backup_attempt_at") != attempt || backupSetting(t, s, "last_backup_error") != "" {
+				t.Error("canceled waiter changed the active backup's bookkeeping")
+			}
+			unblock()
+			firstErr := awaitBackup(t, first)
+			if reason == "shutdown" {
+				if !errors.Is(firstErr, context.Canceled) {
+					t.Fatalf("active backup did not stop: %v", firstErr)
+				}
+			} else if firstErr != nil {
+				t.Fatal(firstErr)
+			}
+			ctx, cancel = context.WithTimeout(s.Ctx(), 5*time.Second)
+			defer cancel()
+			if err := s.Svc.Drain(ctx); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
