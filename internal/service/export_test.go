@@ -32,3 +32,22 @@ var DuePhaseForTest = duePhase
 func DeriveForTest(ctx context.Context, q store.Q, task domain.TaskID, d civil.Date) (domain.BlockStatus, error) {
 	return derive(ctx, q, task, d)
 }
+
+// BlockChangeForTest exposes transitions before the outcome and revert APIs exist.
+type BlockChangeForTest = blockChange
+
+// TestSetBlock exercises a block transition through the runner, optionally placing first.
+func (s *Service) TestSetBlock(ctx context.Context, m Meta, id domain.BlockID, ch BlockChangeForTest, placed bool) (*OpResult, error) {
+	return s.run(ctx, m, opSpec{kind: "test.block", class: classForward, scopes: domain.ScopeWrite}, func(o *op) error {
+		b, err := o.loadBlock(id, nil)
+		if err != nil {
+			return err
+		}
+		if placed {
+			if err := o.place(b.TaskID); err != nil {
+				return err
+			}
+		}
+		return o.setBlock(&b, ch)
+	})
+}

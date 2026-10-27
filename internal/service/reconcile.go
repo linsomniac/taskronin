@@ -21,6 +21,27 @@ type reconcileStep struct {
 var reconcileSteps = []reconcileStep{
 	{name: "due", need: needDue, run: (*op).reconcileDue},
 	{name: "overdue", need: needOverdue, run: (*op).reconcileOverdue},
+	{name: "resolve", need: needResolve, run: (*op).reconcileBlocks},
+}
+
+func needResolve(ctx context.Context, q store.Q, _ time.Time, today civil.Date) (bool, error) {
+	var needed bool
+	err := q.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM time_blocks
+		WHERE deleted_at IS NULL AND status = 'planned' AND date < ?)`, today).Scan(&needed)
+	return needed, err
+}
+
+func (o *op) reconcileBlocks() error {
+	blocks, err := store.PlannedBefore(o.ctx, o.tx, o.today)
+	if err != nil {
+		return err
+	}
+	for _, b := range blocks {
+		if err := o.resolveByDerivation(&b); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func needDue(ctx context.Context, q store.Q, _ time.Time, today civil.Date) (bool, error) {

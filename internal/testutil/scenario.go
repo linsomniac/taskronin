@@ -360,6 +360,13 @@ func (s *Scenario) Reasons(id domain.TaskID) []domain.TriageReason {
 	return reasons
 }
 
+// Slips returns lifetime and unacknowledged slip counts from the task view.
+func (s *Scenario) Slips(id domain.TaskID) (lifetime, sinceTriage int) {
+	s.T.Helper()
+	t := s.Task(id)
+	return t.SlipsLifetime, t.SlipsSinceTriage
+}
+
 // Backlog independently queries open, undeleted, undeferred tasks without reasons.
 func (s *Scenario) Backlog() []domain.TaskID {
 	s.T.Helper()
