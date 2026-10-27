@@ -374,4 +374,54 @@ func TestHistoryOpsPagingInputs(t *testing.T) {
 	testutil.RequireCode(t, err, domain.CodeForbidden)
 	_, err = s.Svc.GetOp(s.Ctx(), actor, s.Last.OpID)
 	testutil.RequireCode(t, err, domain.CodeForbidden)
+
+	t.Run("cross_list", func(t *testing.T) {
+		s.Add("B")
+		ai := s.As(testutil.AI())
+		ai.Log(id, "first AI entry", "")
+		ai.Log(id, "second AI entry", "")
+		lists := []struct {
+			name string
+			page func(string) (string, error)
+		}{
+			{"history", func(cursor string) (string, error) {
+				p, err := s.Svc.History(s.Ctx(), s.Actor, service.HistoryIn{TaskID: id, Limit: 1, Cursor: cursor})
+				return p.NextCursor, err
+			}},
+			{"ops", func(cursor string) (string, error) {
+				p, err := s.Svc.ListOps(s.Ctx(), s.Actor, service.ListOpsIn{Limit: 1, Cursor: cursor})
+				return p.NextCursor, err
+			}},
+			{"ai_changes", func(cursor string) (string, error) {
+				p, err := s.Svc.ListAIChanges(s.Ctx(), s.Actor, service.ListAIChangesIn{Limit: 1, Cursor: cursor})
+				return p.NextCursor, err
+			}},
+			{"all_tasks", func(cursor string) (string, error) {
+				p, err := s.Svc.ListTasks(s.Ctx(), s.Actor, service.ListTasksIn{View: domain.ViewAll, Limit: 1, Cursor: cursor})
+				return p.NextCursor, err
+			}},
+		}
+		for _, source := range lists {
+			cursor, err := source.page("")
+			if err != nil || cursor == "" {
+				t.Fatalf("%s did not return a continuation cursor: %q, %v", source.name, cursor, err)
+			}
+			if source.name == "history" {
+				decoded, err := domain.DecodeCursor(cursor)
+				if err != nil || decoded.ID <= int64(latestOp(t, s).Seq) {
+					t.Fatalf("fixture must have an event ID beyond the latest op sequence: %+v, %v", decoded, err)
+				}
+			}
+			for _, target := range lists {
+				t.Run(source.name+"_to_"+target.name, func(t *testing.T) {
+					next, err := target.page(cursor)
+					if source.name != target.name {
+						testutil.RequireCode(t, err, domain.CodeMalformed)
+					} else if err != nil || next == cursor {
+						t.Fatalf("same-list continuation failed: next=%q, err=%v", next, err)
+					}
+				})
+			}
+		}
+	})
 }

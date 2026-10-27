@@ -738,6 +738,7 @@ func pageLimit(limit int) (int, error) {
 }
 
 type cursorKey struct {
+	literal  string
 	date     bool
 	min, max int64
 }
@@ -774,8 +775,12 @@ func decodeKeyset(view domain.View, cursor string) (domain.Cursor, error) {
 		schema = []cursorKey{date, minute, integer}
 	case domain.ViewDone, domain.ViewDropped, domain.ViewDeleted:
 		schema = []cursorKey{millis}
-	case domain.ViewAll, "history", "ops":
+	case domain.ViewAll:
 		schema = []cursorKey{}
+	case "history", "ops", "ai-changes":
+		// AIDEV-NOTE: ID-only audit lists need a list tag to distinguish event
+		// IDs, operation sequences, and the empty-key all-tasks cursor.
+		schema = []cursorKey{{literal: string(view)}}
 	case "entries":
 		schema = []cursorKey{date, {min: 0, max: 1}, minute, millis}
 	default:
@@ -785,7 +790,13 @@ func decodeKeyset(view domain.View, cursor string) (domain.Cursor, error) {
 		return malformed()
 	}
 	for i, key := range schema {
-		if key.date {
+		switch {
+		case key.literal != "":
+			value, ok := c.Keys[i].(string)
+			if !ok || value != key.literal {
+				return malformed()
+			}
+		case key.date:
 			date, ok := c.Keys[i].(string)
 			if !ok {
 				return malformed()
@@ -793,7 +804,7 @@ func decodeKeyset(view domain.View, cursor string) (domain.Cursor, error) {
 			if _, err := civil.ParseDate(date); err != nil {
 				return malformed()
 			}
-		} else {
+		default:
 			number, ok := c.Keys[i].(json.Number)
 			if !ok {
 				return malformed()

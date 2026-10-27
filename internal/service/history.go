@@ -75,7 +75,7 @@ func (s *Service) History(ctx context.Context, a domain.Actor, in HistoryIn) (Pa
 		}
 		if len(events) > limit {
 			events = events[:limit]
-			page.NextCursor = domain.EncodeCursor(domain.Cursor{Keys: []any{}, ID: int64(events[limit-1].ID)})
+			page.NextCursor = domain.EncodeCursor(domain.Cursor{Keys: []any{"history"}, ID: int64(events[limit-1].ID)})
 		}
 		page.Items = make([]EventView, 0, len(events))
 		ops := make(map[domain.OpID]OpSummary)
@@ -114,7 +114,7 @@ func (s *Service) ListOps(ctx context.Context, a domain.Actor, in ListOpsIn) (Pa
 	var page Page[OpSummary]
 	err = s.read(ctx, a, domain.ScopeRead, false, func(q store.Q, _ time.Time, _ civil.Date) error {
 		var err error
-		page, err = opPage(ctx, q, store.OpQuery{Actor: in.Actor, SinceSeq: in.SinceSeq,
+		page, err = opPage(ctx, q, "ops", store.OpQuery{Actor: in.Actor, SinceSeq: in.SinceSeq,
 			BeforeSeq: domain.OpSeq(cursor.ID), Limit: limit})
 		return err
 	})
@@ -169,7 +169,7 @@ func eventView(event domain.Event, summary OpSummary) EventView {
 		Action: event.Action, Before: event.Before, After: event.After}
 }
 
-func opPage(ctx context.Context, q store.Q, query store.OpQuery) (Page[OpSummary], error) {
+func opPage(ctx context.Context, q store.Q, view domain.View, query store.OpQuery) (Page[OpSummary], error) {
 	limit := query.Limit
 	query.Limit++
 	records, err := store.ListOps(ctx, q, query)
@@ -179,7 +179,7 @@ func opPage(ctx context.Context, q store.Q, query store.OpQuery) (Page[OpSummary
 	var page Page[OpSummary]
 	if len(records) > limit {
 		records = records[:limit]
-		page.NextCursor = domain.EncodeCursor(domain.Cursor{Keys: []any{}, ID: int64(records[limit-1].Seq)})
+		page.NextCursor = domain.EncodeCursor(domain.Cursor{Keys: []any{string(view)}, ID: int64(records[limit-1].Seq)})
 	}
 	page.Items = make([]OpSummary, 0, len(records))
 	for _, rec := range records {

@@ -38,7 +38,7 @@ func (s *Service) ListAIChanges(ctx context.Context, a domain.Actor, in ListAICh
 	if err != nil {
 		return AIChanges{}, err
 	}
-	cursor, err := decodeKeyset("ops", in.Cursor)
+	cursor, err := decodeKeyset("ai-changes", in.Cursor)
 	if err != nil {
 		return AIChanges{}, err
 	}
@@ -57,7 +57,7 @@ func (s *Service) ListAIChanges(ctx context.Context, a domain.Actor, in ListAICh
 		if !in.IncludeReviewed {
 			query.SinceSeq = changes.ReviewedThrough
 		}
-		page, err := opPage(ctx, q, query)
+		page, err := opPage(ctx, q, "ai-changes", query)
 		if err != nil {
 			return err
 		}
