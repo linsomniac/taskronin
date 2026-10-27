@@ -26,6 +26,7 @@ type opSpec struct {
 	scopes                              domain.Scopes
 	idem, revertible, ownerOnly, notWeb bool
 	noReconcile, structuralOnly         bool
+	targetID                            domain.OpID // Explicit Revert target; selected after replay lookup.
 }
 
 type pairKey struct {
@@ -70,6 +71,7 @@ func (s *Service) run(ctx context.Context, m Meta, spec opSpec, fn func(*op) err
 	}
 	// AIDEV-NOTE: Task 18 supplies identity, lifecycle, replay and rate checks below.
 	// AIDEV-TODO: Tasks 30–31 add reversal target selection and stack transitions.
+	// Revert selection is implemented below; Task 31 supplies Undo/Redo selection.
 	if spec.idem {
 		if err := validateIdemKey(m.Idem.Key); err != nil {
 			return nil, err
@@ -110,6 +112,17 @@ func (s *Service) run(ctx context.Context, m Meta, spec opSpec, fn func(*op) err
 			return s.replayIdem(ctx, *row)
 		}
 	}
+	var target *domain.OpRecord
+	if spec.class == classRevert {
+		r, err := store.GetOp(ctx, tx, spec.targetID)
+		if err != nil {
+			return nil, serviceError(err)
+		}
+		if !m.Actor.Scopes.Has(r.Scopes) || (m.Actor.Kind != domain.ActorOwner && m.Actor.Key() != r.Actor) {
+			return nil, domain.Errorf(domain.CodeForbidden, "operation is not permitted")
+		}
+		target = &r
+	}
 	if !spec.noReconcile {
 		if err := s.reconcileTx(ctx, tx, now); err != nil {
 			return nil, serviceError(err)
@@ -141,6 +154,12 @@ func (s *Service) run(ctx context.Context, m Meta, spec opSpec, fn func(*op) err
 		}
 	}
 	o := s.newOp(ctx, tx, m.Actor, spec, now)
+	if target != nil {
+		o.target = target
+		o.rec.Scopes = target.Scopes
+		o.rec.Via = "revert"
+		o.rec.RevertsOpID = sql.Null[domain.OpID]{V: target.ID, Valid: true}
+	}
 	if err := store.InsertOp(ctx, tx, &o.rec); err != nil {
 		return fail(err)
 	}
@@ -161,7 +180,7 @@ func (s *Service) run(ctx context.Context, m Meta, spec opSpec, fn func(*op) err
 		if _, err := tx.ExecContext(ctx, `ROLLBACK TO user_op`); err != nil {
 			return fail(err)
 		}
-	} else if spec.class == classForward && spec.revertible {
+	} else if (spec.class == classForward || spec.class == classRevert) && spec.revertible {
 		if err := store.PushStack(ctx, tx, m.Actor.Key(), store.StackUndo, o.rec.ID); err != nil {
 			return fail(err)
 		}

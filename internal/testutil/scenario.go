@@ -541,3 +541,63 @@ func (s *Scenario) Backlog() []domain.TaskID {
 	}
 	return ids
 }
+
+// Revert reverses an operation using the current actor and a fresh request key.
+func (s *Scenario) Revert(op domain.OpID) *service.OpResult {
+	s.T.Helper()
+	return s.Must(s.Svc.Revert(s.Ctx(), s.Meta(), service.RevertIn{OpID: op}))
+}
+
+// StateDigest returns deterministic live user state, excluding bookkeeping clocks,
+// versions and sequences. Task order is represented by IDs rather than rank values.
+func (s *Scenario) StateDigest() string {
+	s.T.Helper()
+	queries := []struct{ name, query string }{
+		{"tasks", `SELECT id, title, notes, status, defer_date, defer_min, due_date, due_min,
+   due_ack, due_ack_date, project, priority, origin, completed_date FROM tasks WHERE deleted_at IS NULL ORDER BY rank, id`},
+		{"reasons", `SELECT task_id, reason FROM task_triage JOIN tasks ON tasks.id = task_id WHERE tasks.deleted_at IS NULL ORDER BY task_id, reason`},
+		{"tags", `SELECT task_id, tags.name FROM task_tags JOIN tags ON tags.id = tag_id JOIN tasks ON tasks.id = task_id WHERE tasks.deleted_at IS NULL ORDER BY task_id, tags.name`},
+		{"entries", `SELECT id, task_id, kind, title, notes, work_date, occurred_min, reopened FROM log_entries WHERE deleted_at IS NULL ORDER BY id`},
+		{"blocks", `SELECT id, task_id, date, start_min, end_min, status, outcome_source, cancel_reason, slipped FROM time_blocks WHERE deleted_at IS NULL ORDER BY id`},
+		{"focus", `SELECT task_id, date FROM focus`},
+		{"interruptions", `SELECT id, date, from_task_id, from_block_id, to_task_id FROM interruptions WHERE deleted_at IS NULL ORDER BY id`},
+	}
+	digest := make(map[string][][]any)
+	for _, q := range queries {
+		digest[q.name] = s.digestRows(q.query)
+	}
+	b, err := json.MarshalIndent(digest, "", "  ")
+	if err != nil {
+		s.T.Fatal(err)
+	}
+	return string(b)
+}
+
+// digestRows accepts only the constant queries in StateDigest.
+func (s *Scenario) digestRows(query string) [][]any {
+	s.T.Helper()
+	rows, err := s.Store.Reader.QueryContext(s.Ctx(), query)
+	if err != nil {
+		s.T.Fatal(err)
+	}
+	defer rows.Close()
+	cols, err := rows.Columns()
+	if err != nil {
+		s.T.Fatal(err)
+	}
+	result := make([][]any, 0)
+	for rows.Next() {
+		values, dest := make([]any, len(cols)), make([]any, len(cols))
+		for i := range values {
+			dest[i] = &values[i]
+		}
+		if err := rows.Scan(dest...); err != nil {
+			s.T.Fatal(err)
+		}
+		result = append(result, values)
+	}
+	if err := rows.Err(); err != nil {
+		s.T.Fatal(err)
+	}
+	return result
+}
