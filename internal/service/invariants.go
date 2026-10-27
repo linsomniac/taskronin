@@ -35,7 +35,22 @@ func (c *invariantCheck) result() error {
 }
 
 // CheckStructural checks I1a, I2, I3, I4, I5, I7 and I8 across the whole store.
+// It resolves moments in the database's persisted tz_last_seen zone.
 func CheckStructural(ctx context.Context, q store.Q) error {
+	// AIDEV-NOTE: Historical snapshots have no running service to supply a
+	// zone. Use their recorded zone; CheckAll and ops use their configured zone.
+	name, err := store.GetSetting(ctx, q, "tz_last_seen")
+	if err != nil {
+		return serviceError(err)
+	}
+	z, err := civil.LoadZone(name)
+	if err != nil {
+		return serviceError(err)
+	}
+	return checkStructural(ctx, q, z)
+}
+
+func checkStructural(ctx context.Context, q store.Q, z civil.Zone) error {
 	c := invariantCheck{ctx: ctx, q: q}
 	ids, err := invariantIDs(ctx, q, `SELECT id FROM tasks ORDER BY id`)
 	if err != nil {
@@ -46,7 +61,7 @@ func CheckStructural(ctx context.Context, q store.Q) error {
 		if err != nil {
 			return serviceError(err)
 		}
-		if err := c.task(t); err != nil {
+		if err := c.task(t, z); err != nil {
 			return serviceError(err)
 		}
 		if err := c.rank(t); err != nil {
@@ -102,7 +117,7 @@ func CheckTimeDependent(ctx context.Context, q store.Q, now time.Time, z civil.Z
 func CheckAll(ctx context.Context, q store.Q, now time.Time, z civil.Zone) error {
 	var details []string
 	for _, check := range []func() error{
-		func() error { return CheckStructural(ctx, q) },
+		func() error { return checkStructural(ctx, q, z) },
 		func() error { return CheckTimeDependent(ctx, q, now, z) },
 	} {
 		if err := check(); err != nil {
@@ -138,20 +153,18 @@ func invariantIDs(ctx context.Context, q store.Q, query string) ([]int64, error)
 	return ids, rows.Err()
 }
 
-func (c *invariantCheck) task(t domain.Task) error {
-	// AIDEV-NOTE: I3 compares civil date/minute pairs without consulting now:
-	// date-only defer is 00:00, while date-only due is 24:00 (D§5.7).
-	var invalidDates, triage bool
-	err := c.q.QueryRowContext(c.ctx, `SELECT
-		defer_date IS NOT NULL AND due_date IS NOT NULL AND
-		(defer_date > due_date OR (defer_date = due_date AND COALESCE(defer_min, 0) >= COALESCE(due_min, 1440))),
-		EXISTS (SELECT 1 FROM task_triage WHERE task_id = tasks.id)
-		FROM tasks WHERE id = ?`, t.ID).Scan(&invalidDates, &triage)
+func (c *invariantCheck) task(t domain.Task, z civil.Zone) error {
+	// AIDEV-NOTE: I3 is independent of now, but must compare resolved instants:
+	// distinct minutes within a DST gap can resolve to the same instant. The
+	// moment helpers also supply date-only defer 00:00 and due 24:00 (D§5.7).
+	if t.DeferDate.Valid && t.DueDate.Valid && (t.DeferDate.V.After(t.DueDate.V) ||
+		!z.DeferMoment(t.DeferDate.V, t.DeferMin).Before(z.DueMoment(t.DueDate.V, t.DueMin))) {
+		c.add("I3", "task #%d defer must precede due and surface on or before its due date", t.ID)
+	}
+	var triage bool
+	err := c.q.QueryRowContext(c.ctx, `SELECT EXISTS (SELECT 1 FROM task_triage WHERE task_id = ?)`, t.ID).Scan(&triage)
 	if err != nil {
 		return err
-	}
-	if invalidDates {
-		c.add("I3", "task #%d defer must precede due and surface on or before its due date", t.ID)
 	}
 	if triage && (t.Status != domain.StatusOpen || t.DeletedAt.Valid) {
 		c.add("I5", "task #%d has triage rows but is closed or deleted", t.ID)
@@ -280,7 +293,7 @@ func (o *op) checkInvariants() error {
 		if err != nil {
 			return err
 		}
-		if err := c.task(t); err != nil {
+		if err := c.task(t, o.s.zone); err != nil {
 			return err
 		}
 		planned, err := store.PlannedOfTask(o.ctx, o.tx, id)

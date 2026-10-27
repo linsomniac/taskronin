@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"taskronin/internal/civil"
 	"taskronin/internal/domain"
 	"taskronin/internal/service"
 	"taskronin/internal/store"
@@ -131,6 +132,93 @@ func TestI3DeferAfterDue(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+func TestI3DSTGapInstants(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		deferMin, dueMin int
+		fail             bool
+	}{
+		{"within gap", 130, 150, true},
+		{"gap to boundary", 130, 180, true},
+		{"before gap", 119, 150, false},
+		{"after gap", 130, 181, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := testutil.StoreNoCheck(t)
+			invariantTask(t, st.Writer, 7)
+			invariantSQL(t, st.Writer, `UPDATE tasks SET defer_date = '2026-03-08', defer_min = ?,
+				due_date = '2026-03-08', due_min = ? WHERE id = 7`, tc.deferMin, tc.dueMin)
+			for _, check := range []struct {
+				name string
+				run  func() error
+			}{
+				{"structural", func() error { return service.CheckStructural(t.Context(), st.Reader) }},
+				{"all", func() error { return checkAll(t, st.Reader) }},
+			} {
+				t.Run(check.name, func(t *testing.T) {
+					err := check.run()
+					if tc.fail {
+						requireInvariant(t, err, "I3")
+					} else if err != nil {
+						t.Fatal(err)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestI3ConfiguredZone(t *testing.T) {
+	for _, tc := range []struct {
+		stored, supplied string
+	}{
+		{"UTC", "America/Denver"},
+		{"America/Denver", "UTC"},
+	} {
+		t.Run(tc.supplied, func(t *testing.T) {
+			st := testutil.StoreNoCheck(t)
+			invariantTask(t, st.Writer, 7)
+			invariantSQL(t, st.Writer, `UPDATE tasks SET defer_date = '2026-03-08', defer_min = 130,
+				due_date = '2026-03-08', due_min = 150 WHERE id = 7`)
+			if err := store.SetSetting(t.Context(), st.Writer, "tz_last_seen", tc.stored); err != nil {
+				t.Fatal(err)
+			}
+			z, err := civil.LoadZone(tc.supplied)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Run("structural uses stored zone", func(t *testing.T) {
+				err := service.CheckStructural(t.Context(), st.Reader)
+				if tc.stored == "America/Denver" {
+					requireInvariant(t, err, "I3")
+				} else if err != nil {
+					t.Fatal(err)
+				}
+			})
+			t.Run("all uses supplied zone", func(t *testing.T) {
+				err := service.CheckAll(t.Context(), st.Reader, testutil.Local(t, testutil.DefaultNow), z)
+				if tc.supplied == "America/Denver" {
+					requireInvariant(t, err, "I3")
+				} else if err != nil {
+					t.Fatal(err)
+				}
+			})
+		})
+	}
+}
+
+func TestCheckStructuralInvalidZone(t *testing.T) {
+	st := testutil.StoreNoCheck(t)
+	if err := store.SetSetting(t.Context(), st.Writer, "tz_last_seen", ""); err != nil {
+		t.Fatal(err)
+	}
+	err := service.CheckStructural(t.Context(), st.Reader)
+	testutil.RequireCode(t, err, domain.CodeInternal)
+	if de, _ := domain.AsError(err); de.Detail != "" || de.Err == nil {
+		t.Fatalf("invalid zone must retain a private cause: %+v", de)
 	}
 }
 

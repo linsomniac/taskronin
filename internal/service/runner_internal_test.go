@@ -130,6 +130,65 @@ func TestOpInvariantTouchedTaskBlocks(t *testing.T) {
 	}
 }
 
+func TestOpInvariantDSTGap(t *testing.T) {
+	for _, tc := range []struct {
+		name, zone     string
+		structuralOnly bool
+	}{
+		{"Denver all", "America/Denver", false},
+		{"Denver structural", "America/Denver", true},
+		{"UTC all", "UTC", false},
+		{"UTC structural", "UTC", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, m := runnerFixture(t)
+			z, err := civil.LoadZone(tc.zone)
+			if err != nil {
+				t.Fatal(err)
+			}
+			s.zone = z
+			storedZone := "UTC"
+			if tc.zone == "UTC" {
+				storedZone = "America/Denver"
+			}
+			if err := store.SetSetting(t.Context(), s.store.Writer, "tz_last_seen", storedZone); err != nil {
+				t.Fatal(err)
+			}
+			tk := fixtureTask(t, s, 1)
+			_, err = s.run(t.Context(), m, opSpec{class: classForward, kind: "test.invariant", scopes: domain.ScopeWrite, structuralOnly: tc.structuralOnly}, func(o *op) error {
+				after := tk
+				after.DeferDate = sql.Null[civil.Date]{V: civil.MustDate("2026-03-08"), Valid: true}
+				after.DueDate = after.DeferDate
+				after.DeferMin = sql.Null[civil.Minute]{V: 130, Valid: true}
+				after.DueMin = sql.Null[civil.Minute]{V: 150, Valid: true}
+				if err := store.UpdateTask(o.ctx, o.tx, after); err != nil {
+					return err
+				}
+				return o.recordTaskUpdate(tk, after)
+			})
+			if tc.zone == "America/Denver" {
+				requireRunnerCode(t, err, domain.CodeConflict)
+				if de, _ := domain.AsError(err); !strings.Contains(de.Detail, "invariant I3 violated:") {
+					t.Fatal(err)
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			got, err := store.GetTask(t.Context(), s.store.Reader, tk.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.zone == "America/Denver" {
+				if got.DeferDate.Valid || got.DueDate.Valid || got.Version != 1 {
+					t.Fatalf("invalid DST moments survived rollback: %+v", got)
+				}
+			} else if !got.DeferDate.Valid || !got.DueDate.Valid || got.Version != 2 {
+				t.Fatalf("valid UTC moments were not committed: %+v", got)
+			}
+		})
+	}
+}
+
 // Internal runner tests avoid importing testutil, which imports service itself.
 func runnerFixture(t *testing.T) (*Service, Meta) {
 	t.Helper()
