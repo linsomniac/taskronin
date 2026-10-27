@@ -446,6 +446,22 @@ func (s *Scenario) Defer(id domain.TaskID, moment string) {
 	s.Must(s.Svc.Defer(s.Ctx(), s.Meta(), in))
 }
 
+// Done completes a task using its current precondition and input modifiers.
+func (s *Scenario) Done(id domain.TaskID, mods ...func(*service.CompleteIn)) {
+	s.T.Helper()
+	in := service.CompleteIn{ID: id, Expect: s.Expect(id)}
+	for _, mod := range mods {
+		mod(&in)
+	}
+	s.Must(s.Svc.Complete(s.Ctx(), s.Meta(), in))
+}
+
+// Reopen reopens a task, optionally tombstoning its completion entry.
+func (s *Scenario) Reopen(id domain.TaskID, removeEntry bool) {
+	s.T.Helper()
+	s.Must(s.Svc.Reopen(s.Ctx(), s.Meta(), service.ReopenIn{ID: id, Expect: s.Expect(id), RemoveEntry: removeEntry}))
+}
+
 // Task returns the current task view through GetTask.
 func (s *Scenario) Task(id domain.TaskID) domain.TaskView {
 	s.T.Helper()
