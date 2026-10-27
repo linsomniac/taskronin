@@ -2,10 +2,12 @@ package testutil
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"testing"
 
+	"taskronin/internal/civil"
 	"taskronin/internal/clock"
 	"taskronin/internal/domain"
 	"taskronin/internal/service"
@@ -140,6 +142,43 @@ func (s *Scenario) Exec(query string, args ...any) {
 func (s *Scenario) Expect(id domain.TaskID) domain.Expect {
 	s.T.Helper()
 	return domain.Expect{Gen: s.Svc.Generation(), Version: s.Task(id).Version}
+}
+
+// EntryExpect returns the entry's current version in the live database generation.
+func (s *Scenario) EntryExpect(id domain.EntryID) domain.Expect {
+	s.T.Helper()
+	e, err := s.Svc.GetEntry(s.Ctx(), s.Actor, id)
+	if err != nil {
+		s.T.Fatal(err)
+	}
+	return domain.Expect{Gen: s.Svc.Generation(), Version: e.Version}
+}
+
+// Log records untimed work; task 0 means standalone and date "" means today.
+func (s *Scenario) Log(task domain.TaskID, text, date string) domain.EntryID {
+	s.T.Helper()
+	return s.LogAt(task, text, date, "")
+}
+
+// LogAt records work with an optional HH:MM time; task 0 is standalone, date "" is today.
+func (s *Scenario) LogAt(task domain.TaskID, text, date, at string) domain.EntryID {
+	s.T.Helper()
+	in := service.AddEntryIn{TaskID: sql.Null[domain.TaskID]{V: task, Valid: task != 0}, Title: text}
+	if date != "" {
+		in.WorkDate = D(date)
+	}
+	if at != "" {
+		minute, err := civil.ParseHHMM(at, false)
+		if err != nil {
+			s.T.Fatal(err)
+		}
+		in.At = sql.Null[civil.Minute]{V: minute, Valid: true}
+	}
+	r := s.Must(s.Svc.AddEntry(s.Ctx(), s.Meta(), in))
+	if r.Entry == nil {
+		s.T.Fatal("AddEntry returned no entry")
+	}
+	return r.Entry.ID
 }
 
 // Add captures a task after applying the supplied input modifiers.

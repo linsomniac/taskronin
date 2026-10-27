@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"time"
 
@@ -8,6 +9,21 @@ import (
 	"taskronin/internal/domain"
 	"taskronin/internal/store"
 )
+
+func derive(ctx context.Context, q store.Q, task domain.TaskID, d civil.Date) (domain.BlockStatus, error) {
+	work, complete, err := store.CountEntriesOn(ctx, q, task, d)
+	if err != nil {
+		return "", err
+	}
+	switch {
+	case complete > 0:
+		return domain.BlockDone, nil
+	case work > 0:
+		return domain.BlockWorked, nil
+	default:
+		return domain.BlockMissed, nil
+	}
+}
 
 func duePhase(t domain.Task, now time.Time, today civil.Date, z civil.Zone) domain.DuePhase {
 	if !t.DueDate.Valid {

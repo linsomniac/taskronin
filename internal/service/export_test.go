@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
+	"taskronin/internal/civil"
 	"taskronin/internal/domain"
 	"taskronin/internal/store"
 )
@@ -26,3 +27,8 @@ var EffectsFromEventsForTest = effectsFromEvents
 
 // DuePhaseForTest exposes due classification to external tests.
 var DuePhaseForTest = duePhase
+
+// DeriveForTest exposes entry-based block outcome derivation to external tests.
+func DeriveForTest(ctx context.Context, q store.Q, task domain.TaskID, d civil.Date) (domain.BlockStatus, error) {
+	return derive(ctx, q, task, d)
+}
