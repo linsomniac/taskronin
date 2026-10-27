@@ -161,7 +161,7 @@ func (s *Service) loadResult(ctx context.Context, r *OpResult) error {
 	if len(r.Refs) == 0 {
 		return nil
 	}
-	return s.read(ctx, domain.SystemActor(), 0, false, func(q store.Q, _ time.Time, _ civil.Date) error {
+	return s.read(ctx, domain.SystemActor(), 0, false, func(q store.Q, now time.Time, today civil.Date) error {
 		var tasks []domain.TaskView
 		for _, ref := range r.Refs {
 			switch ref.Entity {
@@ -170,8 +170,11 @@ func (s *Service) loadResult(ctx context.Context, r *OpResult) error {
 				if err != nil {
 					return err
 				}
-				// AIDEV-TODO: Task 16b enriches these persisted rows with taskView/blockView.
-				tasks = append(tasks, domain.TaskView{Task: t})
+				v, err := s.taskView(ctx, q, t, now, today)
+				if err != nil {
+					return err
+				}
+				tasks = append(tasks, v)
 			case domain.EntEntry:
 				e, err := store.GetEntry(ctx, q, domain.EntryID(ref.ID))
 				if err != nil {
@@ -183,7 +186,11 @@ func (s *Service) loadResult(ctx context.Context, r *OpResult) error {
 				if err != nil {
 					return err
 				}
-				r.Block = &domain.BlockView{TimeBlock: b}
+				v, err := s.blockView(ctx, q, b, now)
+				if err != nil {
+					return err
+				}
+				r.Block = &v
 			default:
 				// Settings and other event-only refs have no result representation.
 			}

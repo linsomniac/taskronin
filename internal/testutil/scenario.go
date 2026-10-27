@@ -135,3 +135,79 @@ func (s *Scenario) Exec(query string, args ...any) {
 		s.T.Fatal(err)
 	}
 }
+
+// Expect returns the task's current version in the live database generation.
+func (s *Scenario) Expect(id domain.TaskID) domain.Expect {
+	s.T.Helper()
+	return domain.Expect{Gen: s.Svc.Generation(), Version: s.Task(id).Version}
+}
+
+// Add captures a task after applying the supplied input modifiers.
+func (s *Scenario) Add(title string, mods ...func(*service.AddTaskIn)) domain.TaskID {
+	s.T.Helper()
+	in := service.AddTaskIn{Title: title}
+	for _, mod := range mods {
+		mod(&in)
+	}
+	r := s.Must(s.Svc.AddTask(s.Ctx(), s.Meta(), in))
+	if r.Task == nil {
+		s.T.Fatal("AddTask returned no task")
+	}
+	return r.Task.ID
+}
+
+// Due sets an AddTask input's due moment from a catalog date and optional time.
+func Due(m string) func(*service.AddTaskIn) {
+	return func(in *service.AddTaskIn) { moment := Moment(m); in.Due = &moment }
+}
+
+// MarkManual requests manual triage using the task's current precondition.
+func (s *Scenario) MarkManual(id domain.TaskID) {
+	s.T.Helper()
+	s.Must(s.Svc.MarkManual(s.Ctx(), s.Meta(), service.MarkManualIn{ID: id, Expect: s.Expect(id)}))
+}
+
+// Task returns the current task view through GetTask.
+func (s *Scenario) Task(id domain.TaskID) domain.TaskView {
+	s.T.Helper()
+	detail, err := s.Svc.GetTask(s.Ctx(), s.Actor, id)
+	if err != nil {
+		s.T.Fatal(err)
+	}
+	return detail.TaskView
+}
+
+// Reasons returns a task's triage reasons in descending priority order.
+func (s *Scenario) Reasons(id domain.TaskID) []domain.TriageReason {
+	s.T.Helper()
+	rows := s.Task(id).Reasons
+	reasons := make([]domain.TriageReason, 0, len(rows))
+	for _, row := range rows {
+		reasons = append(reasons, row.Reason)
+	}
+	return reasons
+}
+
+// Backlog independently queries open, undeleted, undeferred tasks without reasons.
+func (s *Scenario) Backlog() []domain.TaskID {
+	s.T.Helper()
+	rows, err := s.Store.Reader.QueryContext(s.Ctx(), `SELECT id FROM tasks
+		WHERE status = 'open' AND deleted_at IS NULL AND defer_date IS NULL
+		AND NOT EXISTS (SELECT 1 FROM task_triage WHERE task_id = tasks.id) ORDER BY rank, id`)
+	if err != nil {
+		s.T.Fatal(err)
+	}
+	defer rows.Close()
+	var ids []domain.TaskID
+	for rows.Next() {
+		var id domain.TaskID
+		if err := rows.Scan(&id); err != nil {
+			s.T.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		s.T.Fatal(err)
+	}
+	return ids
+}

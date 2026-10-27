@@ -23,3 +23,6 @@ func (s *Service) TestOpRaw(ctx context.Context, m Meta, touch []domain.EntityRe
 
 // EffectsFromEventsForTest exposes effect reconstruction to external tests.
 var EffectsFromEventsForTest = effectsFromEvents
+
+// DuePhaseForTest exposes due classification to external tests.
+var DuePhaseForTest = duePhase
