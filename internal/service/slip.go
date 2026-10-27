@@ -16,6 +16,7 @@ type blockChange struct {
 	Source  domain.OutcomeSource // Empty for planned/cancelled.
 	Cancel  domain.CancelReason
 	Slipped *bool // Nil leaves the slip value unchanged.
+	Resolve bool  // Refresh resolution metadata for an explicit user outcome.
 	Restore bool  // Write Image verbatim, skipping every transition hook.
 	Image   map[string]any
 }
@@ -39,7 +40,9 @@ func (o *op) setBlock(b *domain.TimeBlock, ch blockChange) error {
 		if after.Status == domain.BlockPlanned || after.Status == domain.BlockCancelled {
 			after.OutcomeSource = ""
 		}
-		if before.Status != after.Status {
+		// AIDEV-NOTE: SetOutcome resolves at now even when confirming the
+		// current status (A§3.3). Other source-only changes retain metadata.
+		if before.Status != after.Status || ch.Resolve {
 			after.ResolvedAt = sql.Null[time.Time]{V: o.now, Valid: true}
 			after.ResolvedSeq = sql.Null[domain.OpSeq]{V: o.rec.Seq, Valid: true}
 			if after.Status == domain.BlockPlanned {

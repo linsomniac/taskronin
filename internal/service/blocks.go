@@ -171,7 +171,7 @@ func (s *Service) SetOutcome(ctx context.Context, m Meta, in SetOutcomeIn) (*OpR
 			}
 		}
 		slipped := in.Outcome == domain.SetMissed
-		return o.setBlock(&b, blockChange{Status: domain.BlockStatus(in.Outcome), Source: domain.OutcomeUser, Slipped: &slipped})
+		return o.setBlock(&b, blockChange{Status: domain.BlockStatus(in.Outcome), Source: domain.OutcomeUser, Slipped: &slipped, Resolve: true})
 	})
 }
 

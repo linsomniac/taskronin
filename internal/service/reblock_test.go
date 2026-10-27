@@ -1,6 +1,7 @@
 package service_test
 
 import (
+	"encoding/json"
 	"reflect"
 	"slices"
 	"strings"
@@ -440,14 +441,63 @@ func TestBLK50(t *testing.T) {
 
 func TestRCP07(t *testing.T) {
 	s, id, b := resolvedYesterday(t, false)
+	auto := s.BlockView(b).TimeBlock
 	s.Outcome(b, domain.SetMissed)
 	before, block := s.Task(id), s.BlockView(b).TimeBlock
+	if !block.ResolvedAt.Valid || !block.ResolvedAt.V.Equal(s.Clock.Now()) ||
+		!block.ResolvedSeq.Valid || block.ResolvedSeq.V != s.Op(s.Last.OpID).Seq ||
+		block.SlippedAt != auto.SlippedAt || block.SlippedSeq != auto.SlippedSeq {
+		t.Fatalf("user confirmation metadata = %+v; automatic metadata = %+v", block, auto)
+	}
 	s.Log(id, "recap work", "10-27")
 	if s.BlockView(b).TimeBlock != block || !reflect.DeepEqual(s.Task(id), before) {
 		t.Fatal("entry recompute changed a user outcome or reasons")
 	}
 	requireBlockState(t, s, b, "{missed, user, 1, –}")
 	requireDueReasons(t, s, id, domain.ReasonSlipped)
+}
+
+func TestOutcomeConfirmationMetadata(t *testing.T) {
+	for _, outcome := range []domain.UserOutcome{domain.SetMissed, domain.SetWorked} {
+		t.Run(string(outcome), func(t *testing.T) {
+			s, id, b := resolvedYesterday(t, outcome == domain.SetWorked)
+			// Confirm the automatic outcome, then confirm the same user outcome.
+			// Each fresh request resolves at now; an idempotent retry does not.
+			for _, at := range []string{"10-28 10:00", "10-28 11:00"} {
+				s.At(at)
+				before, task := s.BlockView(b).TimeBlock, s.Task(id)
+				m := s.Meta()
+				in := service.SetOutcomeIn{BlockID: b, Expect: s.BlockExpect(b), Outcome: outcome}
+				r := s.Must(s.Svc.SetOutcome(s.Ctx(), m, in))
+				after := s.BlockView(b).TimeBlock
+				if after.Status != before.Status || after.OutcomeSource != domain.OutcomeUser ||
+					!after.ResolvedAt.Valid || !after.ResolvedAt.V.Equal(s.Clock.Now()) ||
+					!after.ResolvedSeq.Valid || after.ResolvedSeq.V != s.Op(r.OpID).Seq ||
+					after.Slipped != before.Slipped || after.SlippedAt != before.SlippedAt || after.SlippedSeq != before.SlippedSeq ||
+					after.Version != before.Version+1 || !reflect.DeepEqual(s.Task(id), task) {
+					t.Fatalf("confirmation = %+v, before = %+v", after, before)
+				}
+				requireEventKeys(t, s, r.OpID, "block:update 1")
+				event := s.Events(r.OpID)[0]
+				var cols struct {
+					ResolvedAt  int64        `json:"resolved_at"`
+					ResolvedSeq domain.OpSeq `json:"resolved_seq"`
+				}
+				if err := json.Unmarshal(event.After, &cols); err != nil {
+					t.Fatal(err)
+				}
+				if cols.ResolvedAt != s.Clock.Now().UnixMilli() || cols.ResolvedSeq != s.Op(r.OpID).Seq {
+					t.Fatalf("resolution event columns = %v", cols)
+				}
+				count := s.OpCount()
+				s.Clock.Advance(time.Minute)
+				replay := s.Must(s.Svc.SetOutcome(s.Ctx(), m, in))
+				if !replay.Replayed || replay.OpID != r.OpID || s.OpCount() != count || s.BlockView(b).TimeBlock != after {
+					t.Fatal("idempotent confirmation refreshed resolution metadata")
+				}
+			}
+		})
+	}
 }
 
 func TestDUE20(t *testing.T) {
