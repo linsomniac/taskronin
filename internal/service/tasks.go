@@ -165,13 +165,18 @@ func (s *Service) AddTask(ctx context.Context, m Meta, in AddTaskIn) (*OpResult,
 			if in.Due.Min.Valid && (in.Due.Min.V < 0 || in.Due.Min.V > 1439) {
 				return validation("due", errors.New("minute must be between 0 and 1439"))
 			}
-			if !s.zone.DueMoment(in.Due.Date, in.Due.Min).After(o.now) {
-				return validation("due", errors.New("must be in the future"))
-			}
 			t.DueDate, t.DueMin = sql.Null[civil.Date]{V: in.Due.Date, Valid: true}, in.Due.Min
 		}
+		if in.Place != nil && in.Place.How == "defer" {
+			if err := o.checkDefer(t, in.Place.Defer); err != nil {
+				return err
+			}
+		}
+		if in.Due != nil && !s.zone.DueMoment(in.Due.Date, in.Due.Min).After(o.now) {
+			return validation("due", errors.New("must be in the future"))
+		}
 		switch {
-		case in.Place == nil || in.Place.How == "block":
+		case in.Place == nil || in.Place.How == "block" || in.Place.How == "defer":
 			t.Rank, err = o.rankBottom()
 		case in.Place.How == "now":
 			t.Rank, err = o.rankTop()
@@ -207,6 +212,11 @@ func (s *Service) AddTask(ctx context.Context, m Meta, in AddTaskIn) (*OpResult,
 			}
 			if err := o.place(t.ID); err != nil {
 				return err
+			}
+			if in.Place.How == "defer" {
+				if err := o.setDefer(t.ID, &in.Place.Defer); err != nil {
+					return err
+				}
 			}
 			if in.Place.How == "now" {
 				if err := o.interrupt(t.ID, true, false); err != nil {
@@ -248,7 +258,13 @@ func (s *Service) MarkManual(ctx context.Context, m Meta, in MarkManualIn) (*OpR
 		if err != nil {
 			return err
 		}
-		// AIDEV-TODO: Task 27 clears a future defer here (D4).
+		// AIDEV-NOTE: Manual triage clears defer without acknowledging reasons
+		// or changing placement fields, so the task is visible in Triage (D4).
+		if t.DeferDate.Valid {
+			if err := o.setDefer(t.ID, nil); err != nil {
+				return err
+			}
+		}
 		if err := o.addReason(t.ID, domain.ReasonManual); err != nil {
 			return err
 		}
@@ -268,17 +284,15 @@ func validateAddPlacement(p AddPlacement) error {
 		return errors.New("block only belongs to block placement")
 	}
 	switch p.How {
-	case "top", "bottom", "block", "now":
+	case "top", "bottom", "block", "now", "defer":
+		// AIDEV-NOTE: All AddPlacement modes are supported; their shared
+		// operation helpers validate the block span or defer moment below.
 		return nil
 	case "before", "after":
 		if p.Ref == 0 {
 			return errors.New("placement reference is required")
 		}
 		return nil
-	case "defer":
-		// AIDEV-TODO: Tasks 22/26/27 implement AddPlacement's remaining modes.
-		// Block and now are implemented; Task 27 supplies defer.
-		return errors.New("unsupported placement")
 	default:
 		return errors.New("unknown placement")
 	}

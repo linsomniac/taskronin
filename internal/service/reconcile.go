@@ -16,13 +16,65 @@ type reconcileStep struct {
 	run  func(*op) error
 }
 
-// Tasks 27, 20, 23 and 26 register surface, due, overdue, resolve and focus,
-// in that order, before concurrent use of the service begins.
+// Surface precedes due so a just-surfaced task receives both reasons in one op.
 var reconcileSteps = []reconcileStep{
+	{name: "surface", need: needSurface, run: (*op).reconcileSurface},
 	{name: "due", need: needDue, run: (*op).reconcileDue},
 	{name: "overdue", need: needOverdue, run: (*op).reconcileOverdue},
 	{name: "resolve", need: needResolve, run: (*op).reconcileBlocks},
 	{name: "focus", need: needFocus, run: (*op).reconcileFocus},
+}
+
+func needSurface(ctx context.Context, q store.Q, now time.Time, today civil.Date) (bool, error) {
+	z, err := civil.LoadZone(now.Location().String())
+	if err != nil {
+		return false, err
+	}
+	ids, err := surfaceTasks(ctx, q, now, today, z, true)
+	return len(ids) > 0, err
+}
+
+func (o *op) reconcileSurface() error {
+	ids, err := surfaceTasks(o.ctx, o.tx, o.now, o.today, o.s.zone, false)
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if err := o.setDefer(id, nil); err != nil {
+			return err
+		}
+		if err := o.addReason(id, domain.ReasonSurfaced); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func surfaceTasks(ctx context.Context, q store.Q, now time.Time, today civil.Date, z civil.Zone, firstOnly bool) ([]domain.TaskID, error) {
+	rows, err := q.QueryContext(ctx, `SELECT id, defer_date, defer_min FROM tasks
+		WHERE status = 'open' AND deleted_at IS NULL AND defer_date <= ? ORDER BY id`, today)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []domain.TaskID
+	for rows.Next() {
+		var id domain.TaskID
+		var date civil.Date
+		var minute sql.Null[civil.Minute]
+		if err := rows.Scan(&id, &date, &minute); err != nil {
+			return nil, err
+		}
+		// AIDEV-NOTE: The date filter only narrows candidates. Civil instants
+		// handle timed defers, DST gaps and folds in both need and run paths.
+		if !z.DeferMoment(date, minute).After(now) {
+			ids = append(ids, id)
+			if firstOnly {
+				break
+			}
+		}
+	}
+	return ids, rows.Err()
 }
 
 func needFocus(ctx context.Context, q store.Q, _ time.Time, today civil.Date) (bool, error) {

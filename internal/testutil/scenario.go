@@ -234,6 +234,11 @@ func Due(m string) func(*service.AddTaskIn) {
 	return func(in *service.AddTaskIn) { moment := Moment(m); in.Due = &moment }
 }
 
+// DeferTo sets an AddTask input's defer moment from a catalog date and optional time.
+func DeferTo(m string) func(*service.AddTaskIn) {
+	return func(in *service.AddTaskIn) { in.Place = &service.AddPlacement{How: "defer", Defer: Moment(m)} }
+}
+
 // Top places a new task at the top of the global task order.
 func Top() func(*service.AddTaskIn) {
 	return func(in *service.AddTaskIn) { in.Place = &service.AddPlacement{How: "top"} }
@@ -428,6 +433,17 @@ func (s *Scenario) SetDue(id domain.TaskID, moment string) {
 		in.Due = &due
 	}
 	s.Must(s.Svc.SetDue(s.Ctx(), s.Meta(), in))
+}
+
+// Defer places a task at a defer moment, or clears its defer when moment is empty.
+func (s *Scenario) Defer(id domain.TaskID, moment string) {
+	s.T.Helper()
+	in := service.DeferIn{ID: id, Expect: s.Expect(id)}
+	if moment != "" {
+		until := Moment(moment)
+		in.Until = &until
+	}
+	s.Must(s.Svc.Defer(s.Ctx(), s.Meta(), in))
 }
 
 // Task returns the current task view through GetTask.

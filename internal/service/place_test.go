@@ -116,7 +116,7 @@ func TestTRI09(t *testing.T) {
 			testutil.RequireCode(t, err, domain.CodeValidation)
 			if how == "defer" {
 				de, _ := domain.AsError(err)
-				if len(de.Fields) != 1 || de.Fields[0].Field != "place" || de.Fields[0].Message != "unsupported placement" {
+				if len(de.Fields) != 1 || de.Fields[0].Field != "defer" {
 					t.Fatalf("error = %v", err)
 				}
 			}

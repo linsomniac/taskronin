@@ -20,6 +20,99 @@ type PlaceIn struct {
 	Ref    domain.TaskID
 }
 
+// DeferIn identifies a task and its defer moment; nil clears the defer.
+type DeferIn struct {
+	ID     domain.TaskID
+	Expect domain.Expect
+	Until  *domain.Moment
+}
+
+// Defer acknowledges triage and sets or clears a task's defer moment.
+func (s *Service) Defer(ctx context.Context, m Meta, in DeferIn) (*OpResult, error) {
+	return s.run(ctx, m, opSpec{kind: domain.OpTaskDefer, class: classForward, scopes: domain.ScopeWrite, idem: true, revertible: true}, func(o *op) error {
+		t, err := o.loadTask(in.ID, &in.Expect, false)
+		if err != nil {
+			return err
+		}
+		if in.Until != nil {
+			if t.Status != domain.StatusOpen {
+				return domain.Errorf(domain.CodeConflict, "task #%d is not open", t.ID)
+			}
+			if err := o.checkDefer(t, *in.Until); err != nil {
+				return err
+			}
+			// AIDEV-NOTE: Defer is a placement throughout the op. Suppress
+			// slipped/continue additions before closing blocks, as in Reblock.
+			o.placed[t.ID] = true
+			if err := o.closeForDefer(t); err != nil {
+				return err
+			}
+		}
+		if err := o.place(t.ID); err != nil {
+			return err
+		}
+		if in.Until != nil {
+			if err := o.setDefer(t.ID, in.Until); err != nil {
+				return err
+			}
+			if err := o.clearFocusIf(t.ID); err != nil {
+				return err
+			}
+		}
+		o.ref(domain.EntityRef{Entity: domain.EntTask, ID: int64(t.ID)})
+		return nil
+	})
+}
+
+func (o *op) checkDefer(t domain.Task, until domain.Moment) error {
+	// AIDEV-NOTE: The task's due fields are validated before reaching here.
+	// Overdue takes precedence over past-defer and ordering errors (DUE-09).
+	if duePhase(t, o.now, o.today, o.s.zone) == domain.DueOverdue {
+		return domain.Errorf(domain.CodeValidation, "change the due date first")
+	}
+	if err := validateMoment("defer", &until); err != nil {
+		return err
+	}
+	if !o.s.zone.DeferMoment(until.Date, until.Min).After(o.now) {
+		return domain.Errorf(domain.CodeValidation, "defer must be in the future")
+	}
+	var due *domain.Moment
+	if t.DueDate.Valid {
+		due = &domain.Moment{Date: t.DueDate.V, Min: t.DueMin}
+	}
+	return o.checkDeferDue(&until, due)
+}
+
+func (o *op) closeForDefer(t domain.Task) error {
+	blocks, err := store.PlannedOfTask(o.ctx, o.tx, t.ID)
+	if err != nil {
+		return err
+	}
+	for _, b := range blocks {
+		if err := o.endEarly(&b, domain.CancelDeferred); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (o *op) setDefer(id domain.TaskID, until *domain.Moment) error {
+	// Reload to preserve placement fields written earlier in this op.
+	t, err := store.GetTask(o.ctx, o.tx, id)
+	if err != nil {
+		return err
+	}
+	before := t
+	t.DeferDate, t.DeferMin = sql.Null[civil.Date]{}, sql.Null[civil.Minute]{}
+	if until != nil {
+		t.DeferDate, t.DeferMin = sql.Null[civil.Date]{V: until.Date, Valid: true}, until.Min
+	}
+	if err := store.UpdateTask(o.ctx, o.tx, t); err != nil {
+		return err
+	}
+	return o.recordTaskUpdate(before, t)
+}
+
 // AcceptItem identifies a new task and the version seen by the caller.
 type AcceptItem struct {
 	ID     domain.TaskID
