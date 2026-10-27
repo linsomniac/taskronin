@@ -87,20 +87,9 @@ func (s *Service) Complete(ctx context.Context, m Meta, in CompleteIn) (*OpResul
 		}
 		e := domain.LogEntry{TaskID: sql.Null[domain.TaskID]{V: t.ID, Valid: true}, Kind: domain.EntryComplete,
 			Title: title, Notes: notes, WorkDate: date, CreatedAt: o.now, UpdatedAt: o.now}
-		if err := store.InsertEntry(o.ctx, o.tx, &e); err != nil {
+		if err := o.insertEntry(&e); err != nil {
 			return err
 		}
-		ref := domain.EntityRef{Entity: domain.EntEntry, ID: int64(e.ID)}
-		o.markInserted(ref)
-		o.markDirty(ref)
-		after, err := json.Marshal(entryCols(e))
-		if err != nil {
-			return err
-		}
-		if err := o.record(domain.Event{Entity: domain.EntEntry, EntityID: int64(e.ID), Action: domain.ActInsert, After: after}); err != nil {
-			return err
-		}
-		o.addPair(e.TaskID, date)
 		if err := o.closeForDone(t, date); err != nil {
 			return err
 		}
@@ -111,7 +100,7 @@ func (s *Service) Complete(ctx context.Context, m Meta, in CompleteIn) (*OpResul
 			return err
 		}
 		o.ref(domain.EntityRef{Entity: domain.EntTask, ID: int64(t.ID)})
-		o.ref(ref)
+		o.ref(domain.EntityRef{Entity: domain.EntEntry, ID: int64(e.ID)})
 		return nil
 	})
 }

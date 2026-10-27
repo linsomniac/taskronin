@@ -207,24 +207,33 @@ func (s *Service) AddEntry(ctx context.Context, m Meta, in AddEntryIn) (*OpResul
 		}
 		e := domain.LogEntry{TaskID: in.TaskID, Kind: domain.EntryWork, Title: title, Notes: notes,
 			WorkDate: date, OccurredMin: in.At, CreatedAt: o.now, UpdatedAt: o.now}
-		if err := store.InsertEntry(o.ctx, o.tx, &e); err != nil {
+		if err := o.insertEntry(&e); err != nil {
 			return err
 		}
-		ref := domain.EntityRef{Entity: domain.EntEntry, ID: int64(e.ID)}
-		o.markInserted(ref)
-		o.markDirty(ref)
-		after, err := json.Marshal(entryCols(e))
-		if err != nil {
-			return err
-		}
-		if err := o.record(domain.Event{Entity: domain.EntEntry, EntityID: int64(e.ID), Action: domain.ActInsert, After: after}); err != nil {
-			return err
-		}
-		o.addPair(e.TaskID, e.WorkDate)
-		o.ref(ref)
+		o.ref(domain.EntityRef{Entity: domain.EntEntry, ID: int64(e.ID)})
 		o.created = true
 		return nil
 	})
+}
+
+func (o *op) insertEntry(e *domain.LogEntry) error {
+	// AIDEV-NOTE: Work and completion entries share persistence and audit
+	// bookkeeping; callers own response refs and Created semantics.
+	if err := store.InsertEntry(o.ctx, o.tx, e); err != nil {
+		return err
+	}
+	ref := domain.EntityRef{Entity: domain.EntEntry, ID: int64(e.ID)}
+	o.markInserted(ref)
+	o.markDirty(ref)
+	after, err := json.Marshal(entryCols(*e))
+	if err != nil {
+		return err
+	}
+	if err := o.record(domain.Event{Entity: domain.EntEntry, EntityID: int64(e.ID), Action: domain.ActInsert, After: after}); err != nil {
+		return err
+	}
+	o.addPair(e.TaskID, e.WorkDate)
+	return nil
 }
 
 func (o *op) checkEntryDate(date civil.Date, at sql.Null[civil.Minute]) error {
