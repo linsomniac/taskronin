@@ -54,3 +54,6 @@ func (s *Service) TestSetBlock(ctx context.Context, m Meta, id domain.BlockID, c
 
 // DecodeOffsetForTest exposes shared offset validation before Search is implemented.
 var DecodeOffsetForTest = decodeOffset
+
+// FTSQueryForTest exposes the literal full-text query builder to external tests.
+func FTSQueryForTest(user string) (string, error) { return ftsQuery(user) }
