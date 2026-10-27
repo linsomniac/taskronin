@@ -1,6 +1,7 @@
 package testutil
 
 import (
+	"context"
 	"log/slog"
 	"path/filepath"
 	"testing"
@@ -41,8 +42,28 @@ func newService(t testing.TB, opts ...SvcOpt) (*service.Service, *clock.Fake, *s
 	if err != nil {
 		t.Fatal(err)
 	}
-	// AIDEV-TODO: Task 17 adds Reconcile + CheckAll cleanup; Task 18's stopping
-	// state switches cleanup to CheckStructural as required by ruling F1.
+	t.Cleanup(func() {
+		// AIDEV-NOTE: Task 18 introduces Stopping. Detect its interface so F1's
+		// shutdown cleanup is ready without introducing lifecycle state here.
+		if lifecycle, ok := any(svc).(interface{ Stopping() <-chan struct{} }); ok {
+			select {
+			case <-lifecycle.Stopping():
+				if err := service.CheckStructural(context.Background(), o.Store.Reader); err != nil {
+					t.Error(err)
+				}
+				return
+			default:
+			}
+		}
+		// testing cancels t.Context before cleanup callbacks run.
+		ctx := context.Background()
+		if err := svc.Reconcile(ctx); err != nil {
+			t.Error(err)
+		}
+		if err := service.CheckAll(ctx, o.Store.Reader, o.Clock.Now().Truncate(time.Millisecond), o.Zone); err != nil {
+			t.Error(err)
+		}
+	})
 	return svc, clk, o.Store
 }
 

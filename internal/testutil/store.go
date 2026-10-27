@@ -8,6 +8,7 @@ import (
 
 	"taskronin/internal/auth"
 	"taskronin/internal/domain"
+	"taskronin/internal/service"
 	"taskronin/internal/store"
 )
 
@@ -16,8 +17,20 @@ const Password = "correct horse battery"
 
 var passwordHash = sync.OnceValues(func() (string, error) { return auth.HashPassword(Password) })
 
-// Store creates a migrated, bootstrapped database and verifies FTS during cleanup.
+// Store creates a migrated, bootstrapped database and checks FTS and structural
+// invariants during cleanup.
 func Store(t testing.TB) *store.Store {
+	t.Helper()
+	return newStore(t, true)
+}
+
+// StoreNoCheck creates a store without cleanup checks for deliberate corruption tests.
+func StoreNoCheck(t testing.TB) *store.Store {
+	t.Helper()
+	return newStore(t, false)
+}
+
+func newStore(t testing.TB, check bool) *store.Store {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "taskronin.db")
 	staging, err := store.OpenStaging(t.Context(), path)
@@ -74,8 +87,13 @@ func Store(t testing.TB) *store.Store {
 	}
 	t.Cleanup(func() {
 		// testing cancels t.Context before cleanup callbacks run.
-		if err := store.FTSIntegrityCheck(context.Background(), st.Writer); err != nil {
-			t.Error(err)
+		if check {
+			if err := store.FTSIntegrityCheck(context.Background(), st.Writer); err != nil {
+				t.Error(err)
+			}
+			if err := service.CheckStructural(context.Background(), st.Reader); err != nil {
+				t.Error(err)
+			}
 		}
 		if err := st.Close(); err != nil {
 			t.Error(err)

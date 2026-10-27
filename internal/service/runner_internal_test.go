@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,6 +18,117 @@ import (
 	"taskronin/internal/domain"
 	"taskronin/internal/store"
 )
+
+func TestOpInvariantScopeAndRanks(t *testing.T) {
+	s, m := runnerFixture(t)
+	touched := fixtureTask(t, s, 1)
+	untouched := fixtureTask(t, s, 1)
+	if _, err := s.store.Writer.ExecContext(t.Context(), `UPDATE tasks SET
+		defer_date = '2026-10-30', due_date = '2026-10-29' WHERE id = ?`, untouched.ID); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := s.store.Writer.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	o := s.newOp(t.Context(), tx, m.Actor, opSpec{}, s.clock.Now())
+	o.markTaskDirty(touched.ID)
+	if err := o.checkInvariants(); err != nil {
+		t.Fatalf("checked an untouched task or an unmoved rank: %v", err)
+	}
+	// Rank checks also apply when the moved task has no dirty version ref.
+	o.dirty = make(map[domain.EntityRef]bool)
+	o.rankMoved[touched.ID] = true
+	err = o.checkInvariants()
+	requireRunnerCode(t, err, domain.CodeConflict)
+	if de, _ := domain.AsError(err); !strings.Contains(de.Detail, "invariant I7 violated:") {
+		t.Fatal(err)
+	}
+	o.rankMoved[touched.ID] = false
+	o.markTaskDirty(untouched.ID)
+	err = o.checkInvariants()
+	requireRunnerCode(t, err, domain.CodeConflict)
+	if de, _ := domain.AsError(err); !strings.Contains(de.Detail, "invariant I3 violated:") || strings.Contains(de.Detail, "invariant I7") {
+		t.Fatal(err)
+	}
+}
+
+func TestOpInvariantStructuralOnlyAndFocus(t *testing.T) {
+	s, m := runnerFixture(t)
+	tk := fixtureTask(t, s, 1)
+	if _, err := s.store.Writer.ExecContext(t.Context(), `UPDATE tasks SET defer_date = '2026-10-29' WHERE id = ?`, tk.ID); err != nil {
+		t.Fatal(err)
+	}
+	b := domain.TimeBlock{TaskID: tk.ID, Span: domain.BlockSpan{Date: s.zone.DateOf(s.clock.Now()), Start: 660, End: 720}, Status: domain.BlockPlanned, CreatedAt: s.clock.Now()}
+	if err := store.InsertBlock(t.Context(), s.store.Writer, &b); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.store.Writer.ExecContext(t.Context(), `UPDATE focus SET task_id = ?, date = '2026-10-27' WHERE id = 1`, tk.ID); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := s.store.Writer.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	o := s.newOp(t.Context(), tx, m.Actor, opSpec{structuralOnly: true}, s.clock.Now())
+	o.markTaskDirty(tk.ID)
+	if err := o.checkInvariants(); err != nil {
+		t.Fatalf("structural-only op checked temporal state: %v", err)
+	}
+	o.spec.structuralOnly = false
+	err = o.checkInvariants()
+	requireRunnerCode(t, err, domain.CodeConflict)
+	de, _ := domain.AsError(err)
+	if !strings.Contains(de.Detail, "invariant I1b violated:") || !strings.Contains(de.Detail, "invariant I6 violated:") {
+		t.Fatal(err)
+	}
+	o.dirty = make(map[domain.EntityRef]bool)
+	err = o.checkInvariants()
+	requireRunnerCode(t, err, domain.CodeConflict)
+	if de, _ := domain.AsError(err); !strings.Contains(de.Detail, "invariant I6 violated:") || strings.Contains(de.Detail, "invariant I1b") {
+		t.Fatalf("focus must be checked even without dirty refs: %v", err)
+	}
+	o.spec.structuralOnly = true
+	o.markTaskDirty(tk.ID)
+	if _, err := tx.ExecContext(t.Context(), `UPDATE tasks SET due_date = '2026-10-28' WHERE id = ?`, tk.ID); err != nil {
+		t.Fatal(err)
+	}
+	err = o.checkInvariants()
+	requireRunnerCode(t, err, domain.CodeConflict)
+	if de, _ := domain.AsError(err); !strings.Contains(de.Detail, "invariant I3 violated:") {
+		t.Fatal(err)
+	}
+}
+
+func TestOpInvariantTouchedTaskBlocks(t *testing.T) {
+	s, m := runnerFixture(t)
+	tk := fixtureTask(t, s, 1)
+	other := fixtureTask(t, s, 2)
+	if _, err := s.store.Writer.ExecContext(t.Context(), `DROP TRIGGER time_blocks_no_overlap_ins`); err != nil {
+		t.Fatal(err)
+	}
+	for _, task := range []domain.Task{tk, other} {
+		b := domain.TimeBlock{TaskID: task.ID, Span: domain.BlockSpan{Date: s.zone.DateOf(s.clock.Now()), Start: 660, End: 720}, Status: domain.BlockPlanned, CreatedAt: s.clock.Now()}
+		if err := store.InsertBlock(t.Context(), s.store.Writer, &b); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tx, err := s.store.Writer.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	o := s.newOp(t.Context(), tx, m.Actor, opSpec{}, s.clock.Now())
+	o.markTaskDirty(tk.ID)
+	err = o.checkInvariants()
+	requireRunnerCode(t, err, domain.CodeConflict)
+	de, _ := domain.AsError(err)
+	if strings.Count(de.Detail, "invariant I2 violated:") != 1 {
+		t.Fatalf("planned blocks of a touched task must check overlaps with untouched blocks: %v", err)
+	}
+}
 
 // Internal runner tests avoid importing testutil, which imports service itself.
 func runnerFixture(t *testing.T) (*Service, Meta) {
