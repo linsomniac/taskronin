@@ -310,7 +310,7 @@ func (s *Service) Today(ctx context.Context, a domain.Actor) (TodayView, error) 
 		if err != nil {
 			return err
 		}
-		// AIDEV-NOTE: Deleted tasks leave their historical blocks and entries intact.
+		// AIDEV-NOTE: Deleted tasks leave historical blocks, entries and interruptions intact.
 		// LIF-09 hides them from Today; Day and entry lists retain that history.
 		live := make(map[domain.TaskID]bool, len(tasks))
 		for _, t := range tasks {
@@ -318,7 +318,9 @@ func (s *Service) Today(ctx context.Context, a domain.Actor) (TodayView, error) 
 		}
 		v.Blocks = slices.DeleteFunc(day.Blocks, func(b domain.BlockView) bool { return !live[b.TaskID] })
 		v.Entries = slices.DeleteFunc(day.Entries, func(e domain.EntryView) bool { return e.TaskID.Valid && !live[e.TaskID.V] })
-		v.Interruptions = day.Interruptions
+		v.Interruptions = slices.DeleteFunc(day.Interruptions, func(in domain.Interruption) bool {
+			return !live[in.ToTaskID] || (in.FromTaskID.Valid && !live[in.FromTaskID.V])
+		})
 		v.Backup, v.AIChanges, v.Banners, err = s.readWarnings(ctx, q, now)
 		return err
 	})

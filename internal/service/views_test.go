@@ -408,6 +408,46 @@ func TestLIF09_Views(t *testing.T) {
 	}
 }
 
+func TestLIF09_InterruptionViews(t *testing.T) {
+	for _, participant := range []string{"from", "to"} {
+		for _, withBlock := range []bool{false, true} {
+			t.Run(fmt.Sprintf("delete_%s/block=%v", participant, withBlock), func(t *testing.T) {
+				s := testutil.NewScenario(t).At("10-28 08:00")
+				liveFrom := s.Add("unrelated source", testutil.Bottom())
+				s.SetFocus(liveFrom, false)
+				s.Add("unrelated destination", testutil.Now())
+				from := s.Add("interrupted source", testutil.Bottom())
+				if withBlock {
+					s.Block(from, "09:00-11:00")
+				}
+				s.SetFocus(from, false)
+				s.At("10-28 10:20")
+				to := s.Add("interruption destination", testutil.Now())
+				before := readToday(t, s).Interruptions
+				if len(before) != 2 || before[1].FromTaskID.V != from || before[1].ToTaskID != to || before[1].FromBlockID.Valid != withBlock {
+					t.Fatalf("interruption fixture = %+v", before)
+				}
+				deleted := from
+				if participant == "to" {
+					deleted = to
+				}
+				s.Delete(deleted)
+				if got := readToday(t, s).Interruptions; !reflect.DeepEqual(got, before[:1]) {
+					t.Fatalf("Today interruptions after deleting %s = %+v, want %+v", participant, got, before[:1])
+				}
+				day, err := s.Svc.Day(s.Ctx(), s.Actor, testutil.D("10-28"))
+				if err != nil || !reflect.DeepEqual(day.Interruptions, before) {
+					t.Fatalf("historical Day interruptions = %+v, want %+v; error = %v", day.Interruptions, before, err)
+				}
+				s.Undelete(deleted)
+				if got := readToday(t, s).Interruptions; !reflect.DeepEqual(got, before) {
+					t.Fatalf("Today interruptions after undelete = %+v, want %+v", got, before)
+				}
+			})
+		}
+	}
+}
+
 func TestListTasksFilters(t *testing.T) {
 	s := testutil.NewScenario(t)
 	add := func(title, project, tag string) domain.TaskID {
