@@ -130,11 +130,27 @@ func (s *Service) Authenticate(ctx context.Context, cookie string) (WebAuth, err
 		Scopes: domain.AllScopes, RemoteKey: row.Remote}, CSRFToken: auth.CSRFToken(row.CSRFSecret)}, nil
 }
 
-// ExpireSessions deletes sessions at their absolute or persisted idle expiry.
-// The maintenance scheduler flushes usage before expiring sessions.
+// ExpireSessions persists pending activity and deletes sessions at absolute or idle expiry.
 func (s *Service) ExpireSessions(ctx context.Context) (int, error) {
+	leave, err := s.enter()
+	if err != nil {
+		return 0, err
+	}
+	defer leave()
+	// AIDEV-NOTE: Authentication may run after the scheduler's last flush.
+	// Hold the same handoff lock as FlushUsage before acquiring the writer,
+	// and touch pending activity in the deletion transaction. On rollback,
+	// leave the queue intact so retry cannot expire a recently used session.
+	s.usage.flushMu.Lock()
+	defer s.usage.flushMu.Unlock()
+	s.usage.mu.Lock()
+	sessions := s.usage.sessions
+	s.usage.mu.Unlock()
 	var n int64
-	err := s.writeTx(ctx, func(tx *sql.Tx, now time.Time) error {
+	err = s.writeTxEntered(ctx, func(tx *sql.Tx, now time.Time) error {
+		if err := store.TouchSessions(ctx, tx, sessions); err != nil {
+			return err
+		}
 		var err error
 		n, err = store.DeleteExpiredSessions(ctx, tx, now, SessionIdle)
 		return err
@@ -142,5 +158,8 @@ func (s *Service) ExpireSessions(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	s.usage.mu.Lock()
+	s.usage.sessions = make(map[[32]byte]time.Time)
+	s.usage.mu.Unlock()
 	return int(n), nil
 }

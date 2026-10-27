@@ -166,7 +166,9 @@ func (s *Service) writeTx(ctx context.Context, fn func(tx *sql.Tx, now time.Time
 	return s.writeTxEntered(ctx, fn)
 }
 
-// writeTxEntered is used only while the caller holds an in-flight registration.
+// writeTxEntered runs a writer transaction without changing lifecycle admission.
+// Callers hold an in-flight registration, except maintTx for final maintenance
+// after Drain.
 func (s *Service) writeTxEntered(ctx context.Context, fn func(tx *sql.Tx, now time.Time) error) error {
 	tx, err := s.store.Writer.BeginTx(ctx, nil)
 	if err != nil {

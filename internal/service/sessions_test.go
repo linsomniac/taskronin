@@ -242,6 +242,91 @@ func TestExpireSessions(t *testing.T) {
 	requireSQLCount(t, s, `SELECT COUNT(*) FROM ops`, 0)
 }
 
+func TestExpireSessionsPendingActivity(t *testing.T) {
+	s := testutil.NewScenario(t)
+	active := loginSession(t, s, "")
+	idle := loginSession(t, s, "")
+	created := s.Clock.Now()
+	s.Clock.Advance(service.SessionIdle - time.Millisecond)
+	if err := s.Svc.FlushUsage(s.Ctx()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Svc.Authenticate(s.Ctx(), active.CookieValue); err != nil {
+		t.Fatal(err)
+	}
+	used := s.Clock.Now()
+	s.Clock.Advance(time.Millisecond)
+	if n, err := s.Svc.ExpireSessions(s.Ctx()); err != nil || n != 1 {
+		t.Fatalf("expiry after activity between flush and expiry = %d, %v; want only the idle session deleted", n, err)
+	}
+	if !sessionRow(t, s, active.CookieValue).LastSeenAt.Equal(used) {
+		t.Fatal("expiry did not persist pending session activity")
+	}
+	requireUnauthenticatedSession(t, s, idle.CookieValue)
+	if _, err := s.Svc.Authenticate(s.Ctx(), active.CookieValue); err != nil {
+		t.Fatal("recently active session did not survive expiry", err)
+	}
+	for day := 10; day <= 28; day += 3 {
+		s.Clock.Set(created.Add(time.Duration(day) * 24 * time.Hour))
+		if _, err := s.Svc.Authenticate(s.Ctx(), active.CookieValue); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s.Clock.Set(created.Add(service.SessionMax))
+	if n, err := s.Svc.ExpireSessions(s.Ctx()); err != nil || n != 1 {
+		t.Fatalf("absolute expiry with pending activity = %d, %v; want 1", n, err)
+	}
+	requireUnauthenticatedSession(t, s, active.CookieValue)
+	requireSQLCount(t, s, `SELECT COUNT(*) FROM ops`, 0)
+}
+
+func TestExpireSessionsRollback(t *testing.T) {
+	for _, tc := range []struct{ name, trigger string }{
+		{"touch", `CREATE TEMP TRIGGER fail_session_expiry BEFORE UPDATE ON web_sessions BEGIN SELECT RAISE(ABORT, 'injected failure'); END`},
+		{"delete", `CREATE TEMP TRIGGER fail_session_expiry BEFORE DELETE ON web_sessions BEGIN SELECT RAISE(ABORT, 'injected failure'); END`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := testutil.NewScenario(t)
+			active := loginSession(t, s, "")
+			idle := loginSession(t, s, "")
+			created := s.Clock.Now()
+			s.Clock.Advance(6 * 24 * time.Hour)
+			if _, err := s.Svc.Authenticate(s.Ctx(), active.CookieValue); err != nil {
+				t.Fatal(err)
+			}
+			used := s.Clock.Now()
+			s.Clock.Advance(24 * time.Hour)
+			if _, err := s.Store.Writer.ExecContext(s.Ctx(), tc.trigger); err != nil {
+				t.Fatal(err)
+			}
+			n, err := s.Svc.ExpireSessions(s.Ctx())
+			testutil.RequireCode(t, err, domain.CodeInternal)
+			if n != 0 || !sessionRow(t, s, active.CookieValue).LastSeenAt.Equal(created) {
+				t.Fatal("failed expiry returned a count or committed a pending touch")
+			}
+			requireSQLCount(t, s, `SELECT COUNT(*) FROM web_sessions`, 2)
+			if _, err := s.Store.Writer.ExecContext(s.Ctx(), `DROP TRIGGER fail_session_expiry`); err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(s.Ctx())
+			cancel()
+			if n, err := s.Svc.ExpireSessions(ctx); n != 0 || !errors.Is(err, context.Canceled) {
+				t.Fatalf("canceled expiry = %d, %v", n, err)
+			}
+			if n, err := s.Svc.ExpireSessions(s.Ctx()); err != nil || n != 1 {
+				t.Fatalf("expiry retry = %d, %v; want only the idle session deleted", n, err)
+			}
+			if !sessionRow(t, s, active.CookieValue).LastSeenAt.Equal(used) {
+				t.Fatal("failed expiry discarded queued activity")
+			}
+			requireUnauthenticatedSession(t, s, idle.CookieValue)
+			if _, err := s.Svc.Authenticate(s.Ctx(), active.CookieValue); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func TestSessionPasswordRevocation(t *testing.T) {
 	for _, reset := range []bool{false, true} {
 		t.Run(map[bool]string{false: "change", true: "offline reset"}[reset], func(t *testing.T) {
@@ -344,6 +429,11 @@ func TestSessionConcurrentUsage(t *testing.T) {
 		wg.Go(func() {
 			if err := s.Svc.FlushUsage(s.Ctx()); err != nil {
 				t.Error(err)
+			}
+		})
+		wg.Go(func() {
+			if n, err := s.Svc.ExpireSessions(s.Ctx()); err != nil || n != 0 {
+				t.Errorf("concurrent expiry = %d, %v; want no active sessions deleted", n, err)
 			}
 		})
 	}

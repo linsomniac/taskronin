@@ -70,14 +70,5 @@ func (s *Service) Drain(ctx context.Context) error {
 func (s *Service) maintTx(ctx context.Context, fn func(tx *sql.Tx, now time.Time) error) error {
 	// AIDEV-NOTE: Final FlushUsage runs after BeginShutdown and Drain, so it
 	// must neither enter the in-flight group nor use the canceled stopCtx.
-	tx, err := s.store.Writer.BeginTx(ctx, nil)
-	if err != nil {
-		return serviceError(err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	now := s.clock.Now().Truncate(time.Millisecond)
-	if err := fn(tx, now); err != nil {
-		return serviceError(err)
-	}
-	return serviceError(tx.Commit())
+	return s.writeTxEntered(ctx, fn)
 }
