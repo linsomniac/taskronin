@@ -335,6 +335,8 @@ func TestREC07(t *testing.T) {
 	requireEventKeys(t, s, systemID, "block:update 1", "triage:add 1 slipped")
 	requireEventKeys(t, s, user.ID, "entry:insert 1", "block:update 1 [derived]",
 		"triage:remove 1 slipped [derived]", "triage:add 1 continue [derived]")
+	requireHistoryOp(t, s, id, systemID)
+	requireHistoryOp(t, s, id, user.ID)
 }
 
 func reconcileDSTDays(t *testing.T, start, first, second, beforeMidnight, midnight string) {

@@ -68,6 +68,7 @@ func TestSLP05(t *testing.T) {
 				want = append(want, "triage:remove 1 continue [derived]")
 			}
 			requireEventKeys(t, s, r.OpID, want...)
+			requireAIOpState(t, s, x, domain.OpReverted)
 		})
 	}
 }
@@ -127,6 +128,7 @@ func TestUND11(t *testing.T) {
 		t.Fatal("missing derived slip")
 	}
 	requireEventKeys(t, s, r.OpID, "entry:tombstone 1", "block:update 1 [derived]", "triage:add 1 slipped [derived]", "triage:remove 1 continue [derived]")
+	requireAIOpState(t, s, x, domain.OpReverted)
 }
 
 func TestUND12(t *testing.T) {

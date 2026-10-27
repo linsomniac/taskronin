@@ -177,7 +177,7 @@ func TestSLP11(t *testing.T) {
 		t.Fatalf("slip metadata = %+v", v)
 	}
 	requireEventKeys(t, s, s.Last.OpID, "task:update 1", "block:update 1", "task:update 1")
-	// F8: Task 33 adds the history assertion for SLP-11.
+	requireHistoryOp(t, s, id, s.Last.OpID)
 }
 
 func TestLIF07(t *testing.T) {

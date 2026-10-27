@@ -774,7 +774,7 @@ func decodeKeyset(view domain.View, cursor string) (domain.Cursor, error) {
 		schema = []cursorKey{date, minute, integer}
 	case domain.ViewDone, domain.ViewDropped, domain.ViewDeleted:
 		schema = []cursorKey{millis}
-	case domain.ViewAll:
+	case domain.ViewAll, "history", "ops":
 		schema = []cursorKey{}
 	case "entries":
 		schema = []cursorKey{date, {min: 0, max: 1}, minute, millis}
@@ -904,18 +904,11 @@ func (s *Service) SyncTimezone(ctx context.Context, name string) (previous strin
 }
 
 func (s *Service) aiUnreviewed(ctx context.Context, q store.Q) (int, error) {
-	value, err := store.GetSetting(ctx, q, "ai_reviewed_through")
+	seq, err := aiReviewedThrough(ctx, q)
 	if err != nil {
 		return 0, err
 	}
-	seq, err := strconv.ParseInt(value, 10, 64)
-	if err != nil {
-		return 0, err
-	}
-	if seq < 0 {
-		return 0, errors.New("negative ai_reviewed_through setting")
-	}
-	return store.CountAIOps(ctx, q, domain.OpSeq(seq))
+	return store.CountAIOps(ctx, q, seq)
 }
 
 func (s *Service) backupHealth(ctx context.Context, q store.Q, now time.Time) (BackupHealth, error) {
