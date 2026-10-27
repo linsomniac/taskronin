@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -71,7 +72,7 @@ func (s *Service) run(ctx context.Context, m Meta, spec opSpec, fn func(*op) err
 	}
 	// AIDEV-NOTE: Task 18 supplies identity, lifecycle, replay and rate checks below.
 	// AIDEV-TODO: Tasks 30–31 add reversal target selection and stack transitions.
-	// Revert selection is implemented below; Task 31 supplies Undo/Redo selection.
+	// Completed: all reversal targets and stack transitions are handled below.
 	if spec.idem {
 		if err := validateIdemKey(m.Idem.Key); err != nil {
 			return nil, err
@@ -112,16 +113,78 @@ func (s *Service) run(ctx context.Context, m Meta, spec opSpec, fn func(*op) err
 			return s.replayIdem(ctx, *row)
 		}
 	}
+	savepoint := false
+	fail := func(cause error) (*OpResult, error) {
+		if savepoint {
+			if _, err := tx.ExecContext(ctx, `ROLLBACK TO user_op`); err != nil {
+				return nil, serviceError(errors.Join(cause, err))
+			}
+			if _, err := tx.ExecContext(ctx, `RELEASE user_op`); err != nil {
+				return nil, serviceError(errors.Join(cause, err))
+			}
+		}
+		var committed *committedError
+		if errors.As(cause, &committed) {
+			// AIDEV-NOTE: Select/replay precede reconcile. A committed pop keeps
+			// no attempted op or events, and atomically remembers its terminal 409.
+			row := committed.StackRow
+			if err := store.DeleteStackRow(ctx, tx, row.Actor, row.Stack, row.Seq); err != nil {
+				return nil, serviceError(err)
+			}
+			if spec.idem {
+				problem := idemProblem{Code: committed.Err.Code, Detail: committed.Err.Detail}
+				for _, conflict := range committed.Err.Conflicts {
+					problem.Conflicts = append(problem.Conflicts, idemConflict(conflict))
+				}
+				body, err := json.Marshal(problem)
+				if err != nil {
+					return nil, serviceError(err)
+				}
+				if err := store.PutIdem(ctx, tx, store.IdemRow{Actor: m.Actor.Key(), Key: m.Idem.Key, Hash: hash,
+					Status: 409, ErrorJSON: body, CreatedAt: now}); err != nil {
+					return nil, serviceError(err)
+				}
+			}
+			cause = committed.Err
+		} else if !savepoint {
+			return nil, serviceError(cause)
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, &domain.Error{Code: domain.CodeInternal, Err: errors.Join(cause, err)}
+		}
+		return nil, serviceError(cause)
+	}
 	var target *domain.OpRecord
-	if spec.class == classRevert {
+	var stackRow undoRowKey
+	var stackOpID domain.OpID
+	scopes := spec.scopes
+	switch spec.class {
+	case classRevert:
 		r, err := store.GetOp(ctx, tx, spec.targetID)
 		if err != nil {
-			return nil, serviceError(err)
-		}
-		if !m.Actor.Scopes.Has(r.Scopes) || (m.Actor.Kind != domain.ActorOwner && m.Actor.Key() != r.Actor) {
-			return nil, domain.Errorf(domain.CodeForbidden, "operation is not permitted")
+			return fail(err)
 		}
 		target = &r
+	case classUndo, classRedo:
+		target, stackRow, err = selectStackOp(ctx, tx, m.Actor.Key(), spec.class)
+		if err != nil {
+			return fail(err)
+		}
+	default:
+		// Forward operations have no reversal target.
+	}
+	if target != nil {
+		if !m.Actor.Scopes.Has(target.Scopes) || (m.Actor.Kind != domain.ActorOwner && m.Actor.Key() != target.Actor) {
+			return fail(domain.Errorf(domain.CodeForbidden, "operation is not permitted"))
+		}
+		scopes = target.Scopes
+		if spec.class == classUndo || spec.class == classRedo {
+			stackOpID = target.ID
+			target, err = resolveStackTarget(ctx, tx, target, stackRow)
+			if err != nil {
+				return fail(err)
+			}
+		}
 	}
 	if !spec.noReconcile {
 		if err := s.reconcileTx(ctx, tx, now); err != nil {
@@ -131,18 +194,7 @@ func (s *Service) run(ctx context.Context, m Meta, spec opSpec, fn func(*op) err
 	if _, err := tx.ExecContext(ctx, `SAVEPOINT user_op`); err != nil {
 		return nil, serviceError(err)
 	}
-	fail := func(cause error) (*OpResult, error) {
-		if _, err := tx.ExecContext(ctx, `ROLLBACK TO user_op`); err != nil {
-			return nil, serviceError(errors.Join(cause, err))
-		}
-		if _, err := tx.ExecContext(ctx, `RELEASE user_op`); err != nil {
-			return nil, serviceError(errors.Join(cause, err))
-		}
-		if err := tx.Commit(); err != nil {
-			return nil, &domain.Error{Code: domain.CodeInternal, Err: errors.Join(cause, err)}
-		}
-		return nil, serviceError(cause)
-	}
+	savepoint = true
 	if m.Actor.MutationsPerHour > 0 {
 		n, oldest, err := store.CountOpsSince(ctx, tx, m.Actor.Key(), now.Add(-time.Hour))
 		if err != nil {
@@ -156,8 +208,16 @@ func (s *Service) run(ctx context.Context, m Meta, spec opSpec, fn func(*op) err
 	o := s.newOp(ctx, tx, m.Actor, spec, now)
 	if target != nil {
 		o.target = target
-		o.rec.Scopes = target.Scopes
+		o.rec.Scopes = scopes
 		o.rec.Via = "revert"
+		switch spec.class {
+		case classUndo:
+			o.rec.Via = "undo"
+		case classRedo:
+			o.rec.Via = "redo"
+		default:
+			// Explicit Revert uses via="revert".
+		}
 		o.rec.RevertsOpID = sql.Null[domain.OpID]{V: target.ID, Valid: true}
 	}
 	if err := store.InsertOp(ctx, tx, &o.rec); err != nil {
@@ -176,11 +236,12 @@ func (s *Service) run(ctx context.Context, m Meta, spec opSpec, fn func(*op) err
 		return fail(err)
 	}
 	noChange := spec.class == classForward && len(o.events) == 0
-	if noChange {
+	switch {
+	case noChange:
 		if _, err := tx.ExecContext(ctx, `ROLLBACK TO user_op`); err != nil {
 			return fail(err)
 		}
-	} else if (spec.class == classForward || spec.class == classRevert) && spec.revertible {
+	case (spec.class == classForward || spec.class == classRevert) && spec.revertible:
 		if err := store.PushStack(ctx, tx, m.Actor.Key(), store.StackUndo, o.rec.ID); err != nil {
 			return fail(err)
 		}
@@ -188,6 +249,10 @@ func (s *Service) run(ctx context.Context, m Meta, spec opSpec, fn func(*op) err
 			return fail(err)
 		}
 		if err := store.TrimStack(ctx, tx, m.Actor.Key(), store.StackUndo, s.undoDepth); err != nil {
+			return fail(err)
+		}
+	case spec.class == classUndo || spec.class == classRedo:
+		if err := s.moveStackOp(ctx, tx, stackRow, stackOpID); err != nil {
 			return fail(err)
 		}
 	}

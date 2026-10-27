@@ -548,6 +548,18 @@ func (s *Scenario) Revert(op domain.OpID) *service.OpResult {
 	return s.Must(s.Svc.Revert(s.Ctx(), s.Meta(), service.RevertIn{OpID: op}))
 }
 
+// Undo reverses the current actor's newest undo entry with a fresh request key.
+func (s *Scenario) Undo() *service.OpResult {
+	s.T.Helper()
+	return s.Must(s.Svc.Undo(s.Ctx(), s.Meta()))
+}
+
+// Redo reapplies the current actor's newest redo entry with a fresh request key.
+func (s *Scenario) Redo() *service.OpResult {
+	s.T.Helper()
+	return s.Must(s.Svc.Redo(s.Ctx(), s.Meta()))
+}
+
 // StateDigest returns deterministic live user state, excluding bookkeeping clocks,
 // versions and sequences. Task order is represented by IDs rather than rank values.
 func (s *Scenario) StateDigest() string {
