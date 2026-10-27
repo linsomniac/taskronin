@@ -18,7 +18,103 @@ type reconcileStep struct {
 
 // Tasks 27, 20, 23 and 26 register surface, due, overdue, resolve and focus,
 // in that order, before concurrent use of the service begins.
-var reconcileSteps []reconcileStep
+var reconcileSteps = []reconcileStep{
+	{name: "due", need: needDue, run: (*op).reconcileDue},
+	{name: "overdue", need: needOverdue, run: (*op).reconcileOverdue},
+}
+
+func needDue(ctx context.Context, q store.Q, _ time.Time, today civil.Date) (bool, error) {
+	ids, err := dueTasks(ctx, q, today, 1)
+	return len(ids) > 0, err
+}
+
+func (o *op) reconcileDue() error {
+	ids, err := dueTasks(o.ctx, o.tx, o.today, -1)
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if err := o.addReason(id, domain.ReasonDue); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func dueTasks(ctx context.Context, q store.Q, today civil.Date, limit int) ([]domain.TaskID, error) {
+	rows, err := q.QueryContext(ctx, `SELECT id FROM tasks
+		WHERE status = 'open' AND deleted_at IS NULL AND defer_date IS NULL
+		AND due_date <= ? AND due_ack = 'none'
+		AND NOT EXISTS (SELECT 1 FROM task_triage WHERE task_id = tasks.id AND reason = 'due')
+		AND NOT EXISTS (SELECT 1 FROM time_blocks WHERE task_id = tasks.id
+			AND date = ? AND status = 'planned' AND deleted_at IS NULL)
+		ORDER BY id LIMIT ?`, today, today, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []domain.TaskID
+	for rows.Next() {
+		var id domain.TaskID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+func needOverdue(ctx context.Context, q store.Q, now time.Time, today civil.Date) (bool, error) {
+	z, err := civil.LoadZone(now.Location().String())
+	if err != nil {
+		return false, err
+	}
+	ids, err := overdueTasks(ctx, q, now, today, z, true)
+	return len(ids) > 0, err
+}
+
+func (o *op) reconcileOverdue() error {
+	ids, err := overdueTasks(o.ctx, o.tx, o.now, o.today, o.s.zone, false)
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if err := o.addReason(id, domain.ReasonOverdue); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func overdueTasks(ctx context.Context, q store.Q, now time.Time, today civil.Date, z civil.Zone, firstOnly bool) ([]domain.TaskID, error) {
+	rows, err := q.QueryContext(ctx, `SELECT id, due_date, due_min FROM tasks
+		WHERE status = 'open' AND deleted_at IS NULL AND due_date <= ?
+		AND NOT EXISTS (SELECT 1 FROM task_triage WHERE task_id = tasks.id AND reason = 'overdue')
+		AND (due_ack != 'overdue' OR due_ack_date IS NULL OR due_ack_date != ?)
+		ORDER BY id`, today, today)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []domain.TaskID
+	for rows.Next() {
+		var id domain.TaskID
+		var date civil.Date
+		var minute sql.Null[civil.Minute]
+		if err := rows.Scan(&id, &date, &minute); err != nil {
+			return nil, err
+		}
+		// AIDEV-NOTE: SQL narrows the candidates; only civil instants decide
+		// overdue, including date-only midnight and the earlier DST fold.
+		if !z.DueMoment(date, minute).After(now) {
+			ids = append(ids, id)
+			if firstOnly {
+				break
+			}
+		}
+	}
+	return ids, rows.Err()
+}
 
 // Reconcile performs time-dependent maintenance only when the reader finds work.
 func (s *Service) Reconcile(ctx context.Context) error {
@@ -40,6 +136,10 @@ func (s *Service) Reconcile(ctx context.Context) error {
 }
 
 func (s *Service) needsReconcile(ctx context.Context, q store.Q, now time.Time) (bool, error) {
+	// AIDEV-NOTE: Step need callbacks receive the configured IANA location
+	// through now, regardless of the clock's location. The instant is unchanged.
+	// This preserves their shared interface while allowing civil moment checks.
+	now = now.In(s.zone.Location())
 	today := s.zone.DateOf(now)
 	var needed bool
 	for _, step := range reconcileSteps {

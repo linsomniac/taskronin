@@ -37,6 +37,85 @@ type MarkManualIn struct {
 	Expect domain.Expect
 }
 
+// SetDueIn identifies a task and its new due moment; nil clears the due.
+type SetDueIn struct {
+	ID     domain.TaskID
+	Expect domain.Expect
+	Due    *domain.Moment
+}
+
+// SetDue changes a task's due moment and resets its due acknowledgement.
+func (s *Service) SetDue(ctx context.Context, m Meta, in SetDueIn) (*OpResult, error) {
+	return s.run(ctx, m, opSpec{kind: domain.OpTaskDue, class: classForward, scopes: domain.ScopeWrite, idem: true, revertible: true}, func(o *op) error {
+		t, err := o.loadTask(in.ID, &in.Expect, false)
+		if err != nil {
+			return err
+		}
+		var deferM *domain.Moment
+		if t.DeferDate.Valid {
+			deferM = &domain.Moment{Date: t.DeferDate.V, Min: t.DeferMin}
+		}
+		if err := o.checkDeferDue(deferM, in.Due); err != nil {
+			return err
+		}
+		before := t
+		t.DueDate, t.DueMin = sql.Null[civil.Date]{}, sql.Null[civil.Minute]{}
+		if in.Due != nil {
+			if !s.zone.DueMoment(in.Due.Date, in.Due.Min).After(o.now) {
+				return validation("due", errors.New("must be in the future"))
+			}
+			t.DueDate, t.DueMin = sql.Null[civil.Date]{V: in.Due.Date, Valid: true}, in.Due.Min
+		}
+		t.DueAck, t.DueAckDate = domain.DueNone, sql.Null[civil.Date]{}
+		if err := store.UpdateTask(o.ctx, o.tx, t); err != nil {
+			return err
+		}
+		if err := o.recordTaskUpdate(before, t); err != nil {
+			return err
+		}
+		if err := o.removeReason(t.ID, domain.ReasonDue); err != nil {
+			return err
+		}
+		if err := o.removeReason(t.ID, domain.ReasonOverdue); err != nil {
+			return err
+		}
+		o.ref(domain.EntityRef{Entity: domain.EntTask, ID: int64(t.ID)})
+		return nil
+	})
+}
+
+func (o *op) checkDeferDue(deferM, dueM *domain.Moment) error {
+	if err := validateMoment("defer", deferM); err != nil {
+		return err
+	}
+	if err := validateMoment("due", dueM); err != nil {
+		return err
+	}
+	if deferM == nil || dueM == nil {
+		return nil
+	}
+	if deferM.Date.After(dueM.Date) ||
+		!o.s.zone.DeferMoment(deferM.Date, deferM.Min).Before(o.s.zone.DueMoment(dueM.Date, dueM.Min)) {
+		return validation("due", errors.New("defer must precede due and surface on or before its due date"))
+	}
+	return nil
+}
+
+func validateMoment(field string, m *domain.Moment) error {
+	if m == nil {
+		return nil
+	}
+	if _, err := civil.ParseDate(m.Date.String()); err != nil {
+		return validation(field, err)
+	}
+	// AIDEV-NOTE: Validate typed API inputs before civil moment helpers;
+	// out-of-range minutes are caller bugs to civil and can panic there.
+	if m.Min.Valid && (m.Min.V < 0 || m.Min.V > 1439) {
+		return validation(field, errors.New("minute must be between 0 and 1439"))
+	}
+	return nil
+}
+
 // AddTask captures a task in triage, or applies an owner-requested placement.
 func (s *Service) AddTask(ctx context.Context, m Meta, in AddTaskIn) (*OpResult, error) {
 	scopes := domain.ScopeCapture

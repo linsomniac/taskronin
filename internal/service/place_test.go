@@ -422,8 +422,10 @@ func TestPlaceDueAcknowledgement(t *testing.T) {
 		t.Run(tc.due, func(t *testing.T) {
 			s := testutil.NewScenario(t)
 			id := s.At("10-28 09:00").Add("due", testutil.Due(tc.due))
-			s.At(testutil.DefaultNow).Place(id, domain.PlaceKeep)
-			requirePlaced(t, s, id, 2)
+			s.At(testutil.DefaultNow).Reconcile()
+			version := s.Task(id).Version
+			s.Place(id, domain.PlaceKeep)
+			requirePlaced(t, s, id, version+1)
 			if s.Task(id).DueAck != tc.phase {
 				t.Fatalf("due ack = %s", s.Task(id).DueAck)
 			}

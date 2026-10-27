@@ -197,6 +197,25 @@ func (s *Scenario) MarkManual(id domain.TaskID) {
 	s.Must(s.Svc.MarkManual(s.Ctx(), s.Meta(), service.MarkManualIn{ID: id, Expect: s.Expect(id)}))
 }
 
+// Reconcile applies pending time-dependent transitions at the current fake instant.
+func (s *Scenario) Reconcile() {
+	s.T.Helper()
+	if err := s.Svc.Reconcile(s.Ctx()); err != nil {
+		s.T.Fatal(err)
+	}
+}
+
+// SetDue sets a task's due moment, or clears it when moment is empty.
+func (s *Scenario) SetDue(id domain.TaskID, moment string) {
+	s.T.Helper()
+	in := service.SetDueIn{ID: id, Expect: s.Expect(id)}
+	if moment != "" {
+		due := Moment(moment)
+		in.Due = &due
+	}
+	s.Must(s.Svc.SetDue(s.Ctx(), s.Meta(), in))
+}
+
 // Task returns the current task view through GetTask.
 func (s *Scenario) Task(id domain.TaskID) domain.TaskView {
 	s.T.Helper()

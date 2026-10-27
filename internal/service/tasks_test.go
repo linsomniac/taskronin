@@ -126,6 +126,8 @@ func TestAddTaskNormalizationAndScopes(t *testing.T) {
 	if r.Task.Origin != capture.Actor.Key() || r.Task.View != domain.ViewTriage || !slices.Equal(r.Task.Tags, []string{"Infra"}) {
 		t.Fatalf("capture = %+v", r.Task)
 	}
+	// The authorized capture may reconcile the original task's due reason.
+	count := s.OpCount()
 	_, err := capture.Svc.GetTask(capture.Ctx(), capture.Actor, id)
 	testutil.RequireCode(t, err, domain.CodeForbidden)
 	_, err = capture.Svc.MarkManual(capture.Ctx(), capture.Meta(), service.MarkManualIn{ID: id, Expect: s.Expect(id)})
@@ -133,7 +135,7 @@ func TestAddTaskNormalizationAndScopes(t *testing.T) {
 	ro := s.As(testutil.TokenActor("ro", domain.ScopeRead))
 	_, err = ro.Svc.AddTask(ro.Ctx(), ro.Meta(), service.AddTaskIn{Title: "forbidden"})
 	testutil.RequireCode(t, err, domain.CodeForbidden)
-	if s.OpCount() != 2 {
+	if s.OpCount() != count {
 		t.Fatal("forbidden operations wrote ops")
 	}
 }
