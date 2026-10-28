@@ -35,24 +35,34 @@ const (
 
 // Login verifies the owner password and atomically replaces any presented session.
 func (s *Service) Login(ctx context.Context, in LoginIn) (Session, error) {
+	// AIDEV-NOTE: The password gate wait (up to 15 s) and argon2 run on the
+	// READER before any writer transaction opens, so a slow login never blocks
+	// the single writer. The writer tx then confirms auth_state is unchanged.
+	a, err := store.GetAuthState(ctx, s.store.Reader)
+	if err != nil {
+		return Session{}, serviceError(err)
+	}
+	if a.WebLoginDisabled {
+		return Session{}, domain.Errorf(domain.CodeForbidden, "web login is disabled")
+	}
+	if in.Password == "" {
+		return Session{}, domain.Errorf(domain.CodePasswordRequired, "password is required")
+	}
+	ok, err := s.passwords.Verify(ctx, in.RemoteKey, a.PasswordHash, in.Password)
+	if err != nil {
+		return Session{}, serviceError(err)
+	}
+	if !ok {
+		return Session{}, domain.Errorf(domain.CodePasswordInvalid, "invalid password")
+	}
 	var result Session
-	err := s.writeTx(ctx, func(tx *sql.Tx, now time.Time) error {
-		a, err := store.GetAuthState(ctx, tx)
+	err = s.writeTx(ctx, func(tx *sql.Tx, now time.Time) error {
+		cur, err := store.GetAuthState(ctx, tx)
 		if err != nil {
 			return err
 		}
-		if a.WebLoginDisabled {
-			return domain.Errorf(domain.CodeForbidden, "web login is disabled")
-		}
-		if in.Password == "" {
-			return domain.Errorf(domain.CodePasswordRequired, "password is required")
-		}
-		ok, err := s.passwords.Verify(ctx, in.RemoteKey, a.PasswordHash, in.Password)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return domain.Errorf(domain.CodePasswordInvalid, "invalid password")
+		if cur.PasswordHash != a.PasswordHash || cur.WebLoginDisabled {
+			return domain.Errorf(domain.CodeConflict, "credentials changed during login; retry")
 		}
 		if old, err := auth.ParseSessionCookie(in.OldCookie); err == nil {
 			if err := store.DeleteSession(ctx, tx, auth.HashSessionID(old)); err != nil {

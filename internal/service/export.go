@@ -26,11 +26,11 @@ func (s *Service) Export(ctx context.Context, a domain.Actor, w io.Writer) error
 	defer leave()
 	ctx, cancel := s.longOpContext(ctx)
 	defer cancel()
-	tx, err := s.store.Reader.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	tx, done, err := beginTx(ctx, s.store.Reader, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return serviceError(err)
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer done()
 	out := &exportOutput{ctx: ctx, writer: w}
 	if err := s.exportTx(ctx, tx, out); err != nil {
 		// AIDEV-NOTE: The writer's error is part of Export's output contract;

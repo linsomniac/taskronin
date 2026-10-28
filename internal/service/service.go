@@ -149,11 +149,11 @@ func (s *Service) read(ctx context.Context, a domain.Actor, scopes domain.Scopes
 			return err
 		}
 	}
-	tx, err := s.store.Reader.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	tx, done, err := beginTx(ctx, s.store.Reader, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return serviceError(err)
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer done()
 	now := s.clock.Now().Truncate(time.Millisecond)
 	if err := fn(tx, now, s.zone.DateOf(now)); err != nil {
 		return serviceError(err)
@@ -174,11 +174,11 @@ func (s *Service) writeTx(ctx context.Context, fn func(tx *sql.Tx, now time.Time
 // Callers hold an in-flight registration, except maintTx for final maintenance
 // after Drain.
 func (s *Service) writeTxEntered(ctx context.Context, fn func(tx *sql.Tx, now time.Time) error) error {
-	tx, err := s.store.Writer.BeginTx(ctx, nil)
+	tx, done, err := beginTx(ctx, s.store.Writer, nil)
 	if err != nil {
-		return serviceError(err)
+		return writerAdmissionError(err)
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer done()
 	now := s.clock.Now().Truncate(time.Millisecond)
 	if err := fn(tx, now); err != nil {
 		return serviceError(err)
@@ -188,6 +188,15 @@ func (s *Service) writeTxEntered(ctx context.Context, fn func(tx *sql.Tx, now ti
 
 func validation(field string, err error) *domain.Error {
 	return domain.ValidationError(domain.FieldError{Field: field, Message: err.Error()})
+}
+
+// writerAdmissionError maps a writer-admission timeout to busy (A§4.3 step 4:
+// 503 + Retry-After); other errors follow serviceError.
+func writerAdmissionError(err error) error {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return &domain.Error{Code: domain.CodeBusy, Detail: "writer is busy", RetryAfter: time.Second, Err: err}
+	}
+	return serviceError(err)
 }
 
 func serviceError(err error) error {
@@ -200,4 +209,24 @@ func serviceError(err error) error {
 	}
 	de, _ := domain.AsError(err)
 	return de
+}
+
+// beginTx admits a transaction on db under ctx, but starts it with a
+// non-cancelable context.
+// AIDEV-NOTE: database/sql's awaitDone goroutine rolls back asynchronously
+// when the BeginTx ctx is canceled, which raced Drain (reader leak). With a
+// WithoutCancel begin ctx the deferred Rollback is synchronous. Callers MUST
+// pass the cancelable ctx to every query. The returned done rolls back (a no-op
+// after Commit) and releases the connection; call it exactly once, before leave().
+func beginTx(ctx context.Context, db *sql.DB, opts *sql.TxOptions) (*sql.Tx, func(), error) {
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	tx, err := conn.BeginTx(context.WithoutCancel(ctx), opts)
+	if err != nil {
+		_ = conn.Close()
+		return nil, nil, err
+	}
+	return tx, func() { _ = tx.Rollback(); _ = conn.Close() }, nil
 }

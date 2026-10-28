@@ -432,9 +432,11 @@ func TestRevokeTokenShutdownResult(t *testing.T) {
 			if read.operation == nil {
 				t.Fatal("runner did not start a result transaction")
 			}
-			originalDeadline, originalOK := read.operation.Deadline()
+			// AIDEV-NOTE: Transactions now begin on context.WithoutCancel (so Rollback is
+			// synchronous, see beginTx); the runner's deadline is carried by the query ctx.
 			resultDeadline, resultOK := read.current.Deadline()
-			if !originalOK || !resultOK || !resultDeadline.Equal(originalDeadline) || read.operation.Err() != nil {
+			if !resultOK || time.Until(resultDeadline) > service.OpBudget || read.current.Err() != nil ||
+				read.operation.Err() != nil {
 				t.Error("token result loading lost the runner's live context or original deadline")
 			}
 			s.Svc.BeginShutdown()

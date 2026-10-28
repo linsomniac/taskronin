@@ -91,11 +91,11 @@ func (s *Service) run(ctx context.Context, m Meta, spec opSpec, fn func(*op) err
 		return nil, err
 	}
 	defer leave()
-	tx, err := s.store.Writer.BeginTx(ctx, nil)
+	tx, done, err := beginTx(ctx, s.store.Writer, nil)
 	if err != nil {
-		return nil, serviceError(err)
+		return nil, writerAdmissionError(err)
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer done()
 	now := s.clock.Now().Truncate(time.Millisecond)
 	// AIDEV-NOTE: Idempotency lookup precedes target selection (R2-5),
 	// reconcile and the rate cap; a retry must never act on the next target.
@@ -110,6 +110,7 @@ func (s *Service) run(ctx context.Context, m Meta, spec opSpec, fn func(*op) err
 			if err := tx.Rollback(); err != nil {
 				return nil, serviceError(err)
 			}
+			done() // free the writer before the replay loads results on the reader
 			return s.replayIdem(ctx, *row)
 		}
 	}
@@ -275,6 +276,9 @@ func (s *Service) run(ctx context.Context, m Meta, spec opSpec, fn func(*op) err
 	if err := tx.Commit(); err != nil {
 		return nil, &domain.Error{Code: domain.CodeInternal, Err: err}
 	}
+	// AIDEV-NOTE: Release the writer connection before loadResult reads on the
+	// reader pool; done is idempotent so the deferred call is harmless.
+	done()
 	r := &OpResult{OpID: o.rec.ID, Created: o.created, NoChange: noChange, Refs: o.refs,
 		Effects: effectsFromEvents(o.rec, o.events), Warnings: o.warnings}
 	if noChange {
