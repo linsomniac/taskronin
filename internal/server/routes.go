@@ -37,7 +37,16 @@ func (s *Server) handlerFor(routes []Route) http.Handler {
 	}
 	// Resolve the pattern before guards so rejected requests also log a route
 	// pattern, never a raw path or query containing user text.
-	router := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { mux.ServeHTTP(w, r) })
+	router := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// AIDEV-NOTE: ServeMux returns no pattern for its default 404/405
+		// handlers. A route is a method/path pair; absent pairs use not_found
+		// because the domain vocabulary has no method-not-allowed code.
+		if state(r).route == "" {
+			s.writeProblem(w, r, domain.Errorf(domain.CodeNotFound, "route not found"))
+			return
+		}
+		mux.ServeHTTP(w, r)
+	})
 	chain := s.socketGuard(s.routeClass(s.bodyLimit(s.authn(s.apiHeaders(router)))))
 	logged := s.accessLog(chain)
 	selectRoute := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

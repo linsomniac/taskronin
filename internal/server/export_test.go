@@ -8,6 +8,7 @@ var (
 	StatusFor    = statusFor
 	IfMatch      = ifMatch
 	WriteProblem = (*Server).writeProblem
+	WriteJSON    = (*Server).writeJSON
 	WriteOp      = (*Server).writeOp
 	Meta         = (*Server).meta
 	ExemptMeta   = (*Server).exemptMeta

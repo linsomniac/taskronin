@@ -1,9 +1,13 @@
 package server_test
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"testing"
@@ -14,6 +18,7 @@ import (
 	"taskronin/internal/server"
 	"taskronin/internal/service"
 	"taskronin/internal/testutil"
+	"taskronin/internal/textsafe"
 )
 
 func TestStatusForEveryCode(t *testing.T) {
@@ -122,6 +127,83 @@ func TestWriteOp(t *testing.T) {
 			}
 			if tc.name == "entry" && (p.Entry == nil || p.Entry.TaskTitle == nil || *p.Entry.TaskTitle != "task") {
 				t.Fatal("entry task title lost")
+			}
+		})
+	}
+}
+
+type failingJSON struct{ err error }
+
+func (v failingJSON) MarshalJSON() ([]byte, error) { return nil, v.err }
+
+func TestProblemDiagnostics(t *testing.T) {
+	var logs bytes.Buffer
+	s, _, token := newTestServer(t, slog.New(slog.NewJSONHandler(&logs, nil)))
+	cause := "database failure\x1b[2J\n\t\u202e\xff"
+	for _, tc := range []struct {
+		name   string
+		err    error
+		code   domain.Code
+		encode bool
+	}{
+		{"internal cause", &domain.Error{Code: domain.CodeInternal, Detail: "operation failed", Err: errors.New(cause)}, domain.CodeInternal, false},
+		{"wrapped internal", fmt.Errorf("adapter: %w", &domain.Error{Code: domain.CodeInternal, Err: errors.New(cause)}), domain.CodeInternal, false},
+		{"untyped", fmt.Errorf("adapter: %w", errors.New(cause)), domain.CodeInternal, false},
+		{"internal detail", &domain.Error{Code: domain.CodeInternal, Detail: cause}, domain.CodeInternal, false},
+		{"busy cause", &domain.Error{Code: domain.CodeBusy, Detail: "try again", Err: errors.New(cause)}, domain.CodeBusy, false},
+		{"JSON serialization", errors.New(cause), domain.CodeInternal, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			logs.Reset()
+			h := server.HandlerFor(s, []server.Route{{Method: http.MethodPost, Pattern: "/api/v1/x", Handler: func(w http.ResponseWriter, r *http.Request) {
+				if tc.encode {
+					server.WriteJSON(s, w, http.StatusOK, failingJSON{err: tc.err})
+					return
+				}
+				server.WriteProblem(s, w, r, tc.err)
+			}}})
+			w := do(t, h, sock, request(http.MethodPost, "/api/v1/x?secret=private-query", token, `{"private-body":"never log"}`))
+			p := problem(t, w, tc.code)
+			if p.RequestID == "" || p.RequestID != w.Header().Get(api.HeaderRequestID) {
+				t.Fatalf("request ID = %q, header = %q", p.RequestID, w.Header().Get(api.HeaderRequestID))
+			}
+			if tc.code == domain.CodeInternal && p.Detail != "internal error" {
+				t.Fatalf("internal detail = %q", p.Detail)
+			}
+			if strings.Contains(w.Body.String(), "database failure") {
+				t.Fatalf("diagnostic leaked to client: %s", w.Body)
+			}
+			decoder := json.NewDecoder(bytes.NewReader(logs.Bytes()))
+			found := false
+			for {
+				var record map[string]any
+				if err := decoder.Decode(&record); errors.Is(err, io.EOF) {
+					break
+				} else if err != nil {
+					t.Fatal(err)
+				}
+				if record["level"] != "ERROR" {
+					continue
+				}
+				if record["request_id"] != p.RequestID || record["code"] != string(tc.code) {
+					t.Fatalf("uncorrelated diagnostic: %v", record)
+				}
+				for _, v := range record {
+					if text, ok := v.(string); ok {
+						if text != textsafe.SanitizeLine(text) {
+							t.Fatalf("unsanitized diagnostic: %q", text)
+						}
+						found = found || strings.Contains(text, textsafe.SanitizeLine(cause))
+					}
+				}
+			}
+			if !found {
+				t.Fatalf("missing sanitized cause in error log: %s", &logs)
+			}
+			for _, secret := range []string{token, "Authorization", "private-body", "private-query"} {
+				if strings.Contains(logs.String(), secret) {
+					t.Fatalf("request secret logged: %q", secret)
+				}
 			}
 		})
 	}

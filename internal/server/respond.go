@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -9,6 +10,7 @@ import (
 	"taskronin/internal/api"
 	"taskronin/internal/domain"
 	"taskronin/internal/service"
+	"taskronin/internal/textsafe"
 )
 
 func statusFor(c domain.Code) int {
@@ -67,6 +69,24 @@ func (s *Server) writeProblem(w http.ResponseWriter, r *http.Request, err error)
 			}
 			p.Current = current
 		}
+	}
+	if status == http.StatusInternalServerError || de.Err != nil {
+		ctx := context.Background()
+		if r != nil {
+			ctx = r.Context()
+		}
+		diagnostic := error(de)
+		if err != nil {
+			diagnostic = err
+		}
+		if de.Err != nil {
+			diagnostic = de.Err
+		}
+		// AIDEV-NOTE: Keep private causes in sanitized diagnostics, never in
+		// the problem body. writeJSON has no request, so correlate its failures
+		// with the generated response ID rather than requiring request state.
+		s.log.ErrorContext(ctx, "HTTP request failed", "request_id", p.RequestID,
+			"code", textsafe.SanitizeLine(p.Code), "error", textsafe.SanitizeLine(diagnostic.Error()))
 	}
 	if status == http.StatusUnauthorized {
 		w.Header().Set("WWW-Authenticate", "Bearer")

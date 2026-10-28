@@ -469,3 +469,49 @@ func TestLongRouteBlockedSocketWrite(t *testing.T) {
 		t.Fatal("shutdown failed to interrupt socket write")
 	}
 }
+
+func TestRoutingProblems(t *testing.T) {
+	s, _, token := newTestServer(t, nil)
+	called := false
+	h := server.HandlerFor(s, []server.Route{{Method: http.MethodGet, Pattern: "/api/v1/tasks/{id}", Handler: func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		if r.PathValue("id") != "42" {
+			t.Errorf("path id = %q", r.PathValue("id"))
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}}})
+	for _, tc := range []struct{ method, path, token string }{
+		{http.MethodGet, "/api/v1/missing", token},
+		{http.MethodPost, "/api/v1/tasks/42", token},
+		{http.MethodPatch, "/api/v1/tasks/42", token},
+		{http.MethodPost, "/healthz", ""},
+	} {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			w := do(t, h, sock, request(tc.method, tc.path, tc.token, ""))
+			p := problem(t, w, domain.CodeNotFound)
+			if p.Type != api.ProblemTypePrefix+string(domain.CodeNotFound) || p.Title != http.StatusText(http.StatusNotFound) || p.Detail == "" || p.RequestID == "" || p.RequestID != w.Header().Get(api.HeaderRequestID) {
+				t.Fatalf("routing problem = %+v", p)
+			}
+			if w.Header().Get(api.HeaderVersion) != buildinfo.Version || w.Header().Get("Cache-Control") != "no-store" || w.Header().Get("X-Content-Type-Options") != "nosniff" {
+				t.Fatalf("routing headers = %v", w.Header())
+			}
+			if called {
+				t.Fatal("unmatched method/path called a route handler")
+			}
+		})
+	}
+	// The fallback stays behind authentication, and matched routes retain mux
+	// path values and GET's implicit HEAD support.
+	problem(t, do(t, h, sock, request(http.MethodGet, "/api/v1/missing", "", "")), domain.CodeUnauthenticated)
+	for _, method := range []string{http.MethodGet, http.MethodHead} {
+		w := do(t, h, sock, request(method, "/api/v1/tasks/42", token, ""))
+		if w.Code != http.StatusNoContent || !called {
+			t.Fatalf("matched %s: status %d, called %t", method, w.Code, called)
+		}
+		called = false
+	}
+	w := do(t, h, sock, request(http.MethodGet, "/api/v1//tasks/42", token, ""))
+	if w.Code != http.StatusTemporaryRedirect || w.Header().Get("Location") != "/api/v1/tasks/42" || called {
+		t.Fatalf("mux redirect = %d %v, called %t", w.Code, w.Header(), called)
+	}
+}
