@@ -1,0 +1,21 @@
+# Written by `tkr init`. Unknown keys are an error.
+timezone      = "America/Denver"   # REQUIRED, IANA name (D§5.12); serve refuses without it
+week_start    = "monday"           # monday..sunday
+due_soon_days = 3                  # 0..30
+
+[paths]
+data_dir = "/home/sean/.local/share/taskronin"   # absolute, resolved by init
+socket   = "/run/user/1000/taskronin/sock"       # must match the .socket unit
+
+[web]
+enabled              = true              # handlers exist from plan D; earlier builds ignore
+listen               = "127.0.0.1:7878"  # loopback only in v1
+allow_plain_loopback = true              # set by init after the single-user check (D§10.2)
+
+[backup]
+dir  = "/home/sean/.local/share/taskronin/backups"
+time = "03:30"                           # daily, server zone
+
+[log]
+level  = "info"                          # debug|info|warn|error
+format = "text"                          # text|json
