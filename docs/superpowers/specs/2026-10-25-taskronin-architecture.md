@@ -20,7 +20,7 @@ one `op_id` (D§3). "Today"/"now" always mean the server's configured zone.
 module taskronin            // round-2 Q1; see "Renaming" below
 
 go 1.26.0
-toolchain go1.26.9
+toolchain go1.26.10
 
 require (
 	charm.land/bubbles/v2                  v2.2.1   // TUI widgets (plan C)

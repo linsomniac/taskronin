@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - Execution context: each implementer gets its task text, these Global Constraints, and read access to the three specs and every plan file. A task may therefore cite a signature by precise location ("A§6.7 `client.Mut`", "Plan C Task 7 Interfaces: `cardDeck`") instead of repeating it; the cited symbol is authoritative.
-- Go `1.26.0`, toolchain `go1.26.9`, module `taskronin` (never hard-code `taskronin/` outside imports), Linux only.
+- Go `1.26.0`, toolchain `go1.26.10`, module `taskronin` (never hard-code `taskronin/` outside imports), Linux only.
 - Pinned (A§1.1): `charm.land/bubbletea/v2 v2.1.0`, `charm.land/bubbles/v2 v2.2.1`, `charm.land/lipgloss/v2 v2.0.6`, `github.com/charmbracelet/x/ansi v0.11.9`, `golang.org/x/sys v0.49.0`; test-only `github.com/charmbracelet/x/exp/teatest/v2 v2.0.0-20260311145557-c83711a11ffa` (P1). A dependency is added (`go get <module>@<pin>`, then `go mod tidy`) in the task that first imports it — charm modules in Task 2, teatest in Task 4 — and `go list -m` must then print exactly these versions (verified 2026-10-25 in a scratch module: no bumps).
 - Layering (A§1.3): `internal/tui` imports only `client`, `api`, `domain`, `civil`, `datespec`, `textsafe`, `editor`, `config` (+ bubbletea, bubbles, lipgloss); no `clock` (`editor.Drafts` with a nil clock defaults to `clock.Real{}`). `_test.go` files may also import `testutil` and teatest (archtest checks non-test imports only). In `internal/cli`, only `cmd_tui.go` imports `tui`.
 - R4: no `time.Now`, no `time.Local` (forbidigo). The TUI shows server time from `api.Clock`; timers only via `tea.Tick`.
