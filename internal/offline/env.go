@@ -158,6 +158,11 @@ func (e *Env) openLive(ctx context.Context) (_ *store.Store, _ *service.Service,
 			err = offlineError(errors.Join(err, st.Close()))
 		}
 	}()
+	// AIDEV-NOTE: reject incompatible schemas before any recovery or service
+	// work. Even opening the ledger can modify it by truncating a torn tail.
+	if _, err := st.SchemaStatus(ctx); err != nil {
+		return nil, nil, offlineError(err)
+	}
 	ledger, _, err := backup.OpenLedger(e.Paths.LedgerFile)
 	if err != nil {
 		return nil, nil, offlineError(err)
