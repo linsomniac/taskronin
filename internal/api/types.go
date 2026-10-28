@@ -3,6 +3,8 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"io"
 	"time"
 
 	"taskronin/internal/civil"
@@ -61,8 +63,20 @@ func (o *Opt[T]) UnmarshalJSON(b []byte) error {
 	value := Opt[T]{Set: true}
 	if bytes.Equal(bytes.TrimSpace(b), []byte("null")) {
 		value.Null = true
-	} else if err := json.Unmarshal(b, &value.V); err != nil {
-		return err
+	} else {
+		// AIDEV-NOTE: An outer decoder's DisallowUnknownFields does not reach
+		// custom unmarshalers. Enforce A§6.3 here for struct values such as Moment.
+		dec := json.NewDecoder(bytes.NewReader(b))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&value.V); err != nil {
+			return err
+		}
+		if err := dec.Decode(new(json.RawMessage)); err != io.EOF {
+			if err != nil {
+				return err
+			}
+			return errors.New("api: trailing data after option value")
+		}
 	}
 	*o = value
 	return nil

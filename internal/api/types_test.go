@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"math"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -70,6 +71,62 @@ func TestOptJSON(t *testing.T) {
 	}
 	if _, err := json.Marshal(Opt[float64]{Set: true, V: math.Inf(1)}); err == nil {
 		t.Fatal("Opt.MarshalJSON failed to propagate an unsupported-value error")
+	}
+}
+
+func TestOptJSONStrictValues(t *testing.T) {
+	type req struct {
+		Due Opt[Moment] `json:"due"`
+	}
+	minute := civil.Minute(540)
+	for _, tc := range []struct {
+		wire string
+		want Opt[Moment]
+	}{
+		{`{}`, Opt[Moment]{}},
+		{`{"due":null}`, Opt[Moment]{Set: true, Null: true}},
+		{`{"due":{"date":"2026-10-30","time":null}}`, Opt[Moment]{Set: true, V: Moment{Date: civil.MustDate("2026-10-30")}}},
+		{`{"due":{"date":"2026-10-30","time":"09:00"}}`, Opt[Moment]{Set: true, V: Moment{Date: civil.MustDate("2026-10-30"), Time: &minute}}},
+	} {
+		var got req
+		dec := json.NewDecoder(strings.NewReader(tc.wire))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&got); err != nil || !reflect.DeepEqual(got.Due, tc.want) {
+			t.Errorf("strict decode(%s) = %+v, %v; want %+v", tc.wire, got.Due, err, tc.want)
+		}
+	}
+	for _, input := range []string{
+		`{"due":{"date":"2026-10-30","time":null,"extra":1}}`,
+		`{"due":{"extra":1,"date":"2026-10-30","time":"09:00"}}`,
+	} {
+		want := Opt[Moment]{Set: true, Null: true}
+		got := req{Due: want}
+		dec := json.NewDecoder(strings.NewReader(input))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&got); err == nil || !strings.Contains(err.Error(), `unknown field "extra"`) {
+			t.Errorf("strict decode(%s) = %v; want unknown-field error", input, err)
+		}
+		if !reflect.DeepEqual(got.Due, want) {
+			t.Errorf("failed decode changed option to %+v; want %+v", got.Due, want)
+		}
+	}
+}
+
+func TestOptJSONSingleValue(t *testing.T) {
+	const moment = `{"date":"2026-10-30","time":null}`
+	want := Opt[Moment]{Set: true, V: Moment{Date: civil.MustDate("2026-10-30")}}
+	var got Opt[Moment]
+	if err := got.UnmarshalJSON([]byte(" \n" + moment + "\t ")); err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("single moment with whitespace = %+v, %v; want %+v", got, err, want)
+	}
+	for _, input := range []string{moment + " {}", moment + " null", moment + " trailing", "null true"} {
+		got := want
+		if err := got.UnmarshalJSON([]byte(input)); err == nil {
+			t.Errorf("Opt.UnmarshalJSON(%s) accepted trailing data", input)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("failed decode changed option to %+v; want %+v", got, want)
+		}
 	}
 }
 
