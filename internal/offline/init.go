@@ -443,7 +443,10 @@ func installInitUnits(ctx context.Context, e *Env, o InitOptions) error {
 	if !filepath.IsAbs(binary) {
 		return domain.Errorf(domain.CodeValidation, "systemd binary path must be absolute")
 	}
-	d := systemd.UnitData{Binary: binary, Socket: e.Paths.Socket, DataDir: e.Paths.DataDir, StateDir: e.Paths.StateDir, RuntimeDir: e.Paths.RuntimeDir}
+	// AIDEV-NOTE: socket activation recreates the configured socket's parent.
+	// An unused XDG runtime directory can disappear at reboot; requiring it in
+	// ReadWritePaths would then prevent the service from starting.
+	d := systemd.UnitData{Binary: binary, Socket: e.Paths.Socket, DataDir: e.Paths.DataDir, StateDir: e.Paths.StateDir, RuntimeDir: filepath.Dir(e.Paths.Socket)}
 	if relative, err := filepath.Rel(e.Paths.DataDir, e.Paths.BackupDir); err != nil {
 		return err
 	} else if relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {

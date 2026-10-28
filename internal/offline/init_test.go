@@ -481,6 +481,72 @@ func TestInitPreservesConfigAndUsesConfiguredPaths(t *testing.T) {
 	}
 }
 
+func TestInitCustomSocketSurvivesRuntimeCleanup(t *testing.T) {
+	for _, location := range []string{"persistent", "runtime"} {
+		t.Run(location, func(t *testing.T) {
+			e, o := initEnv(t)
+			runtimeRoot := filepath.Dir(e.Paths.RuntimeDir)
+			socketDir := filepath.Join(filepath.Dir(o.PasswdPath), "sockets")
+			if location == "runtime" {
+				socketDir = filepath.Join(runtimeRoot, "custom")
+			}
+			s := config.DefaultServer(e.Paths, "America/Denver")
+			s.Paths.Socket = filepath.Join(socketDir, "api")
+			if err := fsutil.EnsureDir0700(e.Paths.ConfigDir); err != nil {
+				t.Fatal(err)
+			}
+			if err := config.WriteServer(e.Paths.ServerConfig, s); err != nil {
+				t.Fatal(err)
+			}
+			o.NoSystemd, o.Binary = false, "/bin/tkr"
+			o.Systemctl = func(context.Context, ...string) error { return nil }
+			if _, err := offline.Init(t.Context(), e, o); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.RemoveAll(runtimeRoot); err != nil {
+				t.Fatal(err)
+			}
+			checkActivationPaths := func() {
+				t.Helper()
+				socket := string(fileBytes(t, filepath.Join(e.Paths.UnitsDir(), "taskronin.socket")))
+				if !strings.Contains(socket, "ListenStream="+s.Paths.Socket+"\n") || !strings.Contains(socket, "DirectoryMode=0700\n") {
+					t.Fatal("socket unit does not provision the configured socket parent")
+				}
+				// Model the socket unit's activation after reboot: it creates
+				// only the configured socket's parent, not the unused XDG path.
+				if err := os.MkdirAll(socketDir, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				requireAbsent(t, e.Paths.RuntimeDir)
+				unit := string(fileBytes(t, filepath.Join(e.Paths.UnitsDir(), "taskronin.service")))
+				for line := range strings.SplitSeq(unit, "\n") {
+					if value, ok := strings.CutPrefix(line, "ReadWritePaths="); ok {
+						paths := strings.Fields(value)
+						for _, path := range paths {
+							if _, err := os.Stat(path); err != nil {
+								t.Fatalf("service requires an unavailable path after runtime cleanup: %s: %v", path, err)
+							}
+						}
+						want := []string{e.Paths.DataDir, e.Paths.StateDir, socketDir}
+						if !reflect.DeepEqual(paths, want) {
+							t.Fatalf("service writable paths = %v, want %v", paths, want)
+						}
+						return
+					}
+				}
+				t.Fatal("missing service writable paths")
+			}
+			checkActivationPaths()
+			e.Server = nil // Reload the persisted custom path for --units-only.
+			o.UnitsOnly = true
+			if _, err := offline.Init(t.Context(), e, o); err != nil {
+				t.Fatal(err)
+			}
+			checkActivationPaths()
+		})
+	}
+}
+
 func TestInitTokenWriteFailureDoesNotPublish(t *testing.T) {
 	e, o := initEnv(t)
 	if err := os.MkdirAll(e.Paths.OwnerToken, 0o700); err != nil {
