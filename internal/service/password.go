@@ -27,6 +27,22 @@ func (s *Service) ChangePassword(ctx context.Context, m Meta, in ChangePasswordI
 	if !m.Actor.Scopes.Has(domain.ScopeAdmin) || m.Actor.Kind != domain.ActorOwner {
 		return domain.Errorf(domain.CodeForbidden, "operation is not permitted")
 	}
+	if m.Gen == "" {
+		return domain.Errorf(domain.CodePreconditionReq, "database generation is required")
+	}
+	if m.Gen != s.gen {
+		return domain.Errorf(domain.CodeGenerationMismatch, "database generation does not match")
+	}
+	// AIDEV-NOTE: BF17 includes the gate and both hashes in the same admission
+	// and 15 s budget as the write. Drain must retain storage until they return;
+	// runEntered continues this accepted operation even after BeginShutdown.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), OpBudget)
+	defer cancel()
+	leave, err := s.enter()
+	if err != nil {
+		return err
+	}
+	defer leave()
 	seen, err := store.GetAuthState(ctx, s.store.Reader)
 	if err != nil {
 		return serviceError(err)
@@ -45,7 +61,7 @@ func (s *Service) ChangePassword(ctx context.Context, m Meta, in ChangePasswordI
 	if err != nil {
 		return err
 	}
-	_, err = s.run(ctx, m, opSpec{kind: domain.OpAuthPassword, class: classForward,
+	_, err = s.runEntered(ctx, m, opSpec{kind: domain.OpAuthPassword, class: classForward,
 		scopes: domain.ScopeAdmin, ownerOnly: true}, func(o *op) error {
 		a, err := store.GetAuthState(o.ctx, o.tx)
 		if err != nil {

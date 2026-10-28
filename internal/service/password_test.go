@@ -1,7 +1,9 @@
 package service_test
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"strings"
 	"sync"
@@ -9,11 +11,75 @@ import (
 	"time"
 
 	"taskronin/internal/auth"
+	"taskronin/internal/clock"
 	"taskronin/internal/domain"
 	"taskronin/internal/service"
 	"taskronin/internal/store"
 	"taskronin/internal/testutil"
 )
+
+func TestChangePasswordRejectsBeforeVerification(t *testing.T) {
+	for _, state := range []string{"missing generation", "stale generation", "stopping"} {
+		t.Run(state, func(t *testing.T) {
+			s := testutil.NewScenario(t)
+			m, want := s.Meta(), domain.CodeBusy
+			switch state {
+			case "missing generation":
+				m.Gen, want = "", domain.CodePreconditionReq
+			case "stale generation":
+				m.Gen, want = domain.NewGeneration(), domain.CodeGenerationMismatch
+			case "stopping":
+				s.Svc.BeginShutdown()
+			}
+			// An invalid password must not win over admission/generation checks.
+			err := s.Svc.ChangePassword(t.Context(), m, service.ChangePasswordIn{Current: "invalid", New: testutil.Password})
+			testutil.RequireCode(t, err, want)
+		})
+	}
+}
+
+type passwordWaitClock struct {
+	clock.Clock
+	armed chan struct{}
+}
+
+func (c passwordWaitClock) After(d time.Duration) <-chan time.Time {
+	ch := c.Clock.After(d)
+	c.armed <- struct{}{}
+	return ch
+}
+
+func TestShutdownDrainsPasswordVerification(t *testing.T) {
+	armed := make(chan struct{}, 1)
+	s := testutil.NewScenario(t, func(o *service.Options) {
+		o.Passwords = auth.NewPasswordGate(passwordWaitClock{Clock: o.Clock, armed: armed})
+	})
+	exhaustGate(t, s, "socket")
+	done := make(chan error, 1)
+	go func() {
+		done <- s.Svc.ChangePassword(context.Background(), s.Meta(), service.ChangePasswordIn{Current: testutil.Password, New: auth.FormatToken(1, mintSecret(t))})
+	}()
+	select {
+	case <-armed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("password did not reach gate")
+	}
+	s.Svc.BeginShutdown()
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	err := s.Svc.Drain(ctx)
+	// Unblock on failure as well, so the fixture always joins accepted work.
+	s.Clock.Advance(10 * time.Second)
+	if result := <-done; result != nil {
+		t.Errorf("accepted password change: %v", result)
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Drain skipped password verification: %v", err)
+	}
+	if err := s.Svc.Drain(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func requireSQLCount(t *testing.T, s *testutil.Scenario, query string, want int) {
 	t.Helper()

@@ -91,6 +91,13 @@ func (s *Service) run(ctx context.Context, m Meta, spec opSpec, fn func(*op) err
 		return nil, err
 	}
 	defer leave()
+	return s.runEntered(ctx, m, spec, fn)
+}
+
+// runEntered continues an authorized, generation-checked operation under its
+// existing lifecycle registration and budget. Password preparation uses this
+// entry point so shutdown cannot reject work it already admitted (BF17).
+func (s *Service) runEntered(ctx context.Context, m Meta, spec opSpec, fn func(*op) error) (*OpResult, error) {
 	tx, done, err := beginTx(ctx, s.store.Writer, nil)
 	if err != nil {
 		return nil, writerAdmissionError(err)
