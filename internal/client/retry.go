@@ -62,15 +62,16 @@ func (c *Client) do(ctx context.Context, k call, out any) (*http.Response, error
 		var err error
 		who, err = c.who(ctx, false)
 		if err != nil {
-			var problem *ProblemError
-			if errors.As(err, &problem) {
-				return nil, err
-			}
-			// The identity read can fail after transmission, but the mutation
-			// itself has not been attempted and must never become pending.
+			// AIDEV-NOTE: uncertainty belongs to the identity read, not the
+			// unattempted mutation. Remove its wrapper before inspecting a
+			// nested problem (such as busy after a dropped identity response).
 			var unknown *OutcomeUnknownError
 			if errors.As(err, &unknown) {
 				err = unknown.Err
+			}
+			var problem *ProblemError
+			if errors.As(err, &problem) {
+				return nil, err
 			}
 			return nil, fmt.Errorf("%w: fetch identity: %w", ErrNotSent, err)
 		}

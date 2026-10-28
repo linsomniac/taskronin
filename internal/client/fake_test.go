@@ -30,6 +30,7 @@ type recorder struct {
 	mu        sync.Mutex
 	requests  []recordedRequest
 	identity  api.WhoAmI
+	whoami    http.Handler // optional identity failure fixture, protected by mu
 	listener  net.Listener
 	tokenFile string
 	token     string
@@ -85,8 +86,13 @@ func newFake(t *testing.T, h http.Handler) (*Client, *recorder) {
 		r.mu.Lock()
 		r.requests = append(r.requests, recordedRequest{Method: req.Method, Path: req.URL.Path, Query: req.URL.RawQuery, Header: req.Header.Clone(), Body: body})
 		identity := r.identity
+		whoami := r.whoami
 		r.mu.Unlock()
 		if req.URL.Path == "/api/v1/whoami" {
+			if whoami != nil {
+				whoami.ServeHTTP(w, req)
+				return
+			}
 			w.Header().Set("Content-Type", api.ContentTypeJSON)
 			_ = json.NewEncoder(w).Encode(identity)
 			return

@@ -642,3 +642,75 @@ func TestBusyWithoutDroppedResponse(t *testing.T) {
 		})
 	}
 }
+
+func TestMutationIdentityFailure(t *testing.T) {
+	for _, kind := range []callKind{callKeyed, callExempt} {
+		for _, tc := range []struct {
+			name                           string
+			dropFirst, dropAll, cancelWait bool
+			attempts                       int
+		}{
+			{name: "dropped_then_busy", dropFirst: true, attempts: 3},
+			{name: "dropped_then_busy_canceled", dropFirst: true, cancelWait: true, attempts: 2},
+			{name: "busy_only", attempts: 2},
+			{name: "dropped_all", dropAll: true, attempts: 3},
+		} {
+			t.Run(fmt.Sprintf("%d/%s", kind, tc.name), func(t *testing.T) {
+				c, rec := newFake(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					w.WriteHeader(http.StatusCreated)
+				}))
+				var attempts int
+				rec.mu.Lock()
+				rec.whoami = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					attempts++
+					if tc.dropAll || (tc.dropFirst && attempts == 1) {
+						dropResponse(t, w)
+						return
+					}
+					w.Header().Set("Retry-After", "1")
+					writeProblem(w, http.StatusServiceUnavailable, domain.CodeBusy)
+				})
+				rec.mu.Unlock()
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				if tc.cancelWait {
+					rec.clock.onAfter = func(d time.Duration) {
+						if d == time.Second {
+							cancel()
+						}
+					}
+				}
+				p := pendingFor(t, c)
+				k := mutation()
+				if kind == callExempt {
+					k.Kind, k.Method, k.Path = callExempt, http.MethodPatch, "/settings"
+				}
+				err := doCall(ctx, c, k, nil)
+				if len(rec.at("/api/v1/whoami")) != tc.attempts {
+					t.Fatalf("identity attempts = %d, want %d", len(rec.at("/api/v1/whoami")), tc.attempts)
+				}
+				if len(rec.at("/api/v1"+k.Path)) != 0 {
+					t.Fatal("mutation sent despite failed identity lookup")
+				}
+				noPending(t, p)
+				var unknown *OutcomeUnknownError
+				if err == nil || errors.Is(err, ErrOutcomeUnknown) || errors.As(err, &unknown) {
+					t.Fatalf("unattempted mutation error = %#v", err)
+				}
+				if tc.dropAll {
+					if !errors.Is(err, ErrNotSent) || !errors.Is(err, io.EOF) {
+						t.Fatalf("identity transport error = %v", err)
+					}
+				} else {
+					var problem *ProblemError
+					if !errors.As(err, &problem) || problem.Status != http.StatusServiceUnavailable || !IsCode(err, domain.CodeBusy) {
+						t.Fatalf("identity problem lost: %v", err)
+					}
+				}
+				if tc.cancelWait && !errors.Is(err, context.Canceled) {
+					t.Fatalf("identity cancellation lost: %v", err)
+				}
+			})
+		}
+	}
+}
