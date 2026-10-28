@@ -325,7 +325,13 @@ func (s *Service) loadResult(ctx context.Context, r *OpResult) error {
 				if err != nil {
 					return err
 				}
-				r.Entry = &e
+				// AIDEV-NOTE: BF11 requires the linked task title in mutation
+				// and replay results so adapters need no second service call.
+				v, err := s.entryView(ctx, q, e)
+				if err != nil {
+					return err
+				}
+				r.Entry = &v
 			case domain.EntBlock:
 				b, err := store.GetBlock(ctx, q, domain.BlockID(ref.ID))
 				if err != nil {

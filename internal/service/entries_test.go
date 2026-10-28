@@ -44,6 +44,87 @@ func TestDAT11(t *testing.T) {
 	}
 }
 
+func TestEntryResultViews(t *testing.T) {
+	for _, linked := range []bool{false, true} {
+		t.Run(map[bool]string{false: "standalone", true: "linked"}[linked], func(t *testing.T) {
+			s := testutil.NewScenario(t)
+			var task domain.TaskID
+			var title string
+			if linked {
+				title = "Original task title"
+				task = s.Add(title)
+			}
+			m := s.Meta()
+			in := service.AddEntryIn{TaskID: sql.Null[domain.TaskID]{V: task, Valid: linked}, Title: "Work log"}
+			r := s.Must(s.Svc.AddEntry(s.Ctx(), m, in))
+			requireEntryResultView(t, r, title)
+			if linked {
+				title = "Renamed task"
+				s.Update(task, func(in *service.UpdateTaskIn) { in.Title = &title })
+			}
+			replayed := s.Must(s.Svc.AddEntry(s.Ctx(), m, in))
+			if !replayed.Replayed || replayed.Entry.ID != r.Entry.ID {
+				t.Fatal("entry creation was not replayed")
+			}
+			requireEntryResultView(t, replayed, title)
+			unchanged := s.Must(s.Svc.UpdateEntry(s.Ctx(), s.Meta(), service.UpdateEntryIn{ID: r.Entry.ID, Expect: s.EntryExpect(r.Entry.ID)}))
+			if !unchanged.NoChange {
+				t.Fatal("empty edit changed the entry")
+			}
+			requireEntryResultView(t, unchanged, title)
+			if linked {
+				s.Relink(r.Entry.ID, 0)
+				requireEntryResultView(t, s.Last, "")
+				s.Done(task)
+				requireEntryResultView(t, s.Last, title)
+			}
+		})
+	}
+}
+
+func requireEntryResultView(t *testing.T, result *service.OpResult, title string) {
+	t.Helper()
+	if result.Entry == nil {
+		t.Fatal("missing entry result")
+	}
+	view, ok := any(*result.Entry).(domain.EntryView)
+	if !ok || view.TaskTitle != title {
+		t.Fatalf("entry result = %T %+v; want EntryView with task title %q", *result.Entry, *result.Entry, title)
+	}
+}
+
+func TestEntryPreconditionView(t *testing.T) {
+	for _, linked := range []bool{false, true} {
+		t.Run(map[bool]string{false: "standalone", true: "linked"}[linked], func(t *testing.T) {
+			s := testutil.NewScenario(t)
+			var task domain.TaskID
+			var title string
+			if linked {
+				title = "Task title"
+				task = s.Add(title)
+			}
+			entry := s.Log(task, "Work log", "")
+			stale := s.EntryExpect(entry)
+			s.EditEntry(entry, func(in *service.UpdateEntryIn) { in.Notes = new("updated") })
+			if linked {
+				title = "Renamed task"
+				s.Update(task, func(in *service.UpdateTaskIn) { in.Title = &title })
+			}
+			count := s.OpCount()
+			_, err := s.Svc.UpdateEntry(s.Ctx(), s.Meta(), service.UpdateEntryIn{ID: entry, Expect: stale, Notes: new("stale edit")})
+			testutil.RequireCode(t, err, domain.CodePrecondition)
+			problem, _ := domain.AsError(err)
+			current, ok := problem.Current.(domain.EntryView)
+			if !ok || current.TaskTitle != title || current.ID != entry || current.Version != stale.Version+1 || current.Notes != "updated" {
+				t.Fatalf("precondition current = %+v; want current EntryView with title %q", problem.Current, title)
+			}
+			if s.OpCount() != count {
+				t.Fatal("stale edit wrote an operation")
+			}
+		})
+	}
+}
+
 func TestDAT17(t *testing.T) {
 	for _, tt := range []struct {
 		name, date, at string

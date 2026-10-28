@@ -209,7 +209,7 @@ func TestEntryEditValidation(t *testing.T) {
 			_, err := s.Svc.UpdateEntry(s.Ctx(), s.Meta(), in)
 			requireEntryField(t, err, tt.field)
 			after, err := s.Svc.GetEntry(s.Ctx(), s.Actor, e)
-			if err != nil || after.LogEntry != before || s.OpCount() != count {
+			if err != nil || after != before || s.OpCount() != count {
 				t.Fatalf("invalid edit changed state: %+v, %v", after, err)
 			}
 		})

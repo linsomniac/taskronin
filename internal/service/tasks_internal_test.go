@@ -44,7 +44,7 @@ func TestTaskLoadHelpers(t *testing.T) {
 		{"entry", func(o *op, id int64, exp *domain.Expect, allow bool) error {
 			_, err := o.loadEntry(domain.EntryID(id), exp, allow)
 			return err
-		}, int64(entry.ID), domain.LogEntry{}, func() error {
+		}, int64(entry.ID), domain.EntryView{}, func() error {
 			entry.DeletedAt = sql.Null[time.Time]{V: now, Valid: true}
 			return store.UpdateEntry(t.Context(), s.store.Writer, entry)
 		}, true},
@@ -83,8 +83,8 @@ func TestTaskLoadHelpers(t *testing.T) {
 					if current.Version != 1 || current.Title != task.Title {
 						t.Fatalf("current task = %+v", current)
 					}
-				case domain.LogEntry:
-					if current.Version != 1 || current.Title != entry.Title {
+				case domain.EntryView:
+					if current.Version != 1 || current.Title != entry.Title || current.TaskTitle != task.Title {
 						t.Fatalf("current entry = %+v", current)
 					}
 				case domain.BlockView:

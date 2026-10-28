@@ -125,7 +125,7 @@ type OpResult struct {
 	Created, Replayed, NoChange bool
 	Refs                        []domain.EntityRef
 	Task                        *domain.TaskView
-	Entry                       *domain.LogEntry
+	Entry                       *domain.EntryView
 	Block                       *domain.BlockView
 	Token                       *domain.Token
 	Tasks                       []domain.TaskView

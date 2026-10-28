@@ -302,7 +302,7 @@ func TestLIF14(t *testing.T) {
 			r, err := a.Svc.Reopen(a.Ctx(), a.Meta(), service.ReopenIn{ID: id, Expect: a.Expect(id), RemoveEntry: true})
 			if actor.Kind == domain.ActorToken {
 				testutil.RequireCode(t, err, domain.CodeForbidden)
-				if s.OpCount() != count || !reflect.DeepEqual(s.Task(id), before) || completionEntries(t, s, id)[0] != entry {
+				if s.OpCount() != count || !reflect.DeepEqual(s.Task(id), before) || completionEntries(t, s, id)[0] != entry.LogEntry {
 					t.Fatal("forbidden reopen changed state")
 				}
 				return
@@ -564,7 +564,7 @@ func TestReopenPurgedCompletion(t *testing.T) {
 				s := testutil.NewScenario(t)
 				id := s.Add("A")
 				s.Done(id)
-				current := *s.Last.Entry
+				current := s.Last.Entry.LogEntry
 				// AIDEV-NOTE: F14 fixture shortcut: purge/ledger replay arrives
 				// in Task 37 and can leave multiple purged unreopened completions.
 				var newer domain.LogEntry

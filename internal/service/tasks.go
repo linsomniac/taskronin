@@ -463,7 +463,11 @@ func (o *op) loadEntry(id domain.EntryID, exp *domain.Expect, allowDeleted bool)
 			return e, domain.Errorf(domain.CodePreconditionReq, "entry precondition is required")
 		}
 		if exp.Gen != o.gen || exp.Version != e.Version {
-			return e, &domain.Error{Code: domain.CodePrecondition, Detail: "entry precondition failed", Current: e}
+			current, err := o.s.entryView(o.ctx, o.tx, e)
+			if err != nil {
+				return e, err
+			}
+			return e, &domain.Error{Code: domain.CodePrecondition, Detail: "entry precondition failed", Current: current}
 		}
 	}
 	return e, nil
