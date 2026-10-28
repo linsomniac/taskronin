@@ -137,7 +137,7 @@ func CleanupTemps(dataDir, backupDir string) (removed []string, err error) {
 			if ref == "" {
 				continue
 			}
-			ref, err = filepath.Abs(ref)
+			ref, err = cleanupLocation(ref)
 			if err != nil {
 				return nil, fmt.Errorf("backup: resolve journal reference: %w", err)
 			}
@@ -192,12 +192,16 @@ func cleanupTempDir(dir string, all bool, protected []string, removed *[]string)
 }
 
 func removeUnreferencedTemp(path string, protected []string, removed *[]string) error {
+	location, err := cleanupLocation(path)
+	if err != nil {
+		return fmt.Errorf("backup: resolve temporary artifact: %w", err)
+	}
 	containsProtected := false
 	for _, ref := range protected {
-		if path == ref || strings.HasPrefix(path, ref+string(filepath.Separator)) {
+		if location == ref || strings.HasPrefix(location, ref+string(filepath.Separator)) {
 			return nil
 		}
-		if strings.HasPrefix(ref, path+string(filepath.Separator)) {
+		if strings.HasPrefix(ref, location+string(filepath.Separator)) {
 			containsProtected = true
 		}
 	}
@@ -218,4 +222,29 @@ func removeUnreferencedTemp(path string, protected []string, removed *[]string) 
 	}
 	*removed = append(*removed, path)
 	return nil
+}
+
+// AIDEV-NOTE: compare filesystem locations across directory symlink aliases,
+// but resolve only the parent: the final entry may itself be a symlink that
+// cleanup must unlink without following. Deletions always use the original path.
+// Journal references can already be renamed away or not yet created, so resolve
+// the longest existing parent and retain any missing suffix for comparison.
+func cleanupLocation(path string) (string, error) {
+	path, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	parent, suffix := filepath.Dir(path), filepath.Base(path)
+	for {
+		resolved, err := filepath.EvalSymlinks(parent)
+		if err == nil {
+			return filepath.Join(resolved, suffix), nil
+		}
+		next := filepath.Dir(parent)
+		if !errors.Is(err, fs.ErrNotExist) || next == parent {
+			return "", err
+		}
+		suffix = filepath.Join(filepath.Base(parent), suffix)
+		parent = next
+	}
 }

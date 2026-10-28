@@ -238,6 +238,118 @@ func TestCleanupTempsProtectsJournalPaths(t *testing.T) {
 	}
 }
 
+func TestCleanupTempsProtectsAliasedScrubJournal(t *testing.T) {
+	for _, aliasData := range []bool{false, true} {
+		name := "backup alias"
+		if aliasData {
+			name = "data alias"
+		}
+		t.Run(name, func(t *testing.T) {
+			realDir := t.TempDir()
+			alias := filepath.Join(t.TempDir(), "alias")
+			if err := os.Symlink(realDir, alias); err != nil {
+				t.Fatal(err)
+			}
+			data, backups := realDir, alias
+			if aliasData {
+				data, backups = alias, realDir
+			}
+			j := &backup.SwapJournal{
+				Kind: backup.SwapScrub, New: filepath.Join(backups, ".tkr-tmp-new.db"),
+				Target: filepath.Join(backups, "snapshot.db"), Aside: filepath.Join(backups, ".tkr-tmp-old"), DeleteAside: true,
+			}
+			writeStageFile(t, j.New, "NEW")
+			writeStageFile(t, j.Target, "OLD")
+			writeStageFile(t, j.Target+"-wal", "OLDWAL")
+			journal := filepath.Join(backups, "scrub.journal")
+			requireSwapCrash(t, backup.Swap(swapCrashAt(t.Context(), "moved-old"), journal, j, nil))
+			extra := filepath.Join(data, ".tkr-tmp-extra")
+			writeStageFile(t, extra, "unreferenced")
+			removed, err := backup.CleanupTemps(data, backups)
+			if err != nil {
+				t.Fatal(err)
+			}
+			requireStageRemoved(t, removed, []string{extra})
+			requireSwapFile(t, j.New, "NEW")
+			requireSwapFile(t, filepath.Join(j.Aside, "snapshot.db"), "OLD")
+			requireSwapFile(t, filepath.Join(j.Aside, "snapshot.db-wal"), "OLDWAL")
+			if err := backup.ResumeSwap(t.Context(), journal); err != nil {
+				t.Fatal(err)
+			}
+			requireSwapFile(t, j.Target, "NEW")
+			requireSwapAbsent(t, j.New, j.Aside, journal)
+		})
+	}
+}
+
+func TestCleanupTempsProtectsAliasedRecoveryPaths(t *testing.T) {
+	for _, missingNew := range []bool{false, true} {
+		name := "new present"
+		if missingNew {
+			name = "new parent missing"
+		}
+		t.Run(name, func(t *testing.T) {
+			data, backups := t.TempDir(), t.TempDir()
+			alias := filepath.Join(t.TempDir(), "alias")
+			if err := os.Symlink(data, alias); err != nil {
+				t.Fatal(err)
+			}
+			stage := filepath.Join(data, "staging", "stage-keep")
+			j := backup.SwapJournal{
+				Version: 1, Kind: backup.SwapRestore, Step: "installed", Rollback: "discarding",
+				New: filepath.Join(alias, "staging", "stage-keep", "nested", "new.db"), Target: filepath.Join(alias, "taskronin.db"),
+				Aside: filepath.Join(alias, ".tkr-tmp-aside"), Discard: filepath.Join(alias, ".tkr-tmp-rollback-0123456789abcdef"),
+			}
+			kept := []string{filepath.Join(j.Aside, "taskronin.db"), filepath.Join(j.Aside, ".tkr-tmp-inside"), j.Discard}
+			if !missingNew {
+				kept = append(kept, j.New)
+			}
+			for _, path := range kept {
+				writeStageFile(t, path, "recovery content")
+			}
+			want := []string{filepath.Join(stage, "unreferenced.db"), filepath.Join(data, ".tkr-tmp-aside-other")}
+			for _, path := range want {
+				writeStageFile(t, path, "unreferenced")
+			}
+			link := filepath.Join(data, ".tkr-tmp-link")
+			if err := os.Symlink(j.Aside, link); err != nil {
+				t.Fatal(err)
+			}
+			want = append(want, link)
+			// The journal may outlive New or its parent after an interrupted
+			// install/cleanup. Missing paths still need alias normalization.
+			writeStageJournal(t, filepath.Join(data, "swap.journal"), j)
+			removed, err := backup.CleanupTemps(data, backups)
+			if err != nil {
+				t.Fatal(err)
+			}
+			requireStageRemoved(t, removed, want)
+			for _, path := range kept {
+				requireSwapFile(t, path, "recovery content")
+			}
+		})
+	}
+}
+
+func TestCleanupTempsRejectsUnresolvableJournalPaths(t *testing.T) {
+	data, backups := t.TempDir(), t.TempDir()
+	path := filepath.Join(data, "staging", "stage-1", "copy.db")
+	writeStageFile(t, path, "keep until journal paths are understood")
+	loop := filepath.Join(data, "loop")
+	if err := os.Symlink(loop, loop); err != nil {
+		t.Fatal(err)
+	}
+	writeStageJournal(t, filepath.Join(backups, "scrub.journal"), backup.SwapJournal{
+		Version: 1, Kind: backup.SwapScrub, Step: "moved-old", New: filepath.Join(loop, "new.db"),
+		Target: filepath.Join(backups, "snapshot.db"), Aside: filepath.Join(backups, ".tkr-tmp-aside"), DeleteAside: true,
+	})
+	removed, err := backup.CleanupTemps(data, backups)
+	if err == nil || len(removed) != 0 {
+		t.Fatalf("cleanup with unresolvable journal path = %v, %v", removed, err)
+	}
+	requireSwapFile(t, path, "keep until journal paths are understood")
+}
+
 func TestCleanupTempsRejectsUnreadableJournalsBeforeDeleting(t *testing.T) {
 	for _, name := range []string{"swap.journal", "scrub.journal"} {
 		t.Run(name, func(t *testing.T) {
