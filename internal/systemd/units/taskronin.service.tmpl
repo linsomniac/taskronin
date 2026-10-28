@@ -1,0 +1,34 @@
+[Unit]
+Description=Taskronin task server
+Requires=taskronin.socket
+After=taskronin.socket
+
+[Service]
+Type=notify
+NotifyAccess=main
+ExecStart={{.Binary}} serve
+Restart=on-failure
+RestartSec=2s
+TimeoutStopSec=45s
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths={{.DataDir}} {{.StateDir}} {{.RuntimeDir}}{{range .ExtraRW}} {{.}}{{end}}
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,12 @@
+[Unit]
+Description=Taskronin API socket
+
+[Socket]
+ListenStream=/run/user/1000/taskronin/sock
+FileDescriptorName=api
+SocketMode=0600
+DirectoryMode=0700
+RemoveOnStop=yes
+
+[Install]
+WantedBy=sockets.target

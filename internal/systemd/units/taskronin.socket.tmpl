@@ -1,0 +1,12 @@
+[Unit]
+Description=Taskronin API socket
+
+[Socket]
+ListenStream={{.Socket}}
+FileDescriptorName=api
+SocketMode=0600
+DirectoryMode=0700
+RemoveOnStop=yes
+
+[Install]
+WantedBy=sockets.target
