@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -519,5 +520,125 @@ func TestConditionalResponse(t *testing.T) {
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusNotModified || resp.Header.Get("ETag") != `"aggregate"` {
 		t.Fatalf("unexpected conditional response: %v", resp)
+	}
+}
+
+func TestBusyAfterDroppedResponse(t *testing.T) {
+	for _, tc := range []struct {
+		name, retryAfter               string
+		cancelWait, expireWait, replay bool
+		attempts                       int
+	}{
+		{name: "retry_limit", retryAfter: "1", attempts: 3},
+		{name: "retry_after_too_long", retryAfter: "5", attempts: 2},
+		{name: "invalid_retry_after", retryAfter: "invalid", attempts: 2},
+		{name: "canceled_backoff", retryAfter: "1", cancelWait: true, attempts: 2},
+		{name: "expired_backoff", retryAfter: "1", expireWait: true, attempts: 2},
+		{name: "successful_replay", retryAfter: "1", replay: true, attempts: 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var attempts int
+			c, rec := newFake(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				attempts++
+				if attempts == 1 {
+					dropResponse(t, w)
+					return
+				}
+				if tc.replay && attempts == 3 {
+					_, _ = w.Write([]byte(`{"replayed":true}`))
+					return
+				}
+				w.Header().Set("Retry-After", tc.retryAfter)
+				writeProblem(w, http.StatusServiceUnavailable, domain.CodeBusy)
+			}))
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			if tc.cancelWait {
+				rec.clock.onAfter = func(d time.Duration) {
+					if d == time.Second {
+						cancel()
+					}
+				}
+			}
+			if tc.expireWait {
+				c.opts.Clock = clock.Real{}
+				c.opts.Timeout = 500 * time.Millisecond
+			}
+			p := pendingFor(t, c)
+			k := mutation()
+			var out api.OpResponse
+			err := doCall(ctx, c, k, &out)
+			requests := rec.at("/api/v1/tasks")
+			if len(requests) != tc.attempts {
+				t.Fatalf("attempts = %d, want %d", len(requests), tc.attempts)
+			}
+			key := requests[0].Header.Get(api.HeaderIdempotencyKey)
+			for _, req := range requests {
+				if req.Header.Get(api.HeaderIdempotencyKey) != key || string(req.Body) != string(requests[0].Body) {
+					t.Fatal("retry changed the original key or body")
+				}
+			}
+			if tc.replay {
+				if err != nil || !out.Replayed {
+					t.Fatalf("replay error = %v, replayed = %v", err, out.Replayed)
+				}
+				noPending(t, p)
+				return
+			}
+			var unknown *OutcomeUnknownError
+			if !errors.As(err, &unknown) || !unknown.Saved || unknown.Key != key || !errors.Is(err, ErrOutcomeUnknown) || !IsCode(err, domain.CodeBusy) || !errors.Is(err, io.EOF) {
+				t.Fatalf("unresolved mutation error = %#v", err)
+			}
+			if tc.cancelWait && !errors.Is(err, context.Canceled) {
+				t.Fatalf("lost cancellation cause: %v", err)
+			}
+			if tc.expireWait && !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("lost deadline cause: %v", err)
+			}
+			data, err := os.ReadFile(filepath.Join(p.Dir, key+".json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var saved PendingRequest
+			if err := json.Unmarshal(data, &saved); err != nil {
+				t.Fatal(err)
+			}
+			if saved.Key != key || saved.Method != k.Method || saved.Path != k.Path || saved.IfMatch != k.Mut.IfMatch || saved.Generation != testGeneration || saved.Actor != "owner" || string(saved.Body) != string(requests[0].Body) {
+				t.Fatalf("incorrect pending request: %+v", saved)
+			}
+		})
+	}
+}
+
+func TestBusyWithoutDroppedResponse(t *testing.T) {
+	for _, cancelWait := range []bool{false, true} {
+		t.Run(fmt.Sprint(cancelWait), func(t *testing.T) {
+			c, rec := newFake(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Retry-After", "1")
+				writeProblem(w, http.StatusServiceUnavailable, domain.CodeBusy)
+			}))
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			if cancelWait {
+				rec.clock.onAfter = func(time.Duration) { cancel() }
+			}
+			p := pendingFor(t, c)
+			err := doCall(ctx, c, mutation(), nil)
+			var problem *ProblemError
+			if !errors.As(err, &problem) || !IsCode(err, domain.CodeBusy) || errors.Is(err, ErrOutcomeUnknown) {
+				t.Fatalf("definitive busy error = %#v", err)
+			}
+			wantAttempts := 2
+			if cancelWait {
+				wantAttempts = 1
+				if !errors.Is(err, context.Canceled) {
+					t.Fatalf("lost cancellation cause: %v", err)
+				}
+			}
+			if len(rec.at("/api/v1/tasks")) != wantAttempts {
+				t.Fatalf("attempts = %d, want %d", len(rec.at("/api/v1/tasks")), wantAttempts)
+			}
+			noPending(t, p)
+		})
 	}
 }

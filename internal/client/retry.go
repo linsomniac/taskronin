@@ -77,6 +77,7 @@ func (c *Client) do(ctx context.Context, k call, out any) (*http.Response, error
 	}
 	transportRetries, busyRetries := 0, 0
 	mayHaveSent := false
+	var unresolved error
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, c.failed(k, body, key, who, mayHaveSent, err)
@@ -86,6 +87,9 @@ func (c *Client) do(ctx context.Context, k call, out any) (*http.Response, error
 		// failed dial cannot prove an earlier transmitted mutation was lost.
 		mayHaveSent = mayHaveSent || sent
 		if err != nil {
+			if sent {
+				unresolved = errors.Join(unresolved, err)
+			}
 			is4xx := resp != nil && resp.StatusCode >= 400 && resp.StatusCode < 500
 			if !k.NoRetry && k.Kind != callExempt && !is4xx && transportRetries < 2 && ctx.Err() == nil {
 				delay := [...]time.Duration{100 * time.Millisecond, 400 * time.Millisecond}[transportRetries]
@@ -111,16 +115,25 @@ func (c *Client) do(ctx context.Context, k call, out any) (*http.Response, error
 				_, _ = c.RefreshGeneration(ctx)
 				return resp, problem
 			}
-			if !k.NoRetry && resp.StatusCode == http.StatusServiceUnavailable && problem.Code() == domain.CodeBusy && busyRetries == 0 {
-				if delay, ok := busyDelay(resp, p); ok {
-					busyRetries++
-					if err := c.wait(ctx, delay); err != nil {
-						// Busy is a definitive response, even when its backoff
-						// consumes the remaining budget: do not save it.
-						return resp, errors.Join(problem, err)
+			if resp.StatusCode == http.StatusServiceUnavailable && problem.Code() == domain.CodeBusy {
+				var busyErr error = problem
+				if !k.NoRetry && busyRetries == 0 {
+					if delay, ok := busyDelay(resp, p); ok {
+						busyRetries++
+						if err := c.wait(ctx, delay); err != nil {
+							busyErr = errors.Join(problem, err)
+						} else {
+							continue
+						}
 					}
-					continue
 				}
+				// AIDEV-NOTE: shutdown admission can return busy before the
+				// idempotency lookup. It cannot resolve an earlier lost response;
+				// preserve that uncertainty and the original pending request.
+				if unresolved != nil {
+					return resp, c.failed(k, body, key, who, true, errors.Join(unresolved, busyErr))
+				}
+				return resp, busyErr
 			}
 			return resp, problem
 		}

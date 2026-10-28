@@ -38,8 +38,9 @@ type recorder struct {
 
 // retryClock makes backoffs immediate but records the requested delays.
 type retryClock struct {
-	mu     sync.Mutex
-	delays []time.Duration
+	mu      sync.Mutex
+	delays  []time.Duration
+	onAfter func(time.Duration)
 }
 
 func (*retryClock) Now() time.Time { return time.Date(2026, 10, 28, 16, 0, 0, 0, time.UTC) }
@@ -47,6 +48,9 @@ func (c *retryClock) After(d time.Duration) <-chan time.Time {
 	c.mu.Lock()
 	c.delays = append(c.delays, d)
 	c.mu.Unlock()
+	if c.onAfter != nil {
+		c.onAfter(d)
+	}
 	ch := make(chan time.Time, 1)
 	ch <- c.Now().Add(d)
 	return ch
