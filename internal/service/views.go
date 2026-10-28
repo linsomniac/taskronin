@@ -94,6 +94,8 @@ func (s *Service) taskView(ctx context.Context, q store.Q, t domain.Task, now ti
 	}
 	v.DuePhase = duePhase(t, now, today, s.zone)
 	v.DueSoon = t.DueDate.Valid && !t.DueDate.V.After(today.AddDays(s.dueSoonDays))
+	// AIDEV-NOTE: Acknowledgement uses op sequences, never wall-clock times;
+	// a clock rollback must not change which slips count since the last placement.
 	var placed int64
 	if t.LastPlacedSeq.Valid {
 		placed = int64(t.LastPlacedSeq.V)
