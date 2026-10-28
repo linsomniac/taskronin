@@ -303,7 +303,10 @@ func TestTokenAdminScopes(t *testing.T) {
 	_, err = s.Svc.RevokeToken(s.Ctx(), s.Meta(), service.RevokeTokenIn{ID: created.Token.ID})
 	testutil.RequireCode(t, err, domain.CodeForbidden)
 	s = s.As(testutil.TokenActor("admin", domain.ScopeAdmin))
-	created = createTestToken(t, s, "admin-created")
+	created, err = s.Svc.CreateToken(s.Ctx(), s.Meta(), service.CreateTokenIn{Name: "admin-created", Scopes: domain.ScopeAdmin})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.Svc.ListTokens(s.Ctx(), s.Actor); err != nil {
 		t.Fatal(err)
 	}
@@ -458,5 +461,21 @@ func TestRevokeTokenShutdownResult(t *testing.T) {
 				t.Fatalf("revocation did not return its redacted current representation: %v", revokeErr)
 			}
 		})
+	}
+}
+
+func TestCreateTokenScopesSubsetOfCaller(t *testing.T) {
+	s := testutil.NewScenario(t)
+	limited := s.As(testutil.TokenActor("limited-admin", domain.ScopeAdmin|domain.ScopeRead))
+	_, err := limited.Svc.CreateToken(s.Ctx(), limited.Meta(),
+		service.CreateTokenIn{Name: "escalate", Scopes: domain.ScopeRead | domain.ScopeDestroy})
+	testutil.RequireCode(t, err, domain.CodeForbidden)
+	if _, err := limited.Svc.CreateToken(s.Ctx(), limited.Meta(),
+		service.CreateTokenIn{Name: "subset", Scopes: domain.ScopeRead}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Svc.CreateToken(s.Ctx(), s.Meta(),
+		service.CreateTokenIn{Name: "owner-all", Scopes: domain.AllScopes}); err != nil {
+		t.Fatal(err)
 	}
 }

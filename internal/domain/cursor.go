@@ -27,6 +27,9 @@ func EncodeCursor(c Cursor) string {
 			Offset  int `json:"o"`
 		}{1, c.Offset}
 	} else {
+		if c.Keys == nil {
+			c.Keys = []any{} // DecodeCursor rejects "k":null
+		}
 		wire = struct {
 			Version int   `json:"v"`
 			Keys    []any `json:"k"`
@@ -102,7 +105,7 @@ func DecodeCursor(s string) (Cursor, error) {
 		}
 		c.Offset = *offset
 	} else {
-		if !seen["k"] || id == nil {
+		if !seen["k"] || c.Keys == nil || id == nil {
 			return Cursor{}, Errorf(CodeMalformed, "invalid keyset cursor")
 		}
 		c.ID = *id

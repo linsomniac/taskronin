@@ -586,11 +586,11 @@ func taskCursor(view domain.View, t domain.TaskView) string {
 		}
 		keys = []any{t.DeferDate.V.String(), int(minute), t.Rank}
 	case domain.ViewDone:
-		keys = []any{t.CompletedAt.V.UnixMilli()}
+		keys = []any{string(view), t.CompletedAt.V.UnixMilli()}
 	case domain.ViewDropped:
-		keys = []any{t.UpdatedAt.UnixMilli()}
+		keys = []any{string(view), t.UpdatedAt.UnixMilli()}
 	case domain.ViewDeleted:
-		keys = []any{t.DeletedAt.V.UnixMilli()}
+		keys = []any{string(view), t.DeletedAt.V.UnixMilli()}
 	default:
 	}
 	return domain.EncodeCursor(domain.Cursor{Keys: keys, ID: int64(t.ID)})
@@ -776,7 +776,9 @@ func decodeKeyset(view domain.View, cursor string) (domain.Cursor, error) {
 	case domain.ViewUpcoming:
 		schema = []cursorKey{date, minute, integer}
 	case domain.ViewDone, domain.ViewDropped, domain.ViewDeleted:
-		schema = []cursorKey{millis}
+		// AIDEV-NOTE: These views share one numeric schema, so the cursor carries
+		// a view tag (stripped below; the store takes only the numeric key).
+		schema = []cursorKey{{literal: string(view)}, millis}
 	case domain.ViewAll:
 		schema = []cursorKey{}
 	case "history", "ops", "ai-changes":
@@ -817,6 +819,9 @@ func decodeKeyset(view domain.View, cursor string) (domain.Cursor, error) {
 			}
 			c.Keys[i] = n
 		}
+	}
+	if view == domain.ViewDone || view == domain.ViewDropped || view == domain.ViewDeleted {
+		c.Keys = c.Keys[1:]
 	}
 	return c, nil
 }

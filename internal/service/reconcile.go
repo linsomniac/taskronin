@@ -12,7 +12,7 @@ import (
 
 type reconcileStep struct {
 	name string
-	need func(context.Context, store.Q, time.Time, civil.Date) (bool, error)
+	need func(context.Context, store.Q, time.Time, civil.Date, civil.Zone) (bool, error)
 	run  func(*op) error
 }
 
@@ -25,11 +25,7 @@ var reconcileSteps = []reconcileStep{
 	{name: "focus", need: needFocus, run: (*op).reconcileFocus},
 }
 
-func needSurface(ctx context.Context, q store.Q, now time.Time, today civil.Date) (bool, error) {
-	z, err := civil.LoadZone(now.Location().String())
-	if err != nil {
-		return false, err
-	}
+func needSurface(ctx context.Context, q store.Q, now time.Time, today civil.Date, z civil.Zone) (bool, error) {
 	ids, err := surfaceTasks(ctx, q, now, today, z, true)
 	return len(ids) > 0, err
 }
@@ -77,7 +73,7 @@ func surfaceTasks(ctx context.Context, q store.Q, now time.Time, today civil.Dat
 	return ids, rows.Err()
 }
 
-func needFocus(ctx context.Context, q store.Q, _ time.Time, today civil.Date) (bool, error) {
+func needFocus(ctx context.Context, q store.Q, _ time.Time, today civil.Date, _ civil.Zone) (bool, error) {
 	var needed bool
 	err := q.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM focus f JOIN tasks t ON t.id = f.task_id
 		WHERE f.date != ? OR t.status != 'open' OR t.deleted_at IS NOT NULL OR t.defer_date IS NOT NULL)`, today).Scan(&needed)
@@ -85,14 +81,14 @@ func needFocus(ctx context.Context, q store.Q, _ time.Time, today civil.Date) (b
 }
 
 func (o *op) reconcileFocus() error {
-	needed, err := needFocus(o.ctx, o.tx, o.now, o.today)
+	needed, err := needFocus(o.ctx, o.tx, o.now, o.today, o.s.zone)
 	if err != nil || !needed {
 		return err
 	}
 	return o.setFocus(sql.Null[domain.TaskID]{})
 }
 
-func needResolve(ctx context.Context, q store.Q, _ time.Time, today civil.Date) (bool, error) {
+func needResolve(ctx context.Context, q store.Q, _ time.Time, today civil.Date, _ civil.Zone) (bool, error) {
 	var needed bool
 	err := q.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM time_blocks
 		WHERE deleted_at IS NULL AND status = 'planned' AND date < ?)`, today).Scan(&needed)
@@ -112,7 +108,7 @@ func (o *op) reconcileBlocks() error {
 	return nil
 }
 
-func needDue(ctx context.Context, q store.Q, _ time.Time, today civil.Date) (bool, error) {
+func needDue(ctx context.Context, q store.Q, _ time.Time, today civil.Date, _ civil.Zone) (bool, error) {
 	ids, err := dueTasks(ctx, q, today, 1)
 	return len(ids) > 0, err
 }
@@ -153,11 +149,7 @@ func dueTasks(ctx context.Context, q store.Q, today civil.Date, limit int) ([]do
 	return ids, rows.Err()
 }
 
-func needOverdue(ctx context.Context, q store.Q, now time.Time, today civil.Date) (bool, error) {
-	z, err := civil.LoadZone(now.Location().String())
-	if err != nil {
-		return false, err
-	}
+func needOverdue(ctx context.Context, q store.Q, now time.Time, today civil.Date, z civil.Zone) (bool, error) {
 	ids, err := overdueTasks(ctx, q, now, today, z, true)
 	return len(ids) > 0, err
 }
@@ -232,7 +224,7 @@ func (s *Service) needsReconcile(ctx context.Context, q store.Q, now time.Time) 
 	today := s.zone.DateOf(now)
 	var needed bool
 	for _, step := range reconcileSteps {
-		need, err := step.need(ctx, q, now, today)
+		need, err := step.need(ctx, q, now, today, s.zone)
 		if err != nil {
 			return false, err
 		}

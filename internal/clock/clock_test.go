@@ -1,6 +1,7 @@
 package clock
 
 import (
+	"sync"
 	"testing"
 	"time"
 )
@@ -51,5 +52,19 @@ func TestRealClock(t *testing.T) {
 	case <-c.After(time.Millisecond):
 	case <-time.After(5 * time.Second):
 		t.Fatal("Real.After never fired")
+	}
+}
+
+func TestFakeConcurrentAdvance(t *testing.T) {
+	start := time.Date(2026, 10, 25, 0, 0, 0, 0, time.UTC)
+	f := NewFake(start)
+	var wg sync.WaitGroup
+	for range 100 {
+		wg.Add(1)
+		go func() { defer wg.Done(); f.Advance(time.Second) }()
+	}
+	wg.Wait()
+	if got := f.Now(); !got.Equal(start.Add(100 * time.Second)) {
+		t.Fatalf("concurrent Advance lost increments: %v", got.Sub(start))
 	}
 }

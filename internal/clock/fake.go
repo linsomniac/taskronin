@@ -46,6 +46,11 @@ func (f *Fake) After(d time.Duration) <-chan time.Time {
 func (f *Fake) Set(t time.Time) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.setLocked(t)
+}
+
+// setLocked implements Set; f.mu must be held.
+func (f *Fake) setLocked(t time.Time) {
 	f.now = t
 	kept := f.waiters[:0]
 	for _, w := range f.waiters {
@@ -60,8 +65,9 @@ func (f *Fake) Set(t time.Time) {
 
 // Advance moves the clock forward by d.
 func (f *Fake) Advance(d time.Duration) {
+	// AIDEV-NOTE: add and fire under one lock so concurrent Advance calls
+	// cannot lose an increment.
 	f.mu.Lock()
-	t := f.now.Add(d)
-	f.mu.Unlock()
-	f.Set(t)
+	defer f.mu.Unlock()
+	f.setLocked(f.now.Add(d))
 }

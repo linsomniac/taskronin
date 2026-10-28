@@ -79,7 +79,8 @@ func (z Zone) Instant(d Date, m Minute, p GapPolicy) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("civil: minute %d out of range", int(m))
 	}
 	if m == EndOfDay {
-		return z.StartOfDay(d.AddDays(1)), nil
+		// Not StartOfDay: it panics on failure; propagate the error instead.
+		return z.Instant(d.AddDays(1), 0, GapForward)
 	}
 
 	// AIDEV-NOTE: DST correctness lives here (A§2.2, review ruling P13). The

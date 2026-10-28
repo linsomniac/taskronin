@@ -83,6 +83,11 @@ func (s *Service) CreateToken(ctx context.Context, m Meta, in CreateTokenIn) (To
 		if in.Scopes == 0 || in.Scopes & ^domain.AllScopes != 0 {
 			return validation("scopes", errors.New("must contain at least one scope and only declared scopes"))
 		}
+		// AIDEV-NOTE: A non-owner caller may only mint tokens whose scopes are a
+		// subset of its own (no privilege escalation); the owner is unrestricted.
+		if m.Actor.Kind != domain.ActorOwner && in.Scopes & ^m.Actor.Scopes != 0 {
+			return domain.Errorf(domain.CodeForbidden, "token scopes exceed the caller's scopes")
+		}
 		if in.ExpiresAt.Valid {
 			in.ExpiresAt.V = in.ExpiresAt.V.UTC().Truncate(time.Millisecond)
 			if !in.ExpiresAt.V.After(o.now) {

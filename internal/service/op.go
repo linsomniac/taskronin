@@ -71,8 +71,8 @@ func (s *Service) run(ctx context.Context, m Meta, spec opSpec, fn func(*op) err
 		return nil, domain.Errorf(domain.CodeForbidden, "operation is not permitted")
 	}
 	// AIDEV-NOTE: Task 18 supplies identity, lifecycle, replay and rate checks below.
-	// AIDEV-TODO: Tasks 30–31 add reversal target selection and stack transitions.
-	// Completed: all reversal targets and stack transitions are handled below.
+	// AIDEV-NOTE: Reversal target selection and stack transitions (formerly an
+	// AIDEV-TODO for Tasks 30-31) are implemented below.
 	if spec.idem {
 		if err := validateIdemKey(m.Idem.Key); err != nil {
 			return nil, err

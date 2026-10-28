@@ -114,7 +114,8 @@ func (s *Service) PurgeLive(ctx context.Context, m Meta, in PurgeLiveIn) (PurgeL
 		return PurgeLiveResult{}, validation("target", errors.New("must be task or entry"))
 	}
 	var result PurgeLiveResult
-	_, err := s.run(ctx, m, opSpec{kind: kind, class: classForward, scopes: domain.ScopeDestroy}, func(o *op) error {
+	_, err := s.run(ctx, m, opSpec{kind: kind, class: classForward, scopes: domain.ScopeDestroy,
+		ownerOnly: true, notWeb: true}, func(o *op) error {
 		set, linked, err := o.selectPurgeSet(in)
 		if err != nil {
 			return err

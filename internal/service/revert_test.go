@@ -557,3 +557,14 @@ func TestRevertRefusalPreservesReconcile(t *testing.T) {
 		t.Fatal("refusal discarded reconcile or kept failed revert")
 	}
 }
+
+func TestRevertInactiveWithoutReversalIsConflict(t *testing.T) {
+	s := testutil.NewScenario(t)
+	s.Add("A")
+	x := s.Last.OpID
+	// Raw fixture (F14): an inactive op with no recorded reversal is unreachable through real ops.
+	if _, err := s.Store.Writer.ExecContext(s.Ctx(), `UPDATE ops SET state = 'reverted' WHERE op_id = ?`, x); err != nil {
+		t.Fatal(err)
+	}
+	_ = revertRefusal(t, s, x, domain.CodeRevertConflict)
+}

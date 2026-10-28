@@ -319,6 +319,7 @@ func TestCursor(t *testing.T) {
 		`{"v":1,"k":[],"id":1,"o":0}`, `{"v":1,"o":0,"v":1}`, `{"V":1,"o":0}`,
 		`{"v":1,"k":{},"id":1}`, `{"v":1,"k":[],"id":1.5}`, `{"v":1,"o":1.5}`,
 		`{"v":1,"k":[],"id":9223372036854775808}`,
+		`{"v":1,"k":null,"id":1}`,
 	} {
 		_, err := DecodeCursor(cursorBase64(input))
 		requireMalformed(t, input, err)

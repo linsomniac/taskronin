@@ -447,7 +447,7 @@ func TestReconcileSavepointBoundaries(t *testing.T) {
 			old := reconcileSteps
 			t.Cleanup(func() { reconcileSteps = old })
 			reconcileSteps = []reconcileStep{
-				{name: "surface", need: func(context.Context, store.Q, time.Time, civil.Date) (bool, error) {
+				{name: "surface", need: func(context.Context, store.Q, time.Time, civil.Date, civil.Zone) (bool, error) {
 					order = append(order, "need surface")
 					return true, nil
 				}, run: func(o *op) error {
@@ -466,7 +466,7 @@ func TestReconcileSavepointBoundaries(t *testing.T) {
 					}
 					return o.recordTaskUpdate(tk, after)
 				}},
-				{name: "focus", need: func(context.Context, store.Q, time.Time, civil.Date) (bool, error) {
+				{name: "focus", need: func(context.Context, store.Q, time.Time, civil.Date, civil.Zone) (bool, error) {
 					order = append(order, "need focus")
 					return false, nil
 				}, run: func(_ *op) error {
@@ -883,7 +883,7 @@ func TestReconcileReaderCheckAndWriterRecheck(t *testing.T) {
 			t.Cleanup(func() { reconcileSteps = old })
 			checks, runs := 0, 0
 			cause := errors.New("need check failed")
-			reconcileSteps = []reconcileStep{{name: "surface", need: func(_ context.Context, _ store.Q, now time.Time, today civil.Date) (bool, error) {
+			reconcileSteps = []reconcileStep{{name: "surface", need: func(_ context.Context, _ store.Q, now time.Time, today civil.Date, _ civil.Zone) (bool, error) {
 				checks++
 				if now.Nanosecond() != 123000000 || today != civil.MustDate("2026-10-28") {
 					t.Fatal("need check clock")
@@ -946,7 +946,7 @@ func TestReplayStoredConflict(t *testing.T) {
 	}
 	old := reconcileSteps
 	t.Cleanup(func() { reconcileSteps = old })
-	reconcileSteps = []reconcileStep{{need: func(context.Context, store.Q, time.Time, civil.Date) (bool, error) {
+	reconcileSteps = []reconcileStep{{need: func(context.Context, store.Q, time.Time, civil.Date, civil.Zone) (bool, error) {
 		t.Fatal("replay ran reconcile")
 		return false, nil
 	}}}
@@ -978,7 +978,7 @@ func TestReplayBeforeReconcile(t *testing.T) {
 	}
 	old := reconcileSteps
 	t.Cleanup(func() { reconcileSteps = old })
-	reconcileSteps = []reconcileStep{{need: func(context.Context, store.Q, time.Time, civil.Date) (bool, error) {
+	reconcileSteps = []reconcileStep{{need: func(context.Context, store.Q, time.Time, civil.Date, civil.Zone) (bool, error) {
 		t.Fatal("replay or mismatch ran reconcile")
 		return false, nil
 	}}}
@@ -1035,7 +1035,7 @@ func TestShutdownReconcileAndWriteTxDrain(t *testing.T) {
 				old := reconcileSteps
 				t.Cleanup(func() { reconcileSteps = old })
 				checks := 0
-				reconcileSteps = []reconcileStep{{need: func(context.Context, store.Q, time.Time, civil.Date) (bool, error) {
+				reconcileSteps = []reconcileStep{{need: func(context.Context, store.Q, time.Time, civil.Date, civil.Zone) (bool, error) {
 					checks++
 					if checks == 1 {
 						close(started)

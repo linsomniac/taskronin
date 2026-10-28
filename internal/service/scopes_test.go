@@ -275,7 +275,7 @@ func scopeCases() []scopeCase {
 			}},
 		{name: "CreateToken", required: domain.ScopeAdmin, notWeb: true, forbidden: [3]bool{true, false, true},
 			call: func(s *testutil.Scenario, m service.Meta) error {
-				_, err := s.Svc.CreateToken(s.Ctx(), m, service.CreateTokenIn{Name: "created", Scopes: domain.ScopeRead})
+				_, err := s.Svc.CreateToken(s.Ctx(), m, service.CreateTokenIn{Name: "created", Scopes: domain.ScopeAdmin})
 				return err
 			}},
 		{name: "RevokeToken", required: domain.ScopeAdmin, notWeb: true, forbidden: [3]bool{true, false, true},

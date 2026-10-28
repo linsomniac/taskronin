@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"maps"
 	"slices"
 	"time"
@@ -43,6 +44,10 @@ func (o *op) revertTx(target domain.OpRecord) error {
 		if err := o.tx.QueryRowContext(o.ctx, `SELECT actor FROM ops
 			WHERE reverts_op_id = ? AND state = 'active' AND seq < ?
 			ORDER BY seq DESC LIMIT 1`, target.ID, o.rec.Seq).Scan(&actor); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				// No active earlier reversal: report a conflict, not not_found.
+				return domain.Errorf(domain.CodeRevertConflict, "operation is not active")
+			}
 			return err
 		}
 		return domain.Errorf(domain.CodeRevertConflict, "already reverted by %s", actor)

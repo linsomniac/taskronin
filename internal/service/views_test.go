@@ -654,7 +654,10 @@ func TestPagingInputs(t *testing.T) {
 		{domain.ViewTriage, []any{9, 1}}, {domain.ViewTriage, []any{0, 1}}, {domain.ViewTriage, []any{1, 0}},
 		{domain.ViewUpcoming, []any{"2026-02-30", 0, 1}}, {domain.ViewUpcoming, []any{"2026-10-29", 1440, 1}},
 		{domain.ViewUpcoming, []any{"2026-10-29", -1, 1}}, {domain.ViewUpcoming, []any{"2026-10-29", 0, "1"}},
-		{domain.ViewDone, []any{-1}}, {domain.ViewDropped, []any{-1}}, {domain.ViewDeleted, []any{-1}},
+		{domain.ViewDone, []any{"done", -1}}, {domain.ViewDropped, []any{"dropped", -1}}, {domain.ViewDeleted, []any{"deleted", -1}},
+		// Untagged and cross-view cursors are malformed (M6).
+		{domain.ViewDone, []any{5}}, {domain.ViewDone, []any{"dropped", 5}}, {domain.ViewDropped, []any{"done", 5}},
+		{domain.ViewDeleted, []any{"done", 5}},
 		{domain.ViewAll, []any{1}},
 	} {
 		_, err = list(service.ListTasksIn{View: tc.view, Cursor: domain.EncodeCursor(domain.Cursor{Keys: tc.keys, ID: 1})})
