@@ -21,7 +21,30 @@ type Route struct {
 }
 
 // Routes returns the API endpoint table. Feature tasks extend this table.
-func (*Server) Routes() []Route { return nil }
+func (s *Server) Routes() []Route {
+	return []Route{
+		{Method: http.MethodGet, Pattern: "/api/v1/clock", Handler: s.clockView},
+		{Method: http.MethodGet, Pattern: "/api/v1/whoami", Handler: s.whoAmI},
+		{Method: http.MethodGet, Pattern: "/api/v1/today", Scopes: domain.ScopeRead, Handler: s.today},
+		{Method: http.MethodGet, Pattern: "/api/v1/status", Scopes: domain.ScopeRead, Handler: s.status},
+		{Method: http.MethodGet, Pattern: "/api/v1/days/{date}", Scopes: domain.ScopeRead, Handler: s.day},
+		{Method: http.MethodGet, Pattern: "/api/v1/upcoming", Scopes: domain.ScopeRead, Handler: s.upcoming},
+		{Method: http.MethodGet, Pattern: "/api/v1/report", Scopes: domain.ScopeRead, Handler: s.report},
+		{Method: http.MethodGet, Pattern: "/api/v1/search", Scopes: domain.ScopeRead, Handler: s.search},
+		{Method: http.MethodGet, Pattern: "/api/v1/tags", Scopes: domain.ScopeRead, Handler: s.tags},
+		{Method: http.MethodGet, Pattern: "/api/v1/tasks", Scopes: domain.ScopeRead, Handler: s.listTasks},
+		{Method: http.MethodGet, Pattern: "/api/v1/tasks/{id}", Scopes: domain.ScopeRead, Handler: s.getTask},
+		{Method: http.MethodGet, Pattern: "/api/v1/tasks/{id}/history", Scopes: domain.ScopeRead, Handler: s.taskHistory},
+		{Method: http.MethodGet, Pattern: "/api/v1/entries", Scopes: domain.ScopeRead, Handler: s.listEntries},
+		{Method: http.MethodGet, Pattern: "/api/v1/entries/{id}", Scopes: domain.ScopeRead, Handler: s.getEntry},
+		{Method: http.MethodGet, Pattern: "/api/v1/blocks", Scopes: domain.ScopeRead, Handler: s.listBlocks},
+		{Method: http.MethodGet, Pattern: "/api/v1/blocks/{id}", Scopes: domain.ScopeRead, Handler: s.getBlock},
+		{Method: http.MethodGet, Pattern: "/api/v1/ops", Scopes: domain.ScopeRead, Handler: s.listOps},
+		{Method: http.MethodGet, Pattern: "/api/v1/ops/{op_id}", Scopes: domain.ScopeRead, Handler: s.getOp},
+		{Method: http.MethodGet, Pattern: "/api/v1/ai-changes", Scopes: domain.ScopeRead, Handler: s.aiChanges},
+		{Method: http.MethodGet, Pattern: "/api/v1/settings", Scopes: domain.ScopeRead, Handler: s.settings},
+	}
+}
 
 // APIHandler returns the socket-only API middleware chain and router.
 func (s *Server) APIHandler() http.Handler { return s.handlerFor(s.Routes()) }
