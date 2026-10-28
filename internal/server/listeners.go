@@ -12,7 +12,7 @@ import (
 	"taskronin/internal/systemd"
 )
 
-// listenAPI uses the systemd listener named api or binds a private Unix socket.
+// listenAPI uses the systemd Unix stream listener named api or binds a private Unix socket.
 // The caller must hold the instance lock. created reports a self-bound socket.
 func listenAPI(socket string) (ln net.Listener, created bool, err error) {
 	listeners, err := systemd.Listeners()
@@ -25,6 +25,13 @@ func listenAPI(socket string) (ln net.Listener, created bool, err error) {
 		}
 	}
 	if ln := listeners["api"]; ln != nil {
+		// AIDEV-NOTE: an activation name does not constrain the transport.
+		// Require a Unix stream socket to keep the API off TCP and packet sockets.
+		api, ok := ln.(*net.UnixListener)
+		if !ok || api.Addr().Network() != "unix" {
+			_ = ln.Close()
+			return nil, false, errors.New("systemd API listener must be a Unix stream socket")
+		}
 		return ln, false, nil
 	}
 	if err := config.CheckSocketPath(socket); err != nil {

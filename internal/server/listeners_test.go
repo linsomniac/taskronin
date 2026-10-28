@@ -142,18 +142,30 @@ func TestListenAPIActivationError(t *testing.T) {
 }
 
 func TestListenAPIActivation(t *testing.T) {
-	for _, name := range []string{"api", "other"} {
-		t.Run(name, func(t *testing.T) {
+	for _, tc := range []struct{ name, network string }{
+		{"api", "unix"},
+		{"other", "unix"},
+		{"api", "tcp"},
+		{"api", "unixpacket"},
+	} {
+		t.Run(tc.name+"_"+tc.network, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "activated.sock")
-			ln, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
+			address := path
+			if tc.network == "tcp" {
+				address = "127.0.0.1:0"
+			}
+			var lc net.ListenConfig
+			ln, err := lc.Listen(t.Context(), tc.network, address)
 			if err != nil {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = ln.Close() })
-			if err := os.Chmod(path, 0o600); err != nil {
-				t.Fatal(err)
+			if tc.network != "tcp" {
+				if err := os.Chmod(path, 0o600); err != nil {
+					t.Fatal(err)
+				}
 			}
-			f, err := ln.File()
+			f, err := ln.(interface{ File() (*os.File, error) }).File()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -166,7 +178,8 @@ func TestListenAPIActivation(t *testing.T) {
 			defer cancel()
 			cmd := exec.CommandContext(ctx, exe, "-test.run=^TestListenAPIActivationHelper$")
 			cmd.ExtraFiles = []*os.File{f}
-			cmd.Env = append(os.Environ(), "TASKRONIN_LISTEN_API_TEST="+name, "TASKRONIN_LISTEN_API_PATH="+path)
+			cmd.Env = append(os.Environ(), "TASKRONIN_LISTEN_API_TEST="+tc.name,
+				"TASKRONIN_LISTEN_API_NETWORK="+tc.network, "TASKRONIN_LISTEN_API_PATH="+path)
 			if out, err := cmd.CombinedOutput(); err != nil {
 				t.Fatalf("activation child: %v\n%s", err, out)
 			}
@@ -182,13 +195,44 @@ func TestListenAPIActivationHelper(t *testing.T) {
 	t.Setenv("LISTEN_PID", strconv.Itoa(os.Getpid()))
 	t.Setenv("LISTEN_FDS", "1")
 	t.Setenv("LISTEN_FDNAMES", name)
+	network := os.Getenv("TASKRONIN_LISTEN_API_NETWORK")
 	path := os.Getenv("TASKRONIN_LISTEN_API_PATH")
-	fallback := filepath.Join(t.TempDir(), "private", "sock")
-	ln, created, err := listenAPI(fallback)
+	inherited, err := os.Readlink("/proc/self/fd/3")
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = ln.Close() })
+	fallback := filepath.Join(t.TempDir(), "private", "sock")
+	ln, created, err := listenAPI(fallback)
+	if ln != nil {
+		t.Cleanup(func() { _ = ln.Close() })
+	}
+	if network != "unix" {
+		if err == nil || ln != nil || created {
+			t.Fatalf("activated %s: listenAPI = %v, %v, %v; want nil, false, error", network, ln, created, err)
+		}
+		if !strings.Contains(err.Error(), "Unix stream") {
+			t.Fatalf("listenAPI: %v; want Unix stream requirement", err)
+		}
+		if _, err := os.Lstat(filepath.Dir(fallback)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("rejected activation touched fallback directory: %v", err)
+		}
+		// AIDEV-NOTE: FileListener duplicates the inherited fd; neither the
+		// original nor any duplicate may survive rejection of its transport.
+		fds, err := os.ReadDir("/proc/self/fd")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, fd := range fds {
+			target, err := os.Readlink(filepath.Join("/proc/self/fd", fd.Name()))
+			if err == nil && target == inherited {
+				t.Errorf("rejected listener leaked fd %s -> %s", fd.Name(), target)
+			}
+		}
+		return
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
 	if created != (name != "api") {
 		t.Fatalf("created = %v for activated %q", created, name)
 	}
