@@ -283,7 +283,7 @@ func TestRenderUnits(t *testing.T) {
 func TestRenderUnitsRejectsUnsafePaths(t *testing.T) {
 	for _, field := range []string{"Binary", "Socket", "DataDir", "StateDir", "RuntimeDir", "ExtraRW"} {
 		t.Run(field, func(t *testing.T) {
-			for _, path := range []string{"/my data", "/a%b", "/a\"b", "/a\\b", "/a\tb", "/a\nb", "/a\rb", "/a\x00b", "/a\x1bb", "/a\x7fb", "/a\u0085b", "/a\u00a0b"} {
+			for _, path := range []string{"/my data", "/a%b", "/a\"b", "/home/o'neil/bin/tkr", "/a'b'c", "/a\\b", "/a\tb", "/a\nb", "/a\rb", "/a\x00b", "/a\x1bb", "/a\x7fb", "/a\u0085b", "/a\u00a0b"} {
 				d := unitData()
 				switch field {
 				case "Binary":
@@ -313,8 +313,14 @@ func TestUnitsVerify(t *testing.T) {
 	if err != nil {
 		t.Skip("systemd-analyze is not installed")
 	}
+	// AIDEV-NOTE: verification checks executable availability without running
+	// it; the test binary also works on hosts without /bin/true.
+	binary, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
 	d := unitData()
-	d.Binary = "/bin/true"
+	d.Binary = binary
 	service, socket, err := systemd.RenderUnits(d)
 	if err != nil {
 		t.Fatal(err)

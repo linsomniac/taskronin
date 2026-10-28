@@ -32,9 +32,9 @@ func RenderUnits(d UnitData) (service, socket []byte, err error) {
 	}
 	for _, p := range paths {
 		// AIDEV-NOTE: the templates deliberately do no systemd escaping;
-		// whitespace, specifiers, quotes and controls must never reach them.
+		// whitespace, specifiers, single/double quotes and controls must never reach them.
 		if strings.ContainsFunc(p.path, func(r rune) bool {
-			return unicode.IsSpace(r) || unicode.IsControl(r) || strings.ContainsRune("%\"\\", r)
+			return unicode.IsSpace(r) || unicode.IsControl(r) || strings.ContainsRune("%'\"\\", r)
 		}) {
 			return nil, nil, fmt.Errorf("unsafe systemd %s path %q", p.field, p.path)
 		}
