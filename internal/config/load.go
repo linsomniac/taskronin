@@ -29,9 +29,13 @@ func LoadServer(path string) (*Server, error) {
 // LoadClient strictly decodes over defaults, or uses just those defaults if the
 // file is missing. In either case the resulting configuration is validated.
 func LoadClient(path string, p Paths) (*Client, error) {
-	c := DefaultClient(p)
-	if err := decodeConfig(path, c); err != nil && !errors.Is(err, os.ErrNotExist) {
+	wire := DefaultClient(p).tomlConfig()
+	if err := decodeConfig(path, &wire); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
+	}
+	c, err := wire.client()
+	if err != nil {
+		return nil, fmt.Errorf("client config %s: %w", path, err)
 	}
 	if err := ValidateClient(c); err != nil {
 		return nil, fmt.Errorf("client config %s: %w", path, err)

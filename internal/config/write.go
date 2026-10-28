@@ -21,22 +21,7 @@ func WriteClient(path string, c *Client) error {
 	// AIDEV-NOTE: toml decodes duration strings into time.Duration, but encodes
 	// time.Duration as integer nanoseconds. This mirror preserves the file's
 	// human-readable string schema and makes writing and loading symmetric.
-	wire := struct {
-		Socket        string `toml:"socket"`
-		TokenFile     string `toml:"token_file"`
-		Timeout       string `toml:"timeout"`
-		StatusTimeout string `toml:"status_timeout"`
-		Editor        string `toml:"editor"`
-		Color         string `toml:"color"`
-		MCP           struct {
-			TokenFile string `toml:"token_file"`
-		} `toml:"mcp"`
-	}{
-		Socket: c.Socket, TokenFile: c.TokenFile,
-		Timeout: c.Timeout.String(), StatusTimeout: c.StatusTimeout.String(),
-		Editor: c.Editor, Color: c.Color, MCP: c.MCP,
-	}
-	return writeConfig(path, "", wire)
+	return writeConfig(path, "", c.tomlConfig())
 }
 
 func writeConfig(path, header string, v any) error {

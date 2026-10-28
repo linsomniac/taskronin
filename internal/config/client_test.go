@@ -100,6 +100,38 @@ func TestValidateClient(t *testing.T) {
 	}
 }
 
+func TestLoadClientDurationStrings(t *testing.T) {
+	for _, field := range []string{"timeout", "status_timeout"} {
+		for _, value := range []string{"300", "20000000000", "300.0", "true", "[]"} {
+			t.Run(field+"="+value, func(t *testing.T) {
+				c, err := config.LoadClient(writeConfig(t, field+" = "+value), configPaths(t))
+				if c != nil || err == nil || !strings.Contains(err.Error(), field) || !strings.Contains(err.Error(), "string") {
+					t.Fatalf("LoadClient = %+v, %v; want %s string-type error", c, err, field)
+				}
+			})
+		}
+	}
+	for _, contents := range []string{
+		`timeout = "25s"`,
+		`status_timeout = "500ms"`,
+		"timeout = \"25s\"\nstatus_timeout = \"500ms\"",
+	} {
+		t.Run(contents, func(t *testing.T) {
+			want := config.DefaultClient(configPaths(t))
+			if strings.HasPrefix(contents, "timeout") {
+				want.Timeout = 25 * time.Second
+			}
+			if strings.Contains(contents, "status_timeout") {
+				want.StatusTimeout = 500 * time.Millisecond
+			}
+			c, err := config.LoadClient(writeConfig(t, contents), configPaths(t))
+			if err != nil || c == nil || *c != *want {
+				t.Fatalf("LoadClient = %+v, %v; want %+v", c, err, want)
+			}
+		})
+	}
+}
+
 func TestLoadClientErrors(t *testing.T) {
 	p := configPaths(t)
 	for _, contents := range []string{"editor = [", "editor = 42"} {

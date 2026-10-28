@@ -255,6 +255,84 @@ func TestWebListenerAllowed(t *testing.T) {
 	}
 }
 
+func TestValidateConfigSymlinkParents(t *testing.T) {
+	// A lexical path under /tmp would already fail the ancestor-mode check,
+	// hiding the symlink bypass. Keep its parents safe in the private checkout.
+	root, err := os.MkdirTemp(".", ".paths-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(root); err != nil {
+			t.Error(err)
+		}
+	})
+	root, err = filepath.Abs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	shared := t.TempDir()
+	if err := os.Chmod(shared, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	private := filepath.Join(shared, "private")
+	if err := os.Mkdir(private, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for name, target := range map[string]string{
+		"alias":    private,
+		"dangling": filepath.Join(shared, "absent"),
+	} {
+		if err := os.Symlink(target, filepath.Join(root, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, field := range []string{"paths.data_dir", "paths.socket", "backup.dir", "socket", "token_file", "mcp.token_file"} {
+		t.Run(field, func(t *testing.T) {
+			validate := func(path string) error {
+				s := config.DefaultServer(configPaths(t), "UTC")
+				c := config.DefaultClient(configPaths(t))
+				switch field {
+				case "paths.data_dir":
+					s.Paths.DataDir = path
+				case "paths.socket":
+					s.Paths.Socket = path
+				case "backup.dir":
+					s.Backup.Dir = path
+				case "socket":
+					c.Socket = path
+				case "token_file":
+					c.TokenFile = path
+				case "mcp.token_file":
+					c.MCP.TokenFile = path
+				}
+				if err := config.ValidateServer(s); err != nil {
+					return err
+				}
+				return config.ValidateClient(c)
+			}
+			missing := filepath.Join(root, "missing", "child")
+			if err := validate(missing); err != nil {
+				t.Fatalf("safe missing directories: %v", err)
+			}
+			if _, err := os.Lstat(filepath.Dir(missing)); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("validation created missing directory: %v", err)
+			}
+			for _, name := range []string{"alias", "dangling"} {
+				t.Run(name, func(t *testing.T) {
+					link := filepath.Join(root, name)
+					for _, path := range []string{link, filepath.Join(link, "missing", "child")} {
+						err := validate(path)
+						if err == nil || !strings.Contains(err.Error(), "symlink") || !strings.Contains(err.Error(), link) {
+							t.Errorf("validation of %s = %v; want rejected symlink %s", path, err, link)
+						}
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestLoadServerEffectivePaths(t *testing.T) {
 	contents := strings.NewReplacer(
 		"/home/sean/.local/share/taskronin/backups", "/taskronin-backup-test/archive",

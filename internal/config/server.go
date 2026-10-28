@@ -159,8 +159,8 @@ func (s *Server) WebListenerAllowed() error {
 	return nil
 }
 
-// validatePath checks directory paths themselves as well as their parents,
-// since those directories will contain the DB, backups, sockets or tokens.
+// validatePath rejects symlink components and checks directory permissions.
+// Directory paths themselves will contain the DB, backups, sockets or tokens.
 func validatePath(field, path string, directory bool) error {
 	if !filepath.IsAbs(path) {
 		return fmt.Errorf("%s must be absolute", field)
@@ -172,21 +172,22 @@ func validatePath(field, path string, directory bool) error {
 		return fmt.Errorf("%s must not contain ? or #", field)
 	}
 	parent := path
-	if !directory {
-		parent = filepath.Dir(path)
-	}
 	// AIDEV-NOTE: init may not have created the configured directories yet.
 	// Skip missing components, but still check every existing ancestor; stopping
 	// at the first missing directory would hide a world-writable parent.
+	// Use Lstat to reject symlinks: Stat follows the target, but the lexical
+	// parent walk would miss permissions on ancestors of that target.
 	for {
-		info, err := os.Stat(parent)
+		info, err := os.Lstat(parent)
 		switch {
 		case os.IsNotExist(err):
 		case err != nil:
 			return fmt.Errorf("%s: inspect parent %q: %w", field, parent, err)
-		case !info.IsDir():
+		case info.Mode()&os.ModeSymlink != 0:
+			return fmt.Errorf("%s: path component %q is a symlink", field, parent)
+		case (directory || parent != path) && !info.IsDir():
 			return fmt.Errorf("%s: parent %q is not a directory", field, parent)
-		case info.Mode().Perm()&0o002 != 0:
+		case (directory || parent != path) && info.Mode().Perm()&0o002 != 0:
 			return fmt.Errorf("%s: parent %q is world-writable", field, parent)
 		}
 		if parent == filepath.Dir(parent) {

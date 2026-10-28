@@ -18,6 +18,45 @@ type Client struct {
 	} `toml:"mcp"`
 }
 
+// AIDEV-NOTE: decoding directly into time.Duration also accepts TOML integers
+// as nanoseconds. Keep durations as strings at the file boundary, then parse
+// them explicitly so a missing unit cannot silently change the time budget.
+type clientTOML struct {
+	Socket        string `toml:"socket"`
+	TokenFile     string `toml:"token_file"`
+	Timeout       string `toml:"timeout"`
+	StatusTimeout string `toml:"status_timeout"`
+	Editor        string `toml:"editor"`
+	Color         string `toml:"color"`
+	MCP           struct {
+		TokenFile string `toml:"token_file"`
+	} `toml:"mcp"`
+}
+
+func (c *Client) tomlConfig() clientTOML {
+	return clientTOML{
+		Socket: c.Socket, TokenFile: c.TokenFile,
+		Timeout: c.Timeout.String(), StatusTimeout: c.StatusTimeout.String(),
+		Editor: c.Editor, Color: c.Color, MCP: c.MCP,
+	}
+}
+
+func (c clientTOML) client() (*Client, error) {
+	timeout, err := time.ParseDuration(c.Timeout)
+	if err != nil {
+		return nil, fmt.Errorf("timeout: %w", err)
+	}
+	statusTimeout, err := time.ParseDuration(c.StatusTimeout)
+	if err != nil {
+		return nil, fmt.Errorf("status_timeout: %w", err)
+	}
+	return &Client{
+		Socket: c.Socket, TokenFile: c.TokenFile,
+		Timeout: timeout, StatusTimeout: statusTimeout,
+		Editor: c.Editor, Color: c.Color, MCP: c.MCP,
+	}, nil
+}
+
 // DefaultClient supplies paths and time budgets for a missing client.toml.
 func DefaultClient(p Paths) *Client {
 	c := &Client{
