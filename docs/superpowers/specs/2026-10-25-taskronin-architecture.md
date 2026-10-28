@@ -127,7 +127,7 @@ as listed). Anything not listed is forbidden.
 | `markdown` | — | goldmark, bluemonday |
 | `web` | `service`, `domain`, `civil`, `datespec`, `auth`, `markdown`, `textsafe`, `clock`, `buildinfo` (reports are rendered from `service.Report` by templates) | — |
 | `systemd` | — | `x/sys/unix` |
-| `server` | `service`, `api`, `auth`, `web`, `store`, `backup`, `config`, `lock`, `fsutil`, `systemd`, `clock`, `civil`, `domain`, `buildinfo` | `x/sys/unix` |
+| `server` | `service`, `api`, `auth`, `web`, `store`, `backup`, `config`, `lock`, `fsutil`, `systemd`, `clock`, `civil`, `domain`, `textsafe`, `buildinfo` | `x/sys/unix` |
 | `client` | `api`, `domain`, `civil`, `config`, `fsutil`, `clock` | — |
 | `report` | `api`, `civil`, `textsafe` | — |
 | `editor` | `fsutil`, `config`, `clock` | — |

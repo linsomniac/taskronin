@@ -74,7 +74,7 @@ var allowed = map[string]rule{
 	"server": {
 		internal: []string{
 			"service", "api", "auth", "web", "store", "backup", "config", "lock", "fsutil",
-			"systemd", "clock", "civil", "domain", "buildinfo",
+			"systemd", "clock", "civil", "domain", "textsafe", "buildinfo",
 		},
 		thirdParty: []string{xSysUnix},
 	},
