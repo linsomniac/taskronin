@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -41,6 +42,31 @@ func TestRestoreCLI(t *testing.T) {
 	srv.Start(t)
 	page, err := srv.Client.ListTasks(t.Context(), client.TaskQuery{View: "all"})
 	if err != nil || len(page.Items) != 1 || page.Items[0].Title != "kept" {
+		t.Fatalf("tasks = %+v, %v", page, err)
+	}
+}
+
+func TestImportCLI(t *testing.T) {
+	src, srcSys := captureServer(t)
+	captureTask(t, src, "carried")
+	file := filepath.Join(t.TempDir(), "export.json")
+	if out, stderr, code := runCLI(t, srcSys, "", "export", "-o", file); code != 0 {
+		t.Fatalf("export: %d %q %q", code, out, stderr)
+	}
+	dst, sys := captureServer(t)
+	dst.Stop()
+	for _, args := range [][]string{{"import"}, {"import", file}} { // no FILE; not a terminal and no --yes
+		if out, stderr, code := runCLI(t, sys, "", args...); code != 2 || out != "" || stderr == "" {
+			t.Fatalf("%v: %d %q %q", args, code, out, stderr)
+		}
+	}
+	out, stderr, code := runCLI(t, sys, "", "import", "-y", file)
+	if code != 0 || !strings.HasPrefix(out, "imported 1 tasks, 0 entries and 0 blocks; the previous database is in ") {
+		t.Fatalf("import: %d %q %q", code, out, stderr)
+	}
+	dst.Start(t)
+	page, err := dst.Client.ListTasks(t.Context(), client.TaskQuery{View: "all"})
+	if err != nil || len(page.Items) != 1 || page.Items[0].Title != "carried" {
 		t.Fatalf("tasks = %+v, %v", page, err)
 	}
 }
