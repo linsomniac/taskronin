@@ -1,0 +1,14 @@
+# Work report Fri 2026-10-23 – Mon 2026-10-26
+
+## Fri 2026-10-23
+
+- Answered Bob's DNS question
+- Added Ansible role for postgres cluster (#42 Set up keycloak postgres cluster)
+- Created pgk cluster in dev (#42)
+
+## Mon 2026-10-26
+
+- Drafted outline (#7 Write report)
+- Failover tested in dev (#42)
+- ✓ Set up keycloak postgres cluster (#42) (reopened)
+- ✓ Add svc-cluster weencrypt name to certs (#57 Add svc-cluster weencrypt name to certs)
