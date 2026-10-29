@@ -44,7 +44,7 @@ func (e *env) printOp(resp *api.OpResponse, headline string) {
 }
 
 func effectInHeadline(resp *api.OpResponse, effect api.Effect, headline string) bool {
-	if headline == effectLine(effect) {
+	if headline == effectLine(effect) || schedulingEffectInHeadline(resp, effect, headline) {
 		return true
 	}
 	if resp.Task == nil || effect.TaskID != resp.Task.ID {
@@ -79,6 +79,51 @@ func effectInHeadline(resp *api.OpResponse, effect api.Effect, headline string) 
 		return action == effect.Kind
 	case "undeleted":
 		return action == "restored"
+	default:
+		return false
+	}
+}
+
+func schedulingEffectInHeadline(resp *api.OpResponse, effect api.Effect, headline string) bool {
+	if effect.Kind == "focus_set" {
+		return strings.HasPrefix(headline, fmt.Sprintf("focus → #%d '", effect.TaskID))
+	}
+	if block := resp.Block; block != nil {
+		scheduled := headline == blockHeadline(block)
+		if effect.Kind == "placed" && effect.TaskID == block.TaskID && scheduled {
+			return true
+		}
+		if effect.BlockID == block.ID {
+			switch effect.Kind {
+			case "blocked", "block_moved":
+				return scheduled
+			case "block_cancelled":
+				return headline == fmt.Sprintf("b%d cancelled", block.ID)
+			}
+		}
+	}
+	if resp.Task == nil || effect.TaskID != resp.Task.ID {
+		return false
+	}
+	task := resp.Task
+	prefix := fmt.Sprintf("#%d ", task.ID)
+	deferred := task.Defer != nil && headline == prefix+"deferred to "+formatMoment(task.Defer)
+	undeferred := headline == prefix+"no longer deferred"
+	switch effect.Kind {
+	case "placed":
+		return headline == prefix+"kept" || strings.HasPrefix(headline, prefix+"moved ") || deferred || undeferred
+	case "moved":
+		return strings.HasPrefix(headline, prefix+"moved ")
+	case "deferred":
+		return deferred
+	case "undeferred":
+		// AIDEV-NOTE: changing a deferral places the task (clearing the
+		// old defer) before setting the new one. Echo the final moment.
+		return deferred || undeferred
+	case "due_set":
+		return task.Due != nil && headline == prefix+"due "+formatMoment(task.Due)
+	case "due_cleared":
+		return headline == prefix+"due date cleared"
 	default:
 		return false
 	}
