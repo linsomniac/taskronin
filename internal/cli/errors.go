@@ -89,14 +89,14 @@ func quoteArgs(argv []string) string {
 func (e *env) fail(err error) int {
 	code := exitCode(err)
 	p := problemFor(err)
+	if e.draftPath != "" {
+		defer e.errorLine("tkr: your draft is at %s", e.draftPath)
+	}
 	if e.jsonOut {
 		if encodeErr := json.NewEncoder(e.out).Encode(p); encodeErr != nil {
 			e.errorLine("tkr: write problem: %s", encodeErr)
 		}
 		return code
-	}
-	if e.draftPath != "" {
-		defer e.errorLine("tkr: your draft is at %s", e.draftPath)
 	}
 	var unknown *client.OutcomeUnknownError
 	switch {
