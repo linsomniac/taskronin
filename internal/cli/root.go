@@ -102,20 +102,14 @@ func (e *env) clientConfig() (*config.Client, error) {
 	if e.ccfg != nil {
 		return e.ccfg, nil
 	}
-	cfg, err := config.LoadClient(e.paths.ClientConfig, e.paths)
-	if err != nil {
-		return nil, tokenConfigError(err)
-	}
-	if e.socket != "" {
-		cfg.Socket = e.socket
-	}
-	if e.tokenFile != "" {
-		cfg.TokenFile = e.tokenFile
-	}
+	overrides := config.ClientOverrides{Socket: e.socket, TokenFile: e.tokenFile}
 	if e.colorSet {
-		cfg.Color = e.color
+		overrides.Color = e.color
 	}
-	if err := config.ValidateClient(cfg); err != nil {
+	// AIDEV-NOTE: validate only after flags replace defaults/config values;
+	// otherwise --token-file cannot recover from a rejected configured token.
+	cfg, err := config.LoadClientWithOverrides(e.paths.ClientConfig, e.paths, overrides)
+	if err != nil {
 		return nil, tokenConfigError(err)
 	}
 	e.ccfg = cfg

@@ -4,15 +4,18 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/sys/unix"
 
 	"taskronin/internal/api"
 	"taskronin/internal/auth"
@@ -114,6 +117,12 @@ func writeJSON(t *testing.T, w io.Writer, v any) {
 
 func init() {
 	register(func(e *env) *cobra.Command {
+		return &cobra.Command{Use: "__test-confirm", Hidden: true, RunE: func(_ *cobra.Command, _ []string) error {
+			_, err := e.offlineEnv().Confirm("Continue?", false)
+			return err
+		}}
+	})
+	register(func(e *env) *cobra.Command {
 		return &cobra.Command{Use: "__test-clock", Hidden: true, RunE: func(cmd *cobra.Command, _ []string) error {
 			if envFrom(cmd) != e {
 				return usagef("wrong command environment")
@@ -160,4 +169,53 @@ func canceledRun(t *testing.T, s sysDeps) int {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	return run(ctx, []string{"__test-clock"}, strings.NewReader(""), io.Discard, io.Discard, s)
+}
+
+func terminalPair(t *testing.T) (master, slave *os.File) {
+	t.Helper()
+	master, err := os.OpenFile("/dev/ptmx", os.O_RDWR|unix.O_NOCTTY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = master.Close() })
+	fd := int(master.Fd())
+	if err := unix.IoctlSetPointerInt(fd, unix.TIOCSPTLCK, 0); err != nil {
+		t.Fatal(err)
+	}
+	number, err := unix.IoctlGetInt(fd, unix.TIOCGPTN)
+	if err != nil {
+		t.Fatal(err)
+	}
+	slave, err = os.OpenFile(fmt.Sprintf("/dev/pts/%d", number), os.O_RDWR|unix.O_NOCTTY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = slave.Close() })
+	return master, slave
+}
+
+// promptOutput permits waiting for an actual terminal prompt without racing
+// the command's output or relying on a scheduling delay.
+type promptOutput struct {
+	mu     sync.Mutex
+	buf    bytes.Buffer
+	prompt string
+	seen   chan struct{}
+	once   sync.Once
+}
+
+func (w *promptOutput) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	n, err := w.buf.Write(p)
+	if strings.Contains(w.buf.String(), w.prompt) {
+		w.once.Do(func() { close(w.seen) })
+	}
+	return n, err
+}
+
+func (w *promptOutput) String() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.String()
 }

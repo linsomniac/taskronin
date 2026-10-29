@@ -1,13 +1,19 @@
 package cli
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 
 	"taskronin/internal/api"
 	"taskronin/internal/buildinfo"
@@ -150,5 +156,173 @@ func TestUsageAndCompletion(t *testing.T) {
 	out, stderr, code := runCLI(t, s, "", "completion", "bash")
 	if code != 0 || stderr != "" || !strings.Contains(out, "bash completion") {
 		t.Fatalf("%d %q %q", code, out, stderr)
+	}
+}
+
+func TestClientOverridesBeforeValidation(t *testing.T) {
+	for _, source := range []string{"default", "config"} {
+		for _, field := range []string{"socket", "token_file"} {
+			t.Run(source+"/"+field, func(t *testing.T) {
+				s, p := testSys(t)
+				socket, token := fakeAPI(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					writeJSON(t, w, api.Clock{Today: civil.MustDate("2026-10-28")})
+				}))
+				bad, target := p.OwnerToken, token
+				if field == "socket" {
+					bad, target = p.Socket, socket
+				}
+				if source == "config" {
+					bad = filepath.Join(s.Home, "invalid")
+					if err := os.MkdirAll(p.ConfigDir, 0o700); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(p.ClientConfig, fmt.Appendf(nil, "%s = %q\n", field, bad), 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if err := os.MkdirAll(filepath.Dir(bad), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(target, bad); err != nil {
+					t.Fatal(err)
+				}
+				out, stderr, code := runCLI(t, s, "", "--socket", socket, "--token-file", token, "__test-clock")
+				if code != 0 || out != "" || stderr != "" {
+					t.Fatalf("override: %d %q %q", code, out, stderr)
+				}
+			})
+		}
+	}
+}
+
+func TestTerminalCancellation(t *testing.T) {
+	for _, kind := range []string{"password", "confirmation", "password-ctrl-c"} {
+		t.Run(kind, func(t *testing.T) {
+			s, p := testSys(t)
+			for _, key := range []string{"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR"} {
+				t.Setenv(key, s.Getenv(key))
+			}
+			master, slave := terminalPair(t)
+			before, err := unix.IoctlGetTermios(int(slave.Fd()), unix.TCGETS)
+			if err != nil {
+				t.Fatal(err)
+			}
+			prompt := "New password: "
+			args := []string{"init", "--no-systemd", "--yes", "--timezone", "America/Denver"}
+			if kind == "confirmation" {
+				prompt, args = "Continue?", []string{"__test-confirm"}
+			}
+			stderr := &promptOutput{prompt: prompt, seen: make(chan struct{})}
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			done := make(chan int, 1)
+			go func() { defer close(done); done <- Main(ctx, args, slave, io.Discard, stderr) }()
+			t.Cleanup(func() {
+				cancel()
+				_, _ = master.Write([]byte("\n\n"))
+				select {
+				case <-done:
+				case <-time.After(2 * time.Second):
+					t.Error("terminal reader did not stop")
+				}
+			})
+			select {
+			case <-stderr.seen:
+			case <-time.After(2 * time.Second):
+				t.Fatal("terminal prompt did not appear")
+			}
+			if kind == "password-ctrl-c" {
+				if _, err := master.Write([]byte{3}); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				cancel()
+			}
+			select {
+			case code := <-done:
+				if code != 130 {
+					t.Fatalf("exit %d, stderr %q", code, stderr.String())
+				}
+			case <-time.After(time.Second):
+				// Release the old blocking implementation so the RED run leaves
+				// neither a reader goroutine nor altered terminal state behind.
+				cancel()
+				_, _ = master.Write([]byte("\n\n"))
+				select {
+				case <-done:
+				case <-time.After(2 * time.Second):
+					t.Fatal("could not release terminal reader")
+				}
+				t.Fatal("cancellation did not unblock terminal input within 1s")
+			}
+			after, err := unix.IoctlGetTermios(int(slave.Fd()), unix.TCGETS)
+			if err != nil || *after != *before {
+				t.Fatalf("terminal state not restored: %v", err)
+			}
+			if _, err := os.Stat(p.DB); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("interrupted init published DB: %v", err)
+			}
+		})
+	}
+}
+
+func TestTerminalPasswordDoesNotEchoOrLoseInput(t *testing.T) {
+	s, _ := testSys(t)
+	for _, key := range []string{"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR"} {
+		t.Setenv(key, s.Getenv(key))
+	}
+	master, slave := terminalPair(t)
+	before, err := unix.IoctlGetTermios(int(slave.Fd()), unix.TCGETS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stderr := &promptOutput{prompt: "New password: ", seen: make(chan struct{})}
+	done := make(chan int, 1)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	go func() {
+		defer close(done)
+		done <- Main(ctx, []string{"init", "--no-systemd", "--yes", "--timezone", "America/Denver"}, slave, io.Discard, stderr)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		_, _ = master.Write([]byte("\n\n"))
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Error("terminal reader did not stop")
+		}
+	})
+	select {
+	case <-stderr.seen:
+	case <-time.After(2 * time.Second):
+		t.Fatal("password prompt did not appear")
+	}
+	if _, err := master.Write([]byte(testutil.Password + "\n" + testutil.Password + "\n")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case code := <-done:
+		if code != 0 {
+			t.Fatalf("exit %d, stderr %q", code, stderr.String())
+		}
+	case <-time.After(5 * time.Second):
+		cancel()
+		t.Fatal("password reader lost buffered input")
+	}
+	after, err := unix.IoctlGetTermios(int(slave.Fd()), unix.TCGETS)
+	if err != nil || *after != *before {
+		t.Fatalf("terminal state not restored: %v", err)
+	}
+	if strings.Contains(stderr.String(), testutil.Password) {
+		t.Fatal("password echoed to output")
+	}
+	masterFD := int(master.Fd())
+	if err := unix.SetNonblock(masterFD, true); err != nil {
+		t.Fatal(err)
+	}
+	var echo [256]byte
+	if n, err := unix.Read(masterFD, echo[:]); n > 0 || !errors.Is(err, unix.EAGAIN) {
+		t.Fatalf("unexpected terminal echo: %d bytes, %v", n, err)
 	}
 }

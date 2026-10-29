@@ -29,9 +29,24 @@ func LoadServer(path string) (*Server, error) {
 // LoadClient strictly decodes over defaults, or uses just those defaults if the
 // file is missing. In either case the resulting configuration is validated.
 func LoadClient(path string, p Paths) (*Client, error) {
+	return LoadClientWithOverrides(path, p, ClientOverrides{})
+}
+
+// LoadClientWithOverrides validates the effective configuration, allowing a
+// caller to replace an unusable configured path without using that path first.
+func LoadClientWithOverrides(path string, p Paths, overrides ClientOverrides) (*Client, error) {
 	wire := DefaultClient(p).tomlConfig()
 	if err := decodeConfig(path, &wire); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
+	}
+	if overrides.Socket != "" {
+		wire.Socket = overrides.Socket
+	}
+	if overrides.TokenFile != "" {
+		wire.TokenFile = overrides.TokenFile
+	}
+	if overrides.Color != "" {
+		wire.Color = overrides.Color
 	}
 	c, err := wire.client()
 	if err != nil {

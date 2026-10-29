@@ -18,6 +18,12 @@ type Client struct {
 	} `toml:"mcp"`
 }
 
+// ClientOverrides contains CLI flags that replace decoded values before
+// validation. Empty strings leave the configured value or default unchanged.
+type ClientOverrides struct {
+	Socket, TokenFile, Color string
+}
+
 // TokenFileError identifies token path failures during configuration validation,
 // before the client can check the credential file itself.
 type TokenFileError struct {
