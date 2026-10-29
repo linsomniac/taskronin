@@ -203,3 +203,12 @@ func (c *Client) Resend(ctx context.Context, p PendingRequest) (*ResendResult, e
 	}
 	return out, nil
 }
+
+// Age reports how long a request has been pending, using the store's clock.
+func (s *PendingStore) Age(p PendingRequest) time.Duration {
+	clk := s.Clock
+	if clk == nil {
+		clk = clock.Real{}
+	}
+	return clk.Now().Sub(p.CreatedAt)
+}
