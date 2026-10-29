@@ -114,13 +114,18 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		s.Getenv = func(string) string { return "" }
 	}
 	e := &env{ctx: ctx, argv: append([]string(nil), args...), in: stdin, out: stdout, err: stderr, sys: s}
+	root := newRoot(e)
+	if e.tryShortStatus(root, args) {
+		return 0
+	}
 	var err error
 	e.paths, err = config.DefaultPaths(s.Getenv, s.Home)
 	if err != nil {
 		return e.fail(err)
 	}
-	root := newRoot(e)
-	root.SetArgs(args)
+	// A nil slice makes Cobra fall back to the process arguments. The injected
+	// CLI invocation may intentionally be empty (the dashboard).
+	root.SetArgs(append([]string{}, args...))
 	if _, err := root.ExecuteContextC(e.ctx); err != nil {
 		if !e.executing {
 			err = usagef("%s", err)

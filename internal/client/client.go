@@ -24,6 +24,7 @@ type Options struct {
 	TokenFile string
 	Channel   string
 	Timeout   time.Duration
+	NoRetry   bool // suppress retries and automatic generation refresh
 	Pending   *PendingStore
 	NewKey    func() string
 	Clock     clock.Clock

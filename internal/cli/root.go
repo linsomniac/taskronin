@@ -63,7 +63,7 @@ func newRoot(e *env) *cobra.Command {
 	root := &cobra.Command{
 		Use: "tkr", Short: "Taskronin task manager", SilenceUsage: true, SilenceErrors: true,
 		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
+		RunE: func(_ *cobra.Command, _ []string) error { return e.today() },
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 			e.executing = true
 			e.colorSet = cmd.Flags().Changed("color")

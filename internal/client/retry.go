@@ -39,6 +39,7 @@ type call struct {
 // do owns the total budget, including identity lookup, backoff and body reads.
 // The returned response supplies status/headers; its body has been closed.
 func (c *Client) do(ctx context.Context, k call, out any) (*http.Response, error) {
+	k.NoRetry = k.NoRetry || c.opts.NoRetry
 	budget := k.Budget
 	if budget == 0 {
 		budget = c.opts.Timeout
@@ -118,7 +119,7 @@ func (c *Client) do(ctx context.Context, k call, out any) (*http.Response, error
 				return resp, fmt.Errorf("HTTP %d: decode problem: %w", resp.StatusCode, err)
 			}
 			problem := &ProblemError{Status: resp.StatusCode, Problem: p}
-			if resp.StatusCode == http.StatusPreconditionFailed && problem.Code() == domain.CodeGenerationMismatch {
+			if !k.NoRetry && resp.StatusCode == http.StatusPreconditionFailed && problem.Code() == domain.CodeGenerationMismatch {
 				_, _ = c.RefreshGeneration(ctx)
 				return resp, problem
 			}

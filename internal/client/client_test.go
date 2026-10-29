@@ -360,6 +360,34 @@ func TestReadNeverPendingAndNoRetryPolicy(t *testing.T) {
 	}
 }
 
+func TestStatusNoRetryOption(t *testing.T) {
+	for _, failure := range []string{"transport", "busy", "generation mismatch"} {
+		t.Run(failure, func(t *testing.T) {
+			base, rec := newFake(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				switch failure {
+				case "transport":
+					dropResponse(t, w)
+				case "busy":
+					w.Header().Set("Retry-After", "0")
+					writeProblem(w, http.StatusServiceUnavailable, domain.CodeBusy)
+				case "generation mismatch":
+					writeProblem(w, http.StatusPreconditionFailed, domain.CodeGenerationMismatch)
+				}
+			}))
+			opts := base.opts
+			opts.NoRetry = true
+			c, err := New(opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, _, _, err = c.Status(t.Context(), "")
+			if err == nil || len(rec.at("/api/v1/status")) != 1 || len(rec.at("/api/v1/whoami")) != 0 {
+				t.Fatalf("err=%v status calls=%d identity calls=%d", err, len(rec.at("/api/v1/status")), len(rec.at("/api/v1/whoami")))
+			}
+		})
+	}
+}
+
 func TestViewsAndConfig(t *testing.T) {
 	c, rec := newFake(t, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if req.URL.Path == "/api/v1/clock" {
