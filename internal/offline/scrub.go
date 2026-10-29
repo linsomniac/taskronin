@@ -41,6 +41,10 @@ type ScrubOptions struct{ Check, Resume, KeepRecoveryFiles, Yes bool }
 //     scrub.journal, and only then CleanupTemps.
 //  3. OpenLedger once (BF26) -> replay live + confirmed checkpoint -> prescrub
 //     snapshot (taken AFTER the live scrub, so it is clean) -> scrubSets.
+//     A set judged clean by the logical replay but whose ORIGINAL -wal/-shm is
+//     non-empty is NOT clean (superseded WAL frames may hold purged text): it
+//     is reported "contains" under --check and rewritten through the swap
+//     otherwise, which removes the sidecars.
 //  4. Completion lines are appended LAST, only when every set is clean/rewritten,
 //     the ledger is healthy and CleanRecoveryFiles returned a mode. Any earlier
 //     exit leaves the records pending so the next run finishes the job.
@@ -211,6 +215,21 @@ func (e *Env) completeScrub(ctx context.Context, ledger *backup.Ledger, health b
 	return nil
 }
 
+// hasSidecarBytes reports whether the ORIGINAL set has a non-empty -wal or -shm.
+// The staged copy had its WAL recovered and checkpointed away, so a logical
+// "no change" says nothing about superseded frames still in those files.
+func hasSidecarBytes(path string) bool {
+	for _, suffix := range []string{"-wal", "-shm"} {
+		// Any stat error other than "absent" is treated as present: rewriting is the safe side.
+		if fi, err := os.Lstat(path + suffix); err == nil && (fi.Size() > 0 || !fi.Mode().IsRegular()) {
+			return true
+		} else if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return true
+		}
+	}
+	return false
+}
+
 // scrubSets is A§12.7 steps 5-6 over every snapshot and pre-restore/pre-import
 // set (also used by purge). Paths in skip (the fresh prescrub snapshot) are not
 // visited. It stops at the first failure that leaves a journal; other failures
@@ -328,7 +347,7 @@ func (e *Env) scrubOne(ctx context.Context, recs []backup.LedgerRecord, path str
 	if err != nil {
 		return "", err
 	}
-	if res.NoChange {
+	if res.NoChange && !hasSidecarBytes(path) {
 		return scrubClean, nil
 	}
 	if check {

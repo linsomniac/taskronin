@@ -534,7 +534,8 @@ func TestScrubDamagedLedger(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := file.WriteString("{\"v\":1,\"rec\":\"zz\",\"state\":\"pending\",\"sum\":\"bad\"}\n"); err != nil {
+	// A well-formed purge of task 2 with a wrong checksum must never be applied.
+	if _, err := file.WriteString("{\"v\":1,\"rec\":\"zz\",\"at\":1,\"state\":\"pending\",\"tasks\":[2],\"sum\":\"bad\"}\n"); err != nil {
 		t.Fatal(err)
 	}
 	if err := file.Close(); err != nil {
@@ -550,6 +551,9 @@ func TestScrubDamagedLedger(t *testing.T) {
 	requireNoSecret(t, f.p1)
 	if len(completeLines(ledgerRecords(t, f.srv))) != 0 {
 		t.Fatal("complete line appended to a damaged ledger")
+	}
+	if got := queryStrings(t, f.s1, "SELECT title FROM tasks WHERE id = 2"); !slices.Equal(got, []string{"other"}) {
+		t.Fatalf("a bad-checksum ledger line was applied: task 2 title = %q", got)
 	}
 	if out := f.e.Out.(*bytes.Buffer).String(); !strings.Contains(out, "--repair-ledger") {
 		t.Fatalf("output lacks the repair hint: %q", out)
@@ -728,4 +732,49 @@ func TestScrubResumeAtEveryStep(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestScrubCleanSetWithSidecar: a set whose logical content is already clean but
+// whose original -wal holds purged bytes must be reported by --check and rewritten.
+func TestScrubCleanSetWithSidecar(t *testing.T) {
+	f := scrubFixture(t)
+	if _, err := offline.ScrubBackups(t.Context(), f.e, offline.ScrubOptions{Yes: true}); err != nil {
+		t.Fatal(err)
+	}
+	dir := f.srv.Paths.DB + ".pre-restore-20261029T000000Z"
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	p2 := filepath.Join(dir, "taskronin.db")
+	copyFile(t, f.s1, p2) // logically clean after the first scrub
+	// SQLite ignores a WAL with a bad header, but its bytes are still on disk.
+	stale := append(bytes.Repeat([]byte{0}, 64), []byte(secretTitle+secretNote)...)
+	if err := os.WriteFile(p2+"-wal", stale, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	hash := fileHash(t, p2+"-wal")
+	results, err := offline.ScrubBackups(t.Context(), f.e, offline.ScrubOptions{Check: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireStatus(t, results, p2, "contains")
+	requireStatus(t, results, f.s1, "clean")
+	if fileHash(t, p2+"-wal") != hash {
+		t.Fatal("check mode changed the sidecar")
+	}
+	results, err = offline.ScrubBackups(t.Context(), f.e, offline.ScrubOptions{Yes: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireStatus(t, results, p2, "rewritten")
+	requireNoSecret(t, p2)
+	requireNoSecretAnywhere(t, f.srv)
+	if _, err := os.Stat(p2 + "-wal"); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("stale WAL survived: %v", err)
+	}
+	results, err = offline.ScrubBackups(t.Context(), f.e, offline.ScrubOptions{Check: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireStatus(t, results, p2, "clean")
 }
