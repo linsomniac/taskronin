@@ -98,10 +98,13 @@ func (c *Client) attempt(ctx context.Context, k call, body []byte, key, generati
 		return nil, nil, tx.sent(), err
 	}
 	defer func() { _ = resp.Body.Close() }()
+	// AIDEV-NOTE: a response proves transmission even if the write goroutine
+	// has not yet updated countingConn. Body or destination errors are then
+	// outcome-unknown, never not-sent.
 	if k.Stream != nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		_, err := io.Copy(k.Stream, resp.Body)
-		return resp, nil, tx.sent(), err
+		return resp, nil, true, err
 	}
 	data, err := io.ReadAll(resp.Body)
-	return resp, data, tx.sent(), err
+	return resp, data, true, err
 }

@@ -31,8 +31,9 @@ type call struct {
 	Mut          Mut // used only by callKeyed
 	Budget       time.Duration
 	IfNoneMatch  string
-	Stream       io.Writer // successful response bodies stream directly to this writer
-	NoRetry      bool      // BF22: status --short must make exactly one attempt
+	Stream       io.Writer       // successful response bodies stream directly to this writer
+	NoRetry      bool            // BF22: status --short must make exactly one attempt
+	Saved        *PendingRequest // guarded resend snapshot; never persisted again
 }
 
 // do owns the total budget, including identity lookup, backoff and body reads.
@@ -45,7 +46,9 @@ func (c *Client) do(ctx context.Context, k call, out any) (*http.Response, error
 	ctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 	var body []byte
-	if k.Body != nil {
+	if k.Saved != nil {
+		body = k.Saved.Body
+	} else if k.Body != nil {
 		var err error
 		body, err = json.Marshal(k.Body)
 		if err != nil {
@@ -54,13 +57,19 @@ func (c *Client) do(ctx context.Context, k call, out any) (*http.Response, error
 	}
 	var key string
 	var who api.WhoAmI
-	if k.Kind == callKeyed {
+	if k.Saved != nil {
+		// AIDEV-NOTE: pin a guarded resend to its original identity and bytes.
+		// Re-reading the shared identity cache here could use a newer generation;
+		// saving a subsequent failure would incorrectly reset the expiry window.
+		key = k.Saved.Key
+		who = api.WhoAmI{Generation: k.Saved.Generation, Actor: k.Saved.Actor}
+	} else if k.Kind == callKeyed {
 		key = k.Mut.Key
 		if key == "" {
 			key = c.opts.NewKey()
 		}
 	}
-	if k.Kind != callRead {
+	if k.Kind != callRead && k.Saved == nil {
 		var err error
 		who, err = c.who(ctx, false)
 		if err != nil {
@@ -187,7 +196,7 @@ func (c *Client) failed(k call, body []byte, key string, who api.WhoAmI, sent bo
 		return fmt.Errorf("%w: %w", ErrNotSent, err)
 	}
 	unknown := &OutcomeUnknownError{Key: key, Err: err}
-	if k.Kind == callKeyed && c.opts.Pending != nil {
+	if k.Kind == callKeyed && k.Saved == nil && c.opts.Pending != nil {
 		p := PendingRequest{Key: key, Method: k.Method, Path: k.Path, IfMatch: k.Mut.IfMatch, Generation: who.Generation, Actor: who.Actor, Body: body}
 		if saveErr := c.opts.Pending.Save(p); saveErr != nil {
 			unknown.Err = errors.Join(err, saveErr)

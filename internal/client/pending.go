@@ -1,10 +1,16 @@
 package client
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
+	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"time"
 
 	"taskronin/internal/api"
@@ -13,7 +19,7 @@ import (
 )
 
 // ResendResult holds exactly one successful keyed response: an operation or
-// revoked token metadata. Task 18's Resend returns *ResendResult.
+// revoked token metadata.
 // AIDEV-NOTE: BF18 requires typed revocation recovery; it cannot be decoded as
 // OpResponse. CLI pending retry must render whichever field is populated.
 type ResendResult struct {
@@ -51,6 +57,12 @@ func (s *PendingStore) Save(p PendingRequest) error {
 		clk = clock.Real{}
 	}
 	p.CreatedAt = clk.Now()
+	return s.write(p.Key, p)
+}
+
+// write preserves creation time when updating an existing pending request.
+// Callers validate key before using it as a filename.
+func (s *PendingStore) write(key string, p PendingRequest) error {
 	data, err := json.Marshal(p)
 	if err != nil {
 		return fmt.Errorf("write pending request: encode: %w", err)
@@ -67,8 +79,127 @@ func (s *PendingStore) Save(p PendingRequest) error {
 	if !info.IsDir() || info.Mode().Perm() != 0o700 {
 		return fmt.Errorf("write pending request: directory %s must have mode 0700 and not be a symlink", s.Dir)
 	}
-	if err := fsutil.WriteFileAtomic(filepath.Join(s.Dir, p.Key+".json"), data, 0o600); err != nil {
+	if err := fsutil.WriteFileAtomic(filepath.Join(s.Dir, key+".json"), data, 0o600); err != nil {
 		return fmt.Errorf("write pending request: %w", err)
 	}
 	return nil
+}
+
+// List returns pending requests ordered by creation time, oldest first.
+// A missing pending directory is an empty store.
+func (s *PendingStore) List() ([]PendingRequest, error) {
+	entries, err := os.ReadDir(s.Dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("list pending requests: %w", err)
+	}
+	var pending []PendingRequest
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+		p, err := readPending(filepath.Join(s.Dir, entry.Name()))
+		if err != nil {
+			return nil, err
+		}
+		pending = append(pending, p)
+	}
+	slices.SortStableFunc(pending, func(a, b PendingRequest) int {
+		return a.CreatedAt.Compare(b.CreatedAt)
+	})
+	return pending, nil
+}
+
+func readPending(path string) (PendingRequest, error) {
+	var p PendingRequest
+	if err := fsutil.CheckPrivate(path); err != nil {
+		return p, fmt.Errorf("read pending request: %w", err)
+	}
+	data, err := os.ReadFile(path) //nolint:gosec // G304: pending files under the user's state dir
+	if err != nil {
+		return p, fmt.Errorf("read pending request: %w", err)
+	}
+	if err := json.Unmarshal(data, &p); err != nil {
+		return p, fmt.Errorf("decode pending request %s: %w", path, err)
+	}
+	return p, nil
+}
+
+func (s *PendingStore) path(key string) (string, error) {
+	if key == "" || key == "." || key == ".." || filepath.Base(key) != key {
+		return "", fmt.Errorf("pending request: invalid key")
+	}
+	return filepath.Join(s.Dir, key+".json"), nil
+}
+
+// MarkFailed records a definitive failure without replacing the saved mutation
+// or restarting its seven-day expiry window.
+func (s *PendingStore) MarkFailed(key, lastError string) error {
+	path, err := s.path(key)
+	if err != nil {
+		return err
+	}
+	p, err := readPending(path)
+	if err != nil {
+		return err
+	}
+	clk := s.Clock
+	if clk == nil {
+		clk = clock.Real{}
+	}
+	p.LastError, p.LastAttemptAt = lastError, clk.Now()
+	return s.write(key, p)
+}
+
+// Discard removes a pending request after success or explicit user discard.
+func (s *PendingStore) Discard(key string) error {
+	path, err := s.path(key)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil {
+		return fmt.Errorf("discard pending request: %w", err)
+	}
+	return fsutil.FsyncDir(s.Dir)
+}
+
+// Resend checks expiry, generation and actor before retrying the saved request.
+// The caller discards a success or marks a definitive failure; Resend never
+// changes pending files, including after another uncertain outcome.
+func (c *Client) Resend(ctx context.Context, p PendingRequest) (*ResendResult, error) {
+	if c.opts.Clock.Now().Sub(p.CreatedAt) > 7*24*time.Hour {
+		return nil, ErrPendingExpired
+	}
+	ctx, cancel := context.WithTimeout(ctx, c.opts.Timeout)
+	defer cancel()
+	generation, err := c.Generation(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if generation != p.Generation {
+		return nil, ErrGenerationMismatch
+	}
+	actor, err := c.Actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if actor != p.Actor {
+		return nil, ErrActorMismatch
+	}
+	k := call{Kind: callKeyed, Method: p.Method, Path: p.Path, Mut: Mut{Key: p.Key, IfMatch: p.IfMatch}, Saved: &p}
+	out := &ResendResult{}
+	var response any
+	if p.Method == http.MethodPost && strings.HasPrefix(p.Path, "/tokens/") && strings.HasSuffix(p.Path, "/revoke") {
+		out.Token = &api.TokenInfo{}
+		response = out.Token
+	} else {
+		out.Op = &api.OpResponse{}
+		response = out.Op
+	}
+	if _, err := c.do(ctx, k, response); err != nil { //nolint:bodyclose // do consumes and closes the response body.
+		return nil, err
+	}
+	return out, nil
 }
