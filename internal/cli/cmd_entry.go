@@ -9,7 +9,6 @@ import (
 
 	"taskronin/internal/api"
 	"taskronin/internal/client"
-	"taskronin/internal/editor"
 	"taskronin/internal/textsafe"
 )
 
@@ -151,51 +150,24 @@ func (e *env) showEntry(entry *api.Entry) error {
 }
 
 func (e *env) editEntry(entry *api.Entry) error {
-	draft, err := (editor.Drafts{Dir: e.paths.DraftsDir}).New(editor.FormatTaskBuffer(entry.Title, entry.Notes))
-	if err != nil {
-		return err
-	}
 	// AIDEV-NOTE: match task editing: retain the draft on every failure,
 	// including a rejected PATCH; discard only unchanged or confirmed edits.
-	defer func() {
-		if draft != nil {
-			e.errorLine("tkr: draft kept at %s", draft.Path)
+	res, err := e.editTitleNotes("entry", entry.Title, entry.Notes, func(title, notes string) (*api.OpResponse, error) {
+		req := api.UpdateEntryRequest{
+			Title: api.Opt[string]{Set: title != entry.Title, V: title},
+			Notes: api.Opt[string]{Set: notes != entry.Notes, V: notes},
 		}
-	}()
-	argv, err := editor.Command(e.ccfg.Editor, e.sys.Getenv)
+		return e.apiClient.UpdateEntry(e.ctx, client.Mut{IfMatch: entry.ETag}, entry.ID, req)
+	})
 	if err != nil {
 		return err
 	}
-	buffer, err := editor.Edit(e.ctx, argv, draft, e.in, e.out, e.err)
-	if err != nil {
-		return err
-	}
-	title, notes, err := editor.ParseTaskBuffer(buffer)
-	if err != nil {
-		return usagef("%s", err)
-	}
-	req := api.UpdateEntryRequest{
-		Title: api.Opt[string]{Set: title != entry.Title, V: title},
-		Notes: api.Opt[string]{Set: notes != entry.Notes, V: notes},
-	}
-	if !req.Title.Set && !req.Notes.Set {
-		if err := draft.Discard(); err != nil {
-			return err
-		}
-		draft = nil
+	if res == nil {
 		if e.jsonOut {
 			return json.NewEncoder(e.out).Encode(entry)
 		}
 		_, err := fmt.Fprintf(e.out, "e%d unchanged\n", entry.ID)
 		return err
 	}
-	res, err := e.apiClient.UpdateEntry(e.ctx, client.Mut{IfMatch: entry.ETag}, entry.ID, req)
-	if err != nil {
-		return err
-	}
-	if err := draft.Discard(); err != nil {
-		return fmt.Errorf("entry updated, but %w", err)
-	}
-	draft = nil
 	return e.outputOp(res, fmt.Sprintf("e%d updated", entry.ID))
 }

@@ -30,53 +30,68 @@ func editCommand(e *env) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			draft, err := (editor.Drafts{Dir: e.paths.DraftsDir}).New(editor.FormatTaskBuffer(task.Title, task.Notes))
-			if err != nil {
-				return err
-			}
-			// AIDEV-NOTE: every failure after creation keeps the draft. Only an
-			// unchanged buffer or a confirmed PATCH permits discarding it.
-			defer func() {
-				if draft != nil {
-					e.errorLine("tkr: draft kept at %s", draft.Path)
+			res, err := e.editTitleNotes("task", task.Title, task.Notes, func(title, notes string) (*api.OpResponse, error) {
+				req := api.UpdateTaskRequest{
+					Title: api.Opt[string]{Set: title != task.Title, V: title},
+					Notes: api.Opt[string]{Set: notes != task.Notes, V: notes},
 				}
-			}()
-			argv, err := editor.Command(e.ccfg.Editor, e.sys.Getenv)
+				return c.UpdateTask(e.ctx, client.Mut{IfMatch: task.ETag}, id, req)
+			})
 			if err != nil {
 				return err
 			}
-			buffer, err := editor.Edit(e.ctx, argv, draft, e.in, e.out, e.err)
-			if err != nil {
-				return err
-			}
-			title, notes, err := editor.ParseTaskBuffer(buffer)
-			if err != nil {
-				return usagef("%s", err)
-			}
-			req := api.UpdateTaskRequest{
-				Title: api.Opt[string]{Set: title != task.Title, V: title},
-				Notes: api.Opt[string]{Set: notes != task.Notes, V: notes},
-			}
-			if !req.Title.Set && !req.Notes.Set {
-				if err := draft.Discard(); err != nil {
-					return err
-				}
-				draft = nil
+			if res == nil {
 				if e.jsonOut {
 					return json.NewEncoder(e.out).Encode(task)
 				}
 				_, err := fmt.Fprintf(e.out, "#%d unchanged\n", id)
 				return err
 			}
-			res, err := c.UpdateTask(e.ctx, client.Mut{IfMatch: task.ETag}, id, req)
-			if err != nil {
-				return err
-			}
-			if err := draft.Discard(); err != nil {
-				return fmt.Errorf("task updated, but %w", err)
-			}
-			draft = nil
 			return e.outputOp(res, fmt.Sprintf("#%d updated", id))
 		},
 	}
+}
+
+// editTitleNotes owns the shared task/entry draft lifecycle. It calls update
+// only for changed content; a nil response with no error means unchanged.
+func (e *env) editTitleNotes(kind, title, notes string, update func(string, string) (*api.OpResponse, error)) (*api.OpResponse, error) {
+	draft, err := (editor.Drafts{Dir: e.paths.DraftsDir}).New(editor.FormatTaskBuffer(title, notes))
+	if err != nil {
+		return nil, err
+	}
+	// AIDEV-NOTE: every failure after creation keeps the draft. Only an
+	// unchanged buffer or a confirmed PATCH permits discarding it.
+	defer func() {
+		if draft != nil {
+			e.errorLine("tkr: draft kept at %s", draft.Path)
+		}
+	}()
+	argv, err := editor.Command(e.ccfg.Editor, e.sys.Getenv)
+	if err != nil {
+		return nil, err
+	}
+	buffer, err := editor.Edit(e.ctx, argv, draft, e.in, e.out, e.err)
+	if err != nil {
+		return nil, err
+	}
+	newTitle, newNotes, err := editor.ParseTaskBuffer(buffer)
+	if err != nil {
+		return nil, usagef("%s", err)
+	}
+	var res *api.OpResponse
+	changed := newTitle != title || newNotes != notes
+	if changed {
+		res, err = update(newTitle, newNotes)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if err := draft.Discard(); err != nil {
+		if changed {
+			return nil, fmt.Errorf("%s updated, but %w", kind, err)
+		}
+		return nil, err
+	}
+	draft = nil
+	return res, nil
 }
