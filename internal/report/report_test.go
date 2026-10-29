@@ -332,6 +332,45 @@ func TestMarkdownEscapes(t *testing.T) {
 	}
 }
 
+func TestMarkdownListPrefixes(t *testing.T) {
+	for _, tt := range []struct {
+		title, want string
+	}{
+		{"- Review DNS", `\- Review DNS`},
+		{"+ Review DNS", `\+ Review DNS`},
+		{"* Review DNS", `\* Review DNS`},
+		{"1. Review DNS", `1\. Review DNS`},
+		{"1) Review DNS", `1\) Review DNS`},
+		{"123456789. Review DNS", `123456789\. Review DNS`},
+		{"0) Review DNS", `0\) Review DNS`},
+		{"   - Review DNS", `   \- Review DNS`},
+		{"   1. Review DNS", `   1\. Review DNS`},
+		{"-", `\-`},
+		{"+", `\+`},
+		{"1.", `1\.`},
+		{"1)", `1\)`},
+		{"svc-cluster (v1.2) + DNS", "svc-cluster (v1.2) + DNS"},
+	} {
+		t.Run(tt.title, func(t *testing.T) {
+			for _, linked := range []bool{false, true} {
+				r := rpt01()
+				r.Days = r.Days[:1]
+				r.Days[0].Lines = []api.ReportLine{{Kind: "work", Title: tt.title}}
+				want := "# Work report Fri 2026-10-23 – Mon 2026-10-26\n\n## Fri 2026-10-23\n\n- " + tt.want
+				if linked {
+					id := int64(42)
+					r.Days[0].Lines[0].TaskID = &id
+					want += " (#42 Set up keycloak postgres cluster)"
+				}
+				want += "\n"
+				if got := rendered(t, Markdown, r); got != want {
+					t.Errorf("linked=%v: Markdown = %q, want %q", linked, got, want)
+				}
+			}
+		})
+	}
+}
+
 type failingWriter struct {
 	err error
 }

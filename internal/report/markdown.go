@@ -37,9 +37,13 @@ func Markdown(w io.Writer, r *api.Report) error {
 }
 
 func markdownText(s string) string {
+	s = textsafe.SanitizeLine(s)
+	// AIDEV-NOTE: A leading bullet or numbered-list delimiter can turn a
+	// title into a nested list. Skip spaces/digits to find that punctuation.
+	marker := len(s) - len(strings.TrimLeft(s, " 0123456789"))
 	var out strings.Builder
-	for _, r := range textsafe.SanitizeLine(s) {
-		if strings.ContainsRune("\\`*_[]<>#|~", r) {
+	for i, r := range s {
+		if strings.ContainsRune("\\`*_[]<>#|~", r) || i == marker && strings.ContainsRune("-+.)", r) {
 			out.WriteByte('\\')
 		}
 		out.WriteRune(r)
