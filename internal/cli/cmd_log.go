@@ -37,6 +37,15 @@ func logCommand(e *env) *cobra.Command {
 				}
 				req.Time = &minute
 			}
+			var draft *editor.Draft
+			if edit {
+				draft, err = e.editLog(&req)
+				if err != nil {
+					return err
+				}
+			}
+			// AIDEV-NOTE: acquire the cached server date only after editing;
+			// the editor may cross midnight before we resolve implicit links.
 			backdated := false
 			if cmd.Flags().Changed("date") {
 				ref, err := e.ref(datespec.Past)
@@ -60,13 +69,6 @@ func logCommand(e *env) *cobra.Command {
 				}
 				if !e.sys.StdinTTY {
 					return usagef("a task id or -N is required when stdin is not a terminal")
-				}
-			}
-			var draft *editor.Draft
-			if edit {
-				draft, err = e.editLog(&req)
-				if err != nil {
-					return err
 				}
 			}
 			c, err := e.client()

@@ -1,11 +1,14 @@
 package cli
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"taskronin/internal/api"
 	"taskronin/internal/civil"
@@ -232,6 +235,104 @@ func TestFOC11_FocusClearedAtMidnight(t *testing.T) {
 		t.Fatalf("exit=%d stdout=%q stderr=%q", code, out, stderr)
 	}
 	assertLogEntry(t, srv, 0, "2026-10-29", "x")
+}
+
+func TestLogEditorCrossesMidnight(t *testing.T) {
+	for _, tc := range []struct {
+		name, date, link, wantDate string
+		wantTask                   int64
+		wantCode                   int
+	}{
+		{"implicit past date", "2026-10-28", "", "", 0, 2},
+		{"implicit today", "today", "", "2026-10-29", 2, 0},
+		{"explicit past date", "2026-10-28", "1", "2026-10-28", 1, 0},
+		{"standalone past date", "2026-10-28", "-N", "2026-10-28", 0, 0},
+		{"explicit yesterday", "yesterday", "1", "2026-10-28", 1, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, sys := logFixture(t)
+			srv.Clock.Set(testutil.Local(t, "2026-10-28 23:59"))
+			logFocus(t, srv)
+			command := filepath.Join(t.TempDir(), "editor")
+			const buffer = "Edited at midnight\n\nRetained notes\n"
+			script := "#!/bin/sh\nprintf 'Edited at midnight\\n\\nRetained notes\\n' > \"$1\"\nprintf 'editor ready\\n'\nread -r finished\n"
+			if err := os.WriteFile(command, []byte(script), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			sys.Getenv = func(key string) string {
+				if key == "VISUAL" || key == "EDITOR" {
+					return command
+				}
+				return os.Getenv(key)
+			}
+			in, release, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			out := &promptOutput{prompt: "editor ready\n", seen: make(chan struct{})}
+			var stderr bytes.Buffer
+			args := []string{"log", "-e", "--date", tc.date}
+			if tc.link != "" {
+				args = append(args, tc.link)
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			done := make(chan int, 1)
+			go func() {
+				defer close(done)
+				done <- run(ctx, args, in, out, &stderr, sys)
+			}()
+			t.Cleanup(func() {
+				cancel()
+				_ = release.Close()
+				_ = in.Close()
+				select {
+				case <-done:
+				case <-time.After(5 * time.Second):
+					t.Error("editor command did not stop")
+				}
+			})
+			select {
+			case <-out.seen:
+			case code := <-done:
+				t.Fatalf("editor did not open: exit=%d stderr=%q", code, stderr.String())
+			}
+			// Advance only while the real editor process is blocked on stdin.
+			srv.Clock.Set(testutil.Local(t, "2026-10-29 00:10"))
+			_, err = srv.Client.SetFocus(t.Context(), client.Mut{}, api.FocusRequest{TaskID: api.Opt[int64]{Set: true, V: 2}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := release.Write([]byte("\n")); err != nil {
+				t.Fatal(err)
+			}
+			code := <-done
+			if code != tc.wantCode {
+				t.Fatalf("exit=%d stdout=%q stderr=%q", code, out.String(), stderr.String())
+			}
+			drafts, err := filepath.Glob(filepath.Join(srv.Paths.DraftsDir, "*.md"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if code != 0 {
+				if len(logEntries(t, srv)) != 0 || len(drafts) != 1 || out.String() != "editor ready\n" ||
+					stderr.String() != "tkr: backdated entries need a task id or -N\ntkr: your draft is at "+drafts[0]+"\n" {
+					t.Fatalf("rejected log: drafts=%v stdout=%q stderr=%q", drafts, out.String(), stderr.String())
+				}
+				got, err := os.ReadFile(drafts[0])
+				if err != nil || string(got) != buffer {
+					t.Fatalf("retained draft=%q, %v", got, err)
+				}
+				return
+			}
+			entry := assertLogEntry(t, srv, tc.wantTask, tc.wantDate, "Edited at midnight")
+			if len(drafts) != 0 || stderr.Len() != 0 || entry.Notes != "Retained notes\n" {
+				t.Fatalf("successful log: drafts=%v stderr=%q entry=%+v", drafts, stderr.String(), entry)
+			}
+			if tc.link == "" && !strings.Contains(out.String(), "→ #2 (focus)\n") {
+				t.Fatalf("missing new day's focus: %q", out.String())
+			}
+		})
+	}
 }
 
 func TestFOC12_NonInteractive(t *testing.T) {
