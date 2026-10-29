@@ -1,0 +1,4 @@
+#1 'Set up keycloak' reopened
+e1 updated
+#1 +reopened
+hint: blocks cancelled by the completion stay cancelled; `tkr undo` of the done op restores them exactly

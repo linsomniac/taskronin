@@ -1,0 +1,488 @@
+package cli
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"testing"
+
+	"taskronin/internal/api"
+	"taskronin/internal/civil"
+	"taskronin/internal/client"
+	"taskronin/internal/testutil"
+)
+
+func captureServer(t *testing.T) (*testutil.Server, sysDeps) {
+	t.Helper()
+	return testutil.StartServer(t, testutil.WithClock("2026-10-28 10:00")), sysDeps{Getenv: os.Getenv}
+}
+
+func captureTask(t *testing.T, srv *testutil.Server, title string) *api.Task {
+	t.Helper()
+	res, err := srv.Client.AddTask(t.Context(), client.Mut{}, api.AddTaskRequest{Title: title})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return res.Task
+}
+
+func captureRun(t *testing.T, sys sysDeps, golden string, args ...string) string {
+	t.Helper()
+	out, stderr, code := runCLI(t, sys, "", args...)
+	if code != 0 || stderr != "" {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, out, stderr)
+	}
+	if golden != "" {
+		testutil.Golden(t, golden, []byte(out))
+	}
+	return out
+}
+
+func TestAddVariants(t *testing.T) {
+	srv, sys := captureServer(t)
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{"add_triage", []string{"Set up keycloak"}},
+		{"add_top", []string{"B", "--top"}},
+		{"add_block", []string{"C", "--block", "13:00-15:00"}},
+		{"add_bottom", []string{"D", "--bottom"}},
+		{"add_after", []string{"E", "--after", "#2"}},
+		{"add_before", []string{"F", "--before", "2"}},
+		{"add_defer", []string{"G", "--defer", "tomorrow"}},
+		{"add_defer_time", []string{"H", "--defer", "fri 9:00"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			captureRun(t, sys, tc.name, append([]string{"add"}, tc.args...)...)
+		})
+	}
+	task, err := srv.Client.GetTask(t.Context(), 8)
+	if err != nil || task.Defer == nil || task.Defer.Date.String() != "2026-10-30" || task.Defer.Time == nil || *task.Defer.Time != 540 {
+		t.Fatalf("defer: %+v, %v", task, err)
+	}
+	page, err := srv.Client.ListTasks(t.Context(), client.TaskQuery{View: "backlog"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []int64
+	for _, task := range page.Items {
+		ids = append(ids, task.ID)
+	}
+	if fmt.Sprint(ids) != "[6 2 5 3 4]" {
+		t.Fatalf("backlog order = %v", ids)
+	}
+}
+
+func TestTRI09_OnePlacementFlag(t *testing.T) {
+	srv, sys := captureServer(t)
+	for _, args := range [][]string{{"add", "x", "--top", "--bottom"}, {"add", "x", "--defer", "tomorrow", "--now"}} {
+		out, stderr, code := runCLI(t, sys, "", args...)
+		if code != 2 || out != "" || !strings.Contains(stderr, "at most one placement flag") {
+			t.Fatalf("exit=%d stdout=%q stderr=%q", code, out, stderr)
+		}
+	}
+	if task := captureTask(t, srv, "first saved task"); task.ID != 1 {
+		t.Fatalf("invalid command saved a task: %+v", task)
+	}
+}
+
+func TestAddQuoteTitle(t *testing.T) {
+	sys, _ := testSys(t)
+	out, stderr, code := runCLI(t, sys, "", "add", "a", "b")
+	if code != 2 || out != "" || !strings.Contains(stderr, "quote your title") {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, out, stderr)
+	}
+}
+
+func TestAddNowInterrupts(t *testing.T) {
+	srv, sys := captureServer(t)
+	captureTask(t, srv, "Set up keycloak")
+	logFocus(t, srv)
+	captureRun(t, sys, "add_now", "add", "Restart stuck pg replica", "--now")
+	status, _, _, err := srv.Client.Status(t.Context(), "")
+	if err != nil || status.Focus == nil || status.Focus.ID != 2 {
+		t.Fatalf("focus = %+v, %v", status, err)
+	}
+}
+
+func TestAddMetadata(t *testing.T) {
+	srv, sys := captureServer(t)
+	captureRun(t, sys, "add_metadata", "add", "Metadata", "--due", "wed 16:00", "-t", "db", "-t", "infra", "-P", "infra.keycloak", "-p", "H")
+	task, err := srv.Client.GetTask(t.Context(), 1)
+	if err != nil || task.Due == nil || task.Due.Date.String() != "2026-11-04" || task.Due.Time == nil || *task.Due.Time != 960 ||
+		task.Project == nil || *task.Project != "infra.keycloak" || task.Priority == nil || *task.Priority != "H" || strings.Join(task.Tags, ",") != "db,infra" {
+		t.Fatalf("metadata = %+v, %v", task, err)
+	}
+}
+
+func TestDoneEcho(t *testing.T) {
+	srv, sys := captureServer(t)
+	captureTask(t, srv, "Set up keycloak")
+	captureRun(t, sys, "done", "done", "1")
+	out, stderr, code := runCLI(t, sys, "", "done", "1", "--date", "tomorrow")
+	if code != 1 || out != "" || stderr == "" {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, out, stderr)
+	}
+}
+
+func TestDoneFlags(t *testing.T) {
+	srv, sys := captureServer(t)
+	captureTask(t, srv, "Set up keycloak")
+	captureTask(t, srv, "Second task")
+	captureRun(t, sys, "done_flags", "done", "#1", "--as", "Add certs", "--log", "Failover tested", "-m", "notes")
+	task, err := srv.Client.GetTask(t.Context(), 1)
+	if err != nil || task.Title != "Add certs" || task.Status != "done" {
+		t.Fatalf("task = %+v, %v", task, err)
+	}
+	entry := assertLogEntry(t, srv, 1, "2026-10-28", "Failover tested")
+	if entry.Kind != "complete" || entry.Notes != "notes" {
+		t.Fatalf("entry = %+v", entry)
+	}
+	captureRun(t, sys, "done_yesterday", "done", "2", "--date", "yesterday")
+}
+
+func TestLIF13_ReopenHint(t *testing.T) {
+	srv, sys := captureServer(t)
+	captureTask(t, srv, "Set up keycloak")
+	captureRun(t, sys, "", "done", "1")
+	captureRun(t, sys, "reopen", "reopen", "1")
+}
+
+func TestReopenRemoveEntry(t *testing.T) {
+	srv, sys := captureServer(t)
+	captureTask(t, srv, "First")
+	captureTask(t, srv, "Second")
+	// AIDEV-NOTE: BF21 requires creating the block before it ends; advance
+	// through real operations instead of constructing an invalid past block.
+	srv.Clock.Set(testutil.Local(t, "2026-10-28 08:00"))
+	_, err := srv.Client.AddTask(t.Context(), client.Mut{}, api.AddTaskRequest{Title: "Third", Place: &api.AddPlacement{
+		How: "block", Block: &api.BlockRequest{Date: civil.MustDate("2026-10-28"), Start: 540, End: 570},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.Clock.Set(testutil.Local(t, "2026-10-28 10:00"))
+	captureRun(t, sys, "", "done", "3")
+	entry := assertLogEntry(t, srv, 3, "2026-10-28", "Third")
+	captureRun(t, sys, "reopen_remove_entry", "reopen", "3", "--remove-entry")
+	deleted, err := srv.Client.GetEntry(t.Context(), entry.ID)
+	if err != nil || deleted.DeletedAt == nil {
+		t.Fatalf("entry = %+v, %v", deleted, err)
+	}
+	task, err := srv.Client.GetTask(t.Context(), 3)
+	if err != nil || task.Status != "open" || len(task.Blocks) != 1 || !task.Blocks[0].Slipped {
+		t.Fatalf("task = %+v, %v", task, err)
+	}
+}
+
+func TestDeleteConfirm(t *testing.T) {
+	srv, sys := captureServer(t)
+	captureTask(t, srv, "Set up keycloak")
+	out, stderr, code := runCLI(t, sys, "", "delete", "1")
+	if code != 2 || out != "" || !strings.Contains(stderr, "use -y to confirm") {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, out, stderr)
+	}
+	captureRun(t, sys, "delete", "delete", "1", "-y")
+	captureRun(t, sys, "undelete", "undelete", "1")
+}
+
+func TestDeleteTTY(t *testing.T) {
+	for _, answer := range []string{"", "n\n", "yes\n", "y\n"} {
+		t.Run(fmt.Sprintf("answer=%q", answer), func(t *testing.T) {
+			srv, sys := captureServer(t)
+			sys.StdinTTY = true
+			captureTask(t, srv, "Set up keycloak")
+			out, stderr, code := runCLI(t, sys, answer, "delete", "1")
+			if code != 0 || stderr != "Delete #1 'Set up keycloak'? [y/N] " {
+				t.Fatalf("exit=%d stdout=%q stderr=%q", code, out, stderr)
+			}
+			task, err := srv.Client.GetTask(t.Context(), 1)
+			confirmed := strings.HasPrefix(answer, "y")
+			if err != nil || (task.DeletedAt != nil) != confirmed || (out != "") != confirmed {
+				t.Fatalf("task = %+v, %v; stdout=%q", task, err, out)
+			}
+		})
+	}
+}
+
+func TestDrop(t *testing.T) {
+	srv, sys := captureServer(t)
+	captureTask(t, srv, "Set up keycloak")
+	captureRun(t, sys, "drop", "drop", "1")
+	task, err := srv.Client.GetTask(t.Context(), 1)
+	if err != nil || task.Status != "dropped" || len(logEntries(t, srv)) != 0 {
+		t.Fatalf("task = %+v, %v", task, err)
+	}
+}
+
+var captureOpID = regexp.MustCompile(`\b[0-9a-f]{8}\b`)
+
+func TestUndoRedo(t *testing.T) {
+	srv, sys := captureServer(t)
+	out, stderr, code := runCLI(t, sys, "", "undo")
+	if code != 6 || out != "" || stderr != "tkr: nothing to undo\n" {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, out, stderr)
+	}
+	captureRun(t, sys, "", "add", "Set up keycloak")
+	for _, verb := range []string{"undo", "redo"} {
+		out := captureRun(t, sys, "", verb)
+		if !strings.HasPrefix(out, map[string]string{"undo": "undone", "redo": "redone"}[verb]+" (op ") || !captureOpID.MatchString(out) {
+			t.Fatalf("%s: %q", verb, out)
+		}
+		testutil.Golden(t, verb, []byte(captureOpID.ReplaceAllString(out, "<opid>")))
+		task, err := srv.Client.GetTask(t.Context(), 1)
+		if err != nil || (task.DeletedAt != nil) != (verb == "undo") {
+			t.Fatalf("task = %+v, %v", task, err)
+		}
+	}
+}
+
+func TestRevert(t *testing.T) {
+	srv, sys := captureServer(t)
+	res, err := srv.Client.AddTask(t.Context(), client.Mut{}, api.AddTaskRequest{Title: "Revert me"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := captureRun(t, sys, "", "revert", *res.OpID)
+	testutil.Golden(t, "revert", []byte(captureOpID.ReplaceAllString(out, "<opid>")))
+	task, err := srv.Client.GetTask(t.Context(), 1)
+	if err != nil || task.DeletedAt == nil {
+		t.Fatalf("task = %+v, %v", task, err)
+	}
+}
+
+func TestFirstRunBeforeInit(t *testing.T) {
+	sys, paths := testSys(t)
+	out, stderr, code := runCLI(t, sys, "", "add", "x")
+	if code != 4 || out != "" || !strings.Contains(stderr, paths.OwnerToken) || !strings.Contains(stderr, "not found — run `tkr init`") ||
+		!strings.Contains(stderr, "nothing was saved. Your command was:\n  tkr add x\n") || strings.Contains(stderr, "panic") {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, out, stderr)
+	}
+}
+
+func TestUnreachableEcho(t *testing.T) {
+	srv, sys := captureServer(t)
+	srv.Stop()
+	out, stderr, code := runCLI(t, sys, "", "add", "Restart stuck pg replica", "--now")
+	want := "tkr: cannot reach the Taskronin server at " + srv.Socket + ": no such file or directory\n" +
+		"tkr: nothing was saved. Your command was:\n  tkr add 'Restart stuck pg replica' --now\n" +
+		"tkr: start it with: systemctl --user start taskronin.socket\n"
+	if code != 3 || out != "" || stderr != want {
+		t.Fatalf("exit=%d stdout=%q stderr=%q; want stderr=%q", code, out, stderr, want)
+	}
+}
+
+func TestCaptureJSON(t *testing.T) {
+	_, sys := captureServer(t)
+	for _, args := range [][]string{
+		{"add", "JSON"}, {"done", "1"}, {"reopen", "1"}, {"drop", "1"},
+		{"delete", "1", "-y"}, {"undelete", "1"}, {"undo"}, {"redo"},
+	} {
+		out := captureRun(t, sys, "", append(args, "--json")...)
+		var res api.OpResponse
+		if err := json.Unmarshal([]byte(out), &res); err != nil || res.OpID == nil || len(res.Effects) == 0 {
+			t.Fatalf("response = %q, %v", out, err)
+		}
+	}
+}
+
+func TestAddEditor(t *testing.T) {
+	for _, name := range []string{"success", "editor failure", "missing editor", "too large", "server refusal", "unreachable"} {
+		t.Run(name, func(t *testing.T) {
+			srv, sys := captureServer(t)
+			dir := t.TempDir()
+			command := filepath.Join(dir, "editor")
+			content := "Notes from editor\nMore notes\n"
+			if name == "too large" {
+				content = strings.Repeat("x", 65537)
+			}
+			buffer := filepath.Join(dir, "buffer")
+			if err := os.WriteFile(buffer, []byte(content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("TKR_CAPTURE_NOTES", buffer)
+			script := "#!/bin/sh\ncp \"$TKR_CAPTURE_NOTES\" \"$1\"\n"
+			if name == "editor failure" {
+				script += "exit 3\n"
+			}
+			if name != "missing editor" {
+				if err := os.WriteFile(command, []byte(script), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				content = ""
+			}
+			sys.Getenv = func(key string) string {
+				if key == "VISUAL" || key == "EDITOR" {
+					return command
+				}
+				return os.Getenv(key)
+			}
+			args := []string{"add", "Title stays", "-e"}
+			if name == "server refusal" {
+				args = append(args, "--before", "999")
+			}
+			if name == "unreachable" {
+				srv.Stop()
+			}
+			out, stderr, code := runCLI(t, sys, "", args...)
+			if name == "unreachable" {
+				srv.Start(t)
+			}
+			drafts, err := filepath.Glob(filepath.Join(srv.Paths.DraftsDir, "*.md"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if name == "success" {
+				task, err := srv.Client.GetTask(t.Context(), 1)
+				if code != 0 || stderr != "" || len(drafts) != 0 || err != nil || task.Title != "Title stays" || task.Notes != content {
+					t.Fatalf("exit=%d stdout=%q stderr=%q drafts=%v task=%+v err=%v", code, out, stderr, drafts, task, err)
+				}
+				return
+			}
+			if code == 0 || out != "" || len(drafts) != 1 || !strings.Contains(stderr, "tkr: your draft is at "+drafts[0]) {
+				t.Fatalf("exit=%d stdout=%q stderr=%q drafts=%v", code, out, stderr, drafts)
+			}
+			got, err := os.ReadFile(drafts[0])
+			if err != nil || string(got) != content {
+				t.Fatalf("draft content lost: %v", err)
+			}
+			if task := captureTask(t, srv, "first saved"); task.ID != 1 {
+				t.Fatal("failed command saved task")
+			}
+		})
+	}
+}
+
+func TestCaptureUsage(t *testing.T) {
+	sys, _ := testSys(t)
+	for _, args := range [][]string{
+		{"add"}, {"add", "x", "--before", "0"}, {"add", "x", "--after", "b1"},
+		{"done"}, {"done", "1", "2"}, {"done", "0"}, {"reopen", "e1"},
+		{"drop", "-1"}, {"delete", "01", "-y"}, {"undelete", "#0"},
+		{"undo", "1"}, {"redo", "1"}, {"revert"}, {"revert", "invalid"},
+	} {
+		out, stderr, code := runCLI(t, sys, "", args...)
+		if code != 2 || out != "" || stderr == "" {
+			t.Fatalf("%v: exit=%d stdout=%q stderr=%q", args, code, out, stderr)
+		}
+	}
+}
+
+func TestCaptureDateValidation(t *testing.T) {
+	srv, sys := captureServer(t)
+	for _, tc := range []struct {
+		args []string
+		code int
+	}{
+		{[]string{"add", "x", "--defer", "next friday"}, 2},
+		{[]string{"add", "x", "--due", ""}, 2},
+		{[]string{"add", "x", "--block", "15:00-13:00"}, 2},
+		{[]string{"add", "x", "--defer", "09:00"}, 1},
+		{[]string{"add", "x", "--due", "yesterday"}, 1},
+		{[]string{"done", "1", "--date", "today 09:00"}, 2},
+	} {
+		out, stderr, code := runCLI(t, sys, "", tc.args...)
+		if code != tc.code || out != "" || stderr == "" {
+			t.Fatalf("%v: exit=%d stdout=%q stderr=%q", tc.args, code, out, stderr)
+		}
+	}
+	if task := captureTask(t, srv, "Weekday completion"); task.ID != 1 {
+		t.Fatal("invalid command saved a task")
+	}
+	out := captureRun(t, sys, "", "done", "1", "--date", "wed")
+	if !strings.Contains(out, "logged Wed 2026-10-28") {
+		t.Fatalf("Past mode resolved weekday incorrectly: %q", out)
+	}
+}
+
+type captureInputFunc func([]byte) (int, error)
+
+func (f captureInputFunc) Read(p []byte) (int, error) { return f(p) }
+
+func TestDeletePrecondition(t *testing.T) {
+	srv, sys := captureServer(t)
+	sys.StdinTTY = true
+	task := captureTask(t, srv, "Original")
+	answer := strings.NewReader("y\n")
+	changed := false
+	in := captureInputFunc(func(p []byte) (int, error) {
+		if !changed {
+			// The CLI already fetched the ETag and displayed the prompt. Change
+			// the real task before confirming to exercise the stale precondition.
+			_, err := srv.Client.UpdateTask(t.Context(), client.Mut{IfMatch: task.ETag}, task.ID,
+				api.UpdateTaskRequest{Title: api.Opt[string]{Set: true, V: "Changed elsewhere"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			changed = true
+		}
+		return answer.Read(p)
+	})
+	var out, stderr bytes.Buffer
+	code := run(t.Context(), []string{"delete", "1"}, in, &out, &stderr, sys)
+	if code != 6 || out.Len() != 0 || !strings.Contains(stderr.String(), "current: #1 version 2") {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, out.String(), stderr.String())
+	}
+	current, err := srv.Client.GetTask(t.Context(), 1)
+	if err != nil || current.Title != "Changed elsewhere" || current.DeletedAt != nil || current.Version != 2 {
+		t.Fatalf("stale delete was retried: %+v, %v", current, err)
+	}
+}
+
+func TestCaptureEffects(t *testing.T) {
+	var out bytes.Buffer
+	e := &env{out: &out}
+	res := &api.OpResponse{Effects: []api.Effect{
+		{Kind: "deferred", TaskID: 42, To: "2026-10-30 09:00"},
+		{Kind: "undeferred", TaskID: 42},
+		{Kind: "due_set", TaskID: 42, To: "2026-10-31"},
+		{Kind: "due_cleared", TaskID: 42},
+		{Kind: "blocked", BlockID: 7, To: "2026-10-28 13:00-15:00"},
+		{Kind: "block_moved", BlockID: 7, From: "13:00", To: "14:00"},
+		{Kind: "block_cancelled", BlockID: 7, To: "task_closed"},
+		{Kind: "block_resolved", BlockID: 7, To: "done"},
+		{Kind: "outcome_set", BlockID: 7, To: "worked"},
+		{Kind: "slipped", BlockID: 7},
+		{Kind: "unslipped", BlockID: 7},
+		{Kind: "reason_added", TaskID: 42, Reason: "slipped"},
+		{Kind: "reason_removed", TaskID: 42, Reason: "new"},
+		{Kind: "focus_set", TaskID: 42},
+		{Kind: "focus_cleared"},
+		{Kind: "interrupted", From: "41"},
+		{Kind: "retitled", TaskID: 42, From: "Old", To: "New"},
+		{Kind: "entry_logged", EntryID: 9},
+		{Kind: "entry_updated", EntryID: 9},
+		{Kind: "entry_relinked", EntryID: 9},
+		{Kind: "entry_deleted", EntryID: 9},
+		{Kind: "entry_restored", EntryID: 9},
+		{Kind: "reverted", From: "abcdef12"},
+		{Kind: "future_kind", TaskID: 42},
+	}}
+	e.printOp(res, "Effects")
+	testutil.Golden(t, "effects", out.Bytes())
+}
+
+func TestCaptureEffectsSanitized(t *testing.T) {
+	var out bytes.Buffer
+	e := &env{out: &out}
+	res := &api.OpResponse{Effects: []api.Effect{{Kind: "retitled", TaskID: 1, From: "Old\nline", To: "New\tname\x1b[31m"}}}
+	e.printOp(res, "Headline\r\x1b[2J")
+	want := "Headline��[2J\n#1 retitled 'Old�line' → 'New�name�[31m'\n"
+	if out.String() != want {
+		t.Fatalf("unsanitized output: %q; want %q", out.String(), want)
+	}
+	// A title that mentions another effect must not suppress it.
+	out.Reset()
+	res.Task = &api.Task{ID: 1, Title: "completed; ✓ logged b7 slipped"}
+	res.Effects = []api.Effect{{Kind: "created", TaskID: 1}, {Kind: "slipped", TaskID: 1, BlockID: 7}, {Kind: "reason_added", TaskID: 2, Reason: "new"}}
+	e.printOp(res, taskHeadline(res.Task, "added to triage (new)"))
+	if !strings.HasSuffix(out.String(), "b7 slipped\n#2 +new\n") || strings.Contains(out.String(), "#1 created") {
+		t.Fatalf("incorrect effect suppression: %q", out.String())
+	}
+}

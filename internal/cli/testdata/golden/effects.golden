@@ -1,0 +1,25 @@
+Effects
+#42 deferred to 2026-10-30 09:00
+#42 no longer deferred
+#42 due 2026-10-31
+#42 due cleared
+b7 blocked 2026-10-28 13:00-15:00
+b7 moved 13:00 → 14:00
+b7 cancelled (task_closed)
+b7 resolved done
+b7 outcome worked
+b7 slipped
+b7 no longer counts as slipped
+#42 +slipped
+#42 −new
+focus → #42
+focus cleared
+interrupted #41
+#42 retitled 'Old' → 'New'
+e9 logged
+e9 updated
+e9 relinked
+e9 deleted
+e9 restored
+reverted op abcdef12
+#42 future_kind
