@@ -163,6 +163,10 @@ func (e *env) parseExpiry(s string) (api.Opt[api.Time], error) {
 		if m[2] == "d" {
 			unit = 24 * time.Hour
 		}
+		// Bound the product so it cannot overflow time.Duration.
+		if n == 0 || time.Duration(n) > 100*365*24*time.Hour/unit {
+			return api.Opt[api.Time]{}, usagef("--expires duration must be between 1h and 100 years")
+		}
 		at = clock.Now.Add(time.Duration(n) * unit)
 	} else if date, dateErr := civil.ParseDate(s); dateErr == nil {
 		zone, err := civil.LoadZone(clock.Timezone)
@@ -284,8 +288,17 @@ func tokenRevokeCommand(e *env) *cobra.Command {
 // findToken matches a numeric ID first, then a name, among live tokens.
 func findToken(tokens []api.TokenInfo, ref string) (api.TokenInfo, error) {
 	id, idErr := strconv.ParseInt(ref, 10, 64)
+	// AIDEV-NOTE: two passes. A digit-only name is legal, so a single pass could
+	// let one token's name shadow another token's numeric ID and revoke the wrong one.
+	if idErr == nil {
+		for _, t := range tokens {
+			if t.RevokedAt == nil && t.ID == id {
+				return t, nil
+			}
+		}
+	}
 	for _, t := range tokens {
-		if t.RevokedAt == nil && ((idErr == nil && t.ID == id) || t.Name == ref) {
+		if t.RevokedAt == nil && t.Name == ref {
 			return t, nil
 		}
 	}

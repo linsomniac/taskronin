@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -338,5 +339,104 @@ func TestIDM09_PendingFlow(t *testing.T) {
 	}
 	if out, _, _ := run("pending"); strings.TrimSpace(out) != "no pending requests" {
 		t.Fatalf("empty list=%q", out)
+	}
+}
+
+func TestTokenRevokeIDBeatsDigitName(t *testing.T) {
+	srv, sys := captureServer(t)
+	never := api.Opt[api.Time]{Set: true, Null: true}
+	create := func(name string) int64 {
+		created, err := srv.Client.CreateToken(t.Context(), api.CreateTokenRequest{Name: name, Scopes: "read", ExpiresAt: never})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return created.Token.ID
+	}
+	decoy := create("9") // lower ID, digit-only name
+	for i := 0; ; i++ {
+		id := create(fmt.Sprintf("filler%d", i))
+		if id == 9 {
+			break
+		}
+		if id > 9 {
+			t.Fatalf("token IDs passed 9 (decoy id %d)", decoy)
+		}
+	}
+	if decoy >= 9 {
+		t.Fatalf("decoy id %d must be below 9", decoy)
+	}
+	captureRun(t, sys, "", "token", "revoke", "9", "-y")
+	tokens, err := srv.Client.Tokens(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tok := range tokens {
+		if tok.ID == 9 && tok.RevokedAt == nil {
+			t.Fatal("token with ID 9 was not revoked")
+		}
+		if tok.ID == decoy && tok.RevokedAt != nil {
+			t.Fatal("token named 9 was revoked instead")
+		}
+	}
+	captureRun(t, sys, "", "token", "revoke", "9", "-y") // now only the name matches
+}
+
+func TestTokenExpiryOverflow(t *testing.T) {
+	srv, sys := captureServer(t)
+	for _, d := range []string{"999999d", "0h", "0d"} {
+		if _, stderr, code := runCLI(t, sys, "", "token", "create", "big", "--mcp", "--expires", d); code != 2 {
+			t.Fatalf("%s: exit=%d stderr=%q", d, code, stderr)
+		}
+	}
+	tokens, err := srv.Client.Tokens(t.Context())
+	if err != nil || len(tokens) != 1 {
+		t.Fatalf("token created: %v %v", tokens, err)
+	}
+}
+
+func TestAIChangesRevertPrefix(t *testing.T) {
+	srv, sys := captureServer(t)
+	ai := srv.TokenClient(t, "ai", domain.MCPDefaultScopes, 0, "mcp")
+	for i := range 17 { // pigeonhole: two ops share a first hex digit
+		if _, err := ai.AddTask(t.Context(), client.Mut{}, api.AddTaskRequest{Title: fmt.Sprintf("t%d", i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	page, err := srv.Client.AIChanges(t.Context(), true, client.PageQuery{Limit: 200})
+	if err != nil || len(page.Ops) < 17 {
+		t.Fatalf("ops: %v %v", page, err)
+	}
+	count := map[byte]int{}
+	for _, op := range page.Ops {
+		count[op.OpID[0]]++
+	}
+	var ambiguous string
+	for c, n := range count {
+		if n > 1 {
+			ambiguous = string(c)
+		}
+	}
+	for _, prefix := range []string{ambiguous, "ffffffff"} {
+		if prefix == "ffffffff" && count['f'] > 0 {
+			for _, op := range page.Ops {
+				if strings.HasPrefix(op.OpID, prefix) {
+					t.Skip("test prefix collides with a generated op ID")
+				}
+			}
+		}
+		out, stderr, code := runCLI(t, sys, "", "ai-changes", "--revert", prefix)
+		if code != 2 || out != "" {
+			t.Fatalf("prefix %q: exit=%d stdout=%q stderr=%q", prefix, code, out, stderr)
+		}
+	}
+	if out := captureRun(t, sys, "", "ai-changes", "--all"); strings.Contains(out, "(reverted)") {
+		t.Fatalf("a rejected prefix reverted something: %q", out)
+	}
+	full := page.Ops[0].OpID
+	if out := captureRun(t, sys, "", "ai-changes", "--revert", full); !strings.Contains(out, "reverted") {
+		t.Fatalf("full ID revert=%q", out)
+	}
+	if out := captureRun(t, sys, "", "ai-changes", "--all"); strings.Count(out, "(reverted)") != 1 {
+		t.Fatalf("expected exactly one reverted op: %q", out)
 	}
 }
