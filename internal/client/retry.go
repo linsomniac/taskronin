@@ -73,18 +73,7 @@ func (c *Client) do(ctx context.Context, k call, out any) (*http.Response, error
 		var err error
 		who, err = c.who(ctx, false)
 		if err != nil {
-			// AIDEV-NOTE: uncertainty belongs to the identity read, not the
-			// unattempted mutation. Remove its wrapper before inspecting a
-			// nested problem (such as busy after a dropped identity response).
-			var unknown *OutcomeUnknownError
-			if errors.As(err, &unknown) {
-				err = unknown.Err
-			}
-			var problem *ProblemError
-			if errors.As(err, &problem) {
-				return nil, err
-			}
-			return nil, fmt.Errorf("%w: fetch identity: %w", ErrNotSent, err)
+			return nil, mutationIdentityError(err)
 		}
 	}
 	transportRetries, busyRetries := 0, 0
@@ -162,6 +151,21 @@ func (c *Client) do(ctx context.Context, k call, out any) (*http.Response, error
 		}
 		return resp, nil
 	}
+}
+
+func mutationIdentityError(err error) error {
+	// AIDEV-NOTE: uncertainty belongs to the identity read, not the
+	// unattempted mutation. Remove its wrapper before inspecting a
+	// nested problem (such as busy after a dropped identity response).
+	var unknown *OutcomeUnknownError
+	if errors.As(err, &unknown) {
+		err = unknown.Err
+	}
+	var problem *ProblemError
+	if errors.As(err, &problem) {
+		return err
+	}
+	return fmt.Errorf("%w: fetch identity: %w", ErrNotSent, err)
 }
 
 func (c *Client) wait(ctx context.Context, delay time.Duration) error {

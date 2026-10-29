@@ -176,14 +176,14 @@ func (c *Client) Resend(ctx context.Context, p PendingRequest) (*ResendResult, e
 	defer cancel()
 	generation, err := c.Generation(ctx)
 	if err != nil {
-		return nil, err
+		return nil, mutationIdentityError(err)
 	}
 	if generation != p.Generation {
 		return nil, ErrGenerationMismatch
 	}
 	actor, err := c.Actor(ctx)
 	if err != nil {
-		return nil, err
+		return nil, mutationIdentityError(err)
 	}
 	if actor != p.Actor {
 		return nil, ErrActorMismatch

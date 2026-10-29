@@ -185,6 +185,82 @@ func TestResendIdentityFailure(t *testing.T) {
 	}
 }
 
+func TestResendIdentityTransportFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name                           string
+		busy, cancelBefore, cancelWait bool
+		attempts                       int
+		cause                          error
+	}{
+		{name: "dropped responses", attempts: 3, cause: io.EOF},
+		{name: "cancelled context", cancelBefore: true, cause: context.Canceled},
+		{name: "cancelled backoff", cancelWait: true, attempts: 1, cause: context.Canceled},
+		{name: "dropped then busy", busy: true, attempts: 3},
+		{name: "dropped then busy cancelled", busy: true, cancelWait: true, attempts: 2, cause: context.Canceled},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, rec := newFake(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Error("unexpected mutation") }))
+			rec.mu.Lock()
+			rec.whoami = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if !tc.busy || len(rec.at("/api/v1/whoami")) == 1 {
+					dropResponse(t, w)
+					return
+				}
+				w.Header().Set("Retry-After", "1")
+				writeProblem(w, http.StatusServiceUnavailable, domain.CodeBusy)
+			})
+			rec.mu.Unlock()
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			if tc.cancelBefore {
+				cancel()
+			}
+			if tc.cancelWait {
+				rec.clock.onAfter = func(d time.Duration) {
+					if !tc.busy || d == time.Second {
+						cancel()
+					}
+				}
+			}
+			s := pendingFor(t, c)
+			p := pendingRequest(c.opts.Clock.Now())
+			if err := s.Save(p); err != nil {
+				t.Fatal(err)
+			}
+			before := pendingBytes(t, s, p.Key)
+			out, err := c.Resend(ctx, p)
+			var unknown *OutcomeUnknownError
+			if out != nil || err == nil || errors.Is(err, ErrOutcomeUnknown) || errors.As(err, &unknown) {
+				t.Errorf("unattempted resend = %+v, %#v", out, err)
+			}
+			if tc.busy {
+				var problem *ProblemError
+				if !errors.As(err, &problem) || problem.Status != http.StatusServiceUnavailable ||
+					!IsCode(err, domain.CodeBusy) || errors.Is(err, ErrNotSent) {
+					t.Errorf("identity problem lost: %v", err)
+				}
+			} else if !errors.Is(err, ErrNotSent) {
+				t.Errorf("identity transport failure = %v; want ErrNotSent", err)
+			}
+			if tc.cause != nil && !errors.Is(err, tc.cause) {
+				t.Errorf("identity failure = %v; want cause %v", err, tc.cause)
+			}
+			if got := len(rec.at("/api/v1/whoami")); got != tc.attempts {
+				t.Errorf("identity attempts = %d, want %d", got, tc.attempts)
+			}
+			if len(rec.at("/api/v1/tasks")) != 0 {
+				t.Error("mutation sent despite failed identity lookup")
+			}
+			if !bytes.Equal(before, pendingBytes(t, s, p.Key)) {
+				t.Error("identity failure changed the saved request")
+			}
+			if got, err := s.List(); err != nil || len(got) != 1 {
+				t.Fatalf("pending files = %+v, %v", got, err)
+			}
+		})
+	}
+}
+
 func TestResendTokenRevocation(t *testing.T) {
 	c, rec := newFake(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = io.WriteString(w, `{"id":42,"name":"ai","scopes":"read,capture","created_at":"2026-10-27T16:00:00Z","revoked_at":"2026-10-28T16:00:00Z"}`)
