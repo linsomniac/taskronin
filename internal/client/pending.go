@@ -12,6 +12,15 @@ import (
 	"taskronin/internal/fsutil"
 )
 
+// ResendResult holds exactly one successful keyed response: an operation or
+// revoked token metadata. Task 18's Resend returns *ResendResult.
+// AIDEV-NOTE: BF18 requires typed revocation recovery; it cannot be decoded as
+// OpResponse. CLI pending retry must render whichever field is populated.
+type ResendResult struct {
+	Op    *api.OpResponse
+	Token *api.TokenInfo
+}
+
 // PendingRequest preserves a keyed mutation for guarded, explicit recovery.
 type PendingRequest struct {
 	Key           string          `json:"key"`

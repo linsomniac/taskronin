@@ -98,6 +98,10 @@ func (c *Client) attempt(ctx context.Context, k call, body []byte, key, generati
 		return nil, nil, tx.sent(), err
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if k.Stream != nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		_, err := io.Copy(k.Stream, resp.Body)
+		return resp, nil, tx.sent(), err
+	}
 	data, err := io.ReadAll(resp.Body)
 	return resp, data, tx.sent(), err
 }

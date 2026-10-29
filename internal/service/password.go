@@ -139,17 +139,6 @@ func (s *Service) ResetPasswordOffline(ctx context.Context, in ResetPasswordIn) 
 	return id, nil
 }
 
-func (o *op) verifyPassword(a store.AuthState, password string) error {
-	ok, err := o.s.passwords.Verify(o.ctx, o.actor.RemoteKey, a.PasswordHash, password)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return domain.Errorf(domain.CodePasswordInvalid, "invalid password")
-	}
-	return nil
-}
-
 func (o *op) recordPasswordChange() error {
 	return o.record(domain.Event{Entity: domain.EntAuth, EntityID: 1, Action: domain.ActUpdate,
 		After: json.RawMessage(`{"what":"password_changed"}`)})

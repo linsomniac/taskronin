@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -30,7 +31,8 @@ type call struct {
 	Mut          Mut // used only by callKeyed
 	Budget       time.Duration
 	IfNoneMatch  string
-	NoRetry      bool // BF22: status --short must make exactly one attempt
+	Stream       io.Writer // successful response bodies stream directly to this writer
+	NoRetry      bool      // BF22: status --short must make exactly one attempt
 }
 
 // do owns the total budget, including identity lookup, backoff and body reads.
@@ -88,6 +90,11 @@ func (c *Client) do(ctx context.Context, k call, out any) (*http.Response, error
 		// failed dial cannot prove an earlier transmitted mutation was lost.
 		mayHaveSent = mayHaveSent || sent
 		if err != nil {
+			// AIDEV-NOTE: A stream may already be visible to its caller. Never
+			// append a retried document after a truncated body or writer failure.
+			if k.Stream != nil && resp != nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+				return resp, err
+			}
 			if sent {
 				unresolved = errors.Join(unresolved, err)
 			}

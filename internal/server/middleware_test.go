@@ -380,8 +380,8 @@ type deadlineWriter struct {
 func (w *deadlineWriter) SetWriteDeadline(v time.Time) error { w.deadlines <- v; return nil }
 
 func TestLongRouteWriteDeadline(t *testing.T) {
-	for _, shutdown := range []bool{false, true} {
-		s, _, token := newTestServer(t, nil)
+	for _, shutdown := range []string{"request", "server", "service"} {
+		s, svc, token := newTestServer(t, nil)
 		parent, cancel := context.WithCancel(t.Context())
 		defer cancel()
 		w := &deadlineWriter{ResponseRecorder: httptest.NewRecorder(), deadlines: make(chan time.Time, 4)}
@@ -394,15 +394,18 @@ func TestLongRouteWriteDeadline(t *testing.T) {
 			default:
 				t.Error("no write deadline")
 			}
-			if shutdown {
+			switch shutdown {
+			case "server":
 				s.BeginShutdown()
-			} else {
+			case "service":
+				svc.BeginShutdown()
+			default:
 				cancel()
 			}
 			select {
 			case deadline := <-w.deadlines:
-				if deadline.After(clock.Real{}.Now()) {
-					t.Error("cancellation deadline is in future")
+				if !deadline.Equal(time.Unix(1, 0)) {
+					t.Error("cancellation deadline is not the prescribed past instant")
 				}
 			case <-time.After(time.Second):
 				t.Error("write not interrupted")

@@ -69,6 +69,14 @@ func (s *Server) Routes() []Route {
 		{Method: http.MethodGet, Pattern: "/api/v1/ai-changes", Scopes: domain.ScopeRead, Handler: s.aiChanges},
 		{Method: http.MethodPost, Pattern: "/api/v1/ai-changes/review", Scopes: domain.ScopeWrite, OwnerOnly: true, Handler: s.reviewAIChanges},
 		{Method: http.MethodGet, Pattern: "/api/v1/settings", Scopes: domain.ScopeRead, Handler: s.settings},
+		{Method: http.MethodPatch, Pattern: "/api/v1/settings", Scopes: domain.ScopeAdmin, Exempt: true, Handler: s.updateSettings},
+		{Method: http.MethodGet, Pattern: "/api/v1/tokens", Scopes: domain.ScopeAdmin, Handler: s.listTokens},
+		{Method: http.MethodPost, Pattern: "/api/v1/tokens", Scopes: domain.ScopeAdmin, Exempt: true, Handler: s.createToken},
+		{Method: http.MethodPost, Pattern: "/api/v1/tokens/{id}/revoke", Scopes: domain.ScopeAdmin, Handler: s.revokeToken},
+		{Method: http.MethodPost, Pattern: "/api/v1/password", Scopes: domain.ScopeAdmin, OwnerOnly: true, Exempt: true, Handler: s.changePassword},
+		{Method: http.MethodGet, Pattern: "/api/v1/backups", Scopes: domain.ScopeAdmin, Handler: s.backups},
+		{Method: http.MethodPost, Pattern: "/api/v1/backups", Scopes: domain.ScopeAdmin, Exempt: true, Long: true, Handler: s.runBackup},
+		{Method: http.MethodGet, Pattern: "/api/v1/export", Scopes: domain.ScopeAdmin, Long: true, Handler: s.export},
 	}
 }
 
@@ -118,17 +126,23 @@ func (s *Server) routeHandler(route Route) http.Handler {
 				s.writeProblem(w, r, err)
 				return
 			}
-			done := make(chan struct{})
-			stop := context.AfterFunc(ctx, func() {
-				defer close(done)
-				_ = controller.SetWriteDeadline(clock.Real{}.Now())
-			})
-			// Join a running callback before returning the connection to net/http.
-			defer func() {
-				if !stop() {
-					<-done
+			returned, joined := make(chan struct{}), make(chan struct{})
+			go func() {
+				defer close(joined)
+				select {
+				case <-s.svc.Stopping():
+					cancel()
+				case <-ctx.Done():
+				case <-returned:
+					return
 				}
+				// AIDEV-NOTE: A past deadline interrupts a Write already blocked
+				// on a stalled reader. Watch service shutdown directly so Drain
+				// never depends on the HTTP server's shutdown ordering.
+				_ = controller.SetWriteDeadline(time.Unix(1, 0))
 			}()
+			// Join before net/http can reuse the writer for another request.
+			defer func() { close(returned); <-joined }()
 			route.Handler(w, r.WithContext(ctx))
 			return
 		}

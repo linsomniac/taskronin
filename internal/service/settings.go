@@ -18,15 +18,46 @@ type UpdateSettingsIn struct {
 
 // UpdateSettings applies retention floors and records password-authorized reductions.
 func (s *Service) UpdateSettings(ctx context.Context, m Meta, in UpdateSettingsIn) (SettingsView, error) {
+	if !m.Actor.Scopes.Has(domain.ScopeAdmin) {
+		return SettingsView{}, domain.Errorf(domain.CodeForbidden, "operation is not permitted")
+	}
+	if m.Gen == "" {
+		return SettingsView{}, domain.Errorf(domain.CodePreconditionReq, "database generation is required")
+	}
+	if m.Gen != s.gen {
+		return SettingsView{}, domain.Errorf(domain.CodeGenerationMismatch, "database generation does not match")
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), OpBudget)
+	defer cancel()
+	leave, err := s.enter()
+	if err != nil {
+		return SettingsView{}, err
+	}
+	defer leave()
+	if in.KeepDaily != nil && *in.KeepDaily < 3 {
+		return SettingsView{}, validation("keep_daily", errors.New("must be at least 3"))
+	}
+	if in.KeepWeekly != nil && *in.KeepWeekly < 1 {
+		return SettingsView{}, validation("keep_weekly", errors.New("must be at least 1"))
+	}
+	// AIDEV-NOTE: BF16 verifies supplied credentials before taking the writer,
+	// within this operation's admission and budget. Whether a password is
+	// required is decided again from the settings locked by the transaction.
+	var seen store.AuthState
+	var verified bool
+	if in.Password != "" {
+		seen, err = store.GetAuthState(ctx, s.store.Reader)
+		if err != nil {
+			return SettingsView{}, serviceError(err)
+		}
+		verified, err = s.passwords.Verify(ctx, m.Actor.RemoteKey, seen.PasswordHash, in.Password)
+		if err != nil {
+			return SettingsView{}, serviceError(err)
+		}
+	}
 	var view SettingsView
-	_, err := s.run(ctx, m, opSpec{kind: domain.OpSettingsUpdate, class: classForward,
+	_, err = s.runEntered(ctx, m, opSpec{kind: domain.OpSettingsUpdate, class: classForward,
 		scopes: domain.ScopeAdmin}, func(o *op) error {
-		if in.KeepDaily != nil && *in.KeepDaily < 3 {
-			return validation("keep_daily", errors.New("must be at least 3"))
-		}
-		if in.KeepWeekly != nil && *in.KeepWeekly < 1 {
-			return validation("keep_weekly", errors.New("must be at least 1"))
-		}
 		daily, err := store.GetSetting(o.ctx, o.tx, "backup_keep_daily")
 		if err != nil {
 			return err
@@ -53,8 +84,11 @@ func (s *Service) UpdateSettings(ctx context.Context, m Meta, in UpdateSettingsI
 			if err != nil {
 				return err
 			}
-			if err := o.verifyPassword(a, in.Password); err != nil {
-				return err
+			if a.PasswordHash != seen.PasswordHash || a.PasswordChangedAt != seen.PasswordChangedAt {
+				return domain.Errorf(domain.CodeConflict, "password changed concurrently; retry")
+			}
+			if !verified {
+				return domain.Errorf(domain.CodePasswordInvalid, "invalid password")
 			}
 			// AIDEV-NOTE: Decide from settings under the writer lock. A read
 			// before run would let concurrent raises bypass password re-entry.

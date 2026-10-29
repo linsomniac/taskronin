@@ -437,3 +437,98 @@ func TestChangePasswordRollback(t *testing.T) {
 	}
 	requireSQLCount(t, s, `SELECT COUNT(*) FROM web_sessions`, 1)
 }
+
+func TestSettingsPasswordGateDoesNotHoldWriter(t *testing.T) {
+	armed := make(chan struct{}, 2)
+	s := testutil.NewScenario(t, func(o *service.Options) {
+		o.Passwords = auth.NewPasswordGate(passwordWaitClock{Clock: o.Clock, armed: armed})
+	})
+	exhaustGate(t, s, "socket")
+	daily := 5
+	done := make(chan error, 1)
+	go func() {
+		_, err := s.Svc.UpdateSettings(context.Background(), s.Meta(), service.UpdateSettingsIn{KeepDaily: &daily, Password: testutil.Password})
+		done <- err
+	}()
+	select {
+	case <-armed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("settings did not reach password gate")
+	}
+	add := make(chan error, 1)
+	go func() {
+		_, err := s.Svc.AddTask(context.Background(), s.Meta(), service.AddTaskIn{Title: "during retention verification"})
+		add <- err
+	}()
+	select {
+	case err := <-add:
+		if err != nil {
+			t.Error(err)
+		}
+	case <-time.After(time.Second):
+		t.Error("retention password verification holds the writer")
+	}
+	s.Svc.BeginShutdown()
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	drainErr := s.Svc.Drain(ctx)
+	s.Clock.Advance(10 * time.Second)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if !errors.Is(drainErr, context.DeadlineExceeded) {
+		t.Fatal("Drain skipped admitted settings verification", drainErr)
+	}
+	if err := s.Svc.Drain(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSettingsPasswordChangedDuringVerification(t *testing.T) {
+	armed := make(chan struct{}, 2)
+	s := testutil.NewScenario(t, func(o *service.Options) {
+		o.Passwords = auth.NewPasswordGate(passwordWaitClock{Clock: o.Clock, armed: armed})
+	})
+	exhaustGate(t, s, "socket")
+	daily := 5
+	done := make(chan error, 1)
+	go func() {
+		_, err := s.Svc.UpdateSettings(context.Background(), s.Meta(), service.UpdateSettingsIn{KeepDaily: &daily, Password: testutil.Password})
+		done <- err
+	}()
+	select {
+	case <-armed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("settings did not reach gate")
+	}
+	changed := make(chan error, 1)
+	m := s.Meta()
+	m.Actor.RemoteKey = "other-socket"
+	next := auth.FormatToken(1, mintSecret(t))
+	go func() {
+		changed <- s.Svc.ChangePassword(context.Background(), m, service.ChangePasswordIn{Current: testutil.Password, New: next})
+	}()
+	select {
+	case <-armed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("password change did not reach gate")
+	}
+	// The other key waits only for the global bucket (2 s); the retention
+	// request still waits on the exhausted per-key bucket (5 s).
+	s.Clock.Advance(2 * time.Second)
+	select {
+	case err := <-changed:
+		if err != nil {
+			t.Error(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Error("password change blocked behind retention verifier")
+	}
+	s.Clock.Advance(10 * time.Second)
+	err := <-done
+	testutil.RequireCode(t, err, domain.CodeConflict)
+	v, err := s.Svc.Settings(s.Ctx(), s.Actor)
+	if err != nil || v.KeepDaily != 7 {
+		t.Fatalf("stale credentials lowered retention: %+v %v", v, err)
+	}
+}
