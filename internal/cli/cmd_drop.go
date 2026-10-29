@@ -77,7 +77,11 @@ func closeTaskCommand(e *env, verb string) *cobra.Command {
 }
 
 func (e *env) confirmDelete(task *api.Task) (bool, error) {
-	if _, err := fmt.Fprintf(e.err, "Delete #%d '%s'? [y/N] ", task.ID, textsafe.SanitizeLine(task.Title)); err != nil {
+	return e.confirmDeletion(fmt.Sprintf("#%d '%s'", task.ID, task.Title))
+}
+
+func (e *env) confirmDeletion(label string) (bool, error) {
+	if _, err := fmt.Fprintf(e.err, "Delete %s? [y/N] ", textsafe.SanitizeLine(label)); err != nil {
 		return false, err
 	}
 	line, err := bufio.NewReader(e.in).ReadString('\n')
