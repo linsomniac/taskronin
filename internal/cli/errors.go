@@ -24,6 +24,13 @@ type usageError struct{ detail string }
 func (e *usageError) Error() string        { return e.detail }
 func usagef(format string, a ...any) error { return &usageError{detail: fmt.Sprintf(format, a...)} }
 
+// checkFoundError reports that a check-only run found work still to do (exit 8,
+// A§9.6). It is not a failure of the command itself, so it has its own exit
+// code that scripts can tell apart from errors (exit 1).
+type checkFoundError struct{ detail string }
+
+func (e *checkFoundError) Error() string { return e.detail }
+
 func tokenConfigError(err error) error {
 	// AIDEV-NOTE: config rejects symlinked token paths before client.New runs.
 	// Preserve the same exit code and recovery guidance as other token failures.
@@ -44,6 +51,10 @@ func exitCode(err error) int {
 	var usage *usageError
 	if errors.As(err, &usage) {
 		return 2
+	}
+	var found *checkFoundError
+	if errors.As(err, &found) {
+		return 8
 	}
 	if errors.Is(err, client.ErrTokenFile) {
 		return 4

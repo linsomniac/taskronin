@@ -26,6 +26,10 @@ const (
 	scrubError     = "error"
 )
 
+// SetStatusContains is the SetResult.Status of a set that still holds purged
+// content (only reported by --check; a real run rewrites such sets).
+const SetStatusContains = scrubContains
+
 // SetResult is the outcome for one backup file set.
 type SetResult struct{ Path, Status, Err string } // Status: clean | contains | rewritten | error
 

@@ -2667,7 +2667,7 @@ func ParseClock(s string, allow2400 bool) (civil.Minute, error)
 | `tkr undo` / `tkr redo` | — | `POST /undo` / `/redo` | Prints the reverted op's effects. |
 | `tkr revert OPID` | — | `POST /ops/{op}/revert` | |
 | `tkr purge task\|entry ID` / `tkr purge --repair-ledger` | `--with-entries`, `--keep-recovery-files`, `-y` | `offline.Purge` | **Offline** (S4, §12.6): needs the server stopped; password prompt (TTY only). Scrubs the live DB and every backup set, then (unless `--keep-recovery-files`) deletes this host's pending requests and drafts after confirmation; prints scrubbed IDs, linked entries left alone, per-set results, and that earlier exports/log lines are out of reach (D§5.11). |
-| `tkr scrub-backups` | `--check`, `--resume`, `--keep-recovery-files`, `-y` | `offline.ScrubBackups` | Offline (S1, §12.7): the standalone/resumable form of purge steps 7–9; password prompt on a TTY. |
+| `tkr scrub-backups` | `--check`, `--resume`, `--keep-recovery-files`, `-y` | `offline.ScrubBackups` | Offline (S1, §12.7): the standalone/resumable form of purge steps 7–9; password prompt on a TTY. `--check` exits 8 when any set `contains` purged content (§9.6). |
 | `tkr pending` / `tkr pending retry [KEY]` / `tkr pending discard KEY` | — | lists (with last error) / resends with the original idempotency key / deletes a saved request | §9.6 |
 | `tkr plan` | — | TUI Plan mode | |
 | `tkr recap` | `--date D` | TUI Recap mode | |
@@ -2760,6 +2760,7 @@ without ID/`-N` → usage error. The API request always carries explicit `task_i
 | 5 | `not_found` |
 | 6 | `conflict`, `deleted`, `revert_conflict`, `not_revertible`, `nothing_to_undo`, `nothing_to_redo`, `precondition_*`, `generation_mismatch` |
 | 7 | `rate_limited`, `busy` |
+| 8 | a check-only run found work still to do: `scrub-backups --check` reports a set that `contains` purged content |
 | 130 | interrupted |
 
 - Human rendering (stderr): `tkr: <detail>`, then `  <field>: <message>` per
@@ -3140,9 +3141,9 @@ func (l *Ledger) Repair() ([]int, error)          // rewrite from valid records 
    `--resume` just makes it explicit); then `CleanupTemps`.
 3. `OpenLedger` (a damaged ledger is allowed here: valid records are still applied, but `complete` lines cannot be appended while it is damaged — step 7 then tells the user to run `tkr purge --repair-ledger`); load records.
 4. On the live DB: `ReplayLedger(live)` + confirmed checkpoint (R2-12, R3-2). Unless `--check`: take a fresh verified snapshot (kind `prescrub`).
-5. For each other snapshot and each `*.pre-restore-*`/`*.pre-import-*` set: `Stage` it → `Migrate` the staged copy to the binary's schema (an old-schema snapshot must replay with current columns, R3-6) → `ReplayLedger(historical)` → nothing changed: `clean`, discard → `--check`: report `contains`, discard → else `CheckStructural`, `integrity_check`, FTS check → `VACUUM INTO` a `.tkr-tmp-` file next to the target → `Verify` → `Swap{Kind: scrub, Aside: <.tkr-tmp- quarantine dir>, DeleteAside: true}`.
+5. For each other snapshot and each `*.pre-restore-*`/`*.pre-import-*` set: `Stage` it → `Migrate` the staged copy to the binary's schema (an old-schema snapshot must replay with current columns, R3-6) → `ReplayLedger(historical)` → nothing changed **and** the original set has no non-empty (or unstattable/non-regular) `-wal`/`-shm` (superseded WAL frames may hold purged text): `clean`, discard → `--check`: report `contains`, discard → else `CheckStructural`, `integrity_check`, FTS check → `VACUUM INTO` a `.tkr-tmp-` file next to the target → `Verify` → `Swap{Kind: scrub, Aside: <.tkr-tmp- quarantine dir>, DeleteAside: true}`.
 6. Stop at the first failure that leaves a journal (the next run resumes that swap first, R2-7); failures without a journal are reported and the batch continues. Snapshots are never deleted, only rewritten.
-7. If every set is clean or rewritten, the ledger is not damaged and `pending` records exist (including after `--resume`): run `offline.CleanRecoveryFiles` exactly as purge step 8 (same flags, confirmation and opt-out); only when it returns a mode, `Append` `complete` lines carrying `recovery_files = mode`. Print per-set results.
+7. If every set is clean or rewritten, the ledger is not damaged and `pending` records exist (including after `--resume`): run `offline.CleanRecoveryFiles` exactly as purge step 8 (same flags, confirmation and opt-out); only when it returns a mode, `Append` `complete` lines carrying `recovery_files = mode`. Print per-set results. Exit status: any `error` set → 1; `--check` with any `contains` set → 8 (§9.6); otherwise 0.
 
 ### 12.8 Offline password reset (`offline/passwd.go`)
 

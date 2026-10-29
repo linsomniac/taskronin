@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"fmt"
+
 	"github.com/spf13/cobra"
 
 	"taskronin/internal/config"
@@ -16,7 +18,7 @@ func scrubCommand(e *env) *cobra.Command {
 		Long: "Apply the purge ledger to every backup snapshot and pre-restore/pre-import set, rewriting each one that\n" +
 			"still holds purged content. The server must be stopped and the owner password is required on a terminal.\n" +
 			"After an interruption, `--resume` finishes the interrupted rewrite first (a plain run does too).\n" +
-			"`--check` only reports which sets still contain purged content. Once every set is clean, leftover client\n" +
+			"`--check` only reports which sets still contain purged content, and exits 8 if any do. Once every set is clean, leftover client\n" +
 			"recovery files (saved requests and editor drafts) are deleted after confirmation, or kept with\n" +
 			"`--keep-recovery-files`, and the purge is marked complete.",
 		Args: cobra.NoArgs,
@@ -30,8 +32,11 @@ func scrubCommand(e *env) *cobra.Command {
 			}
 			env := e.offlineEnv()
 			env.Server = cfg
-			_, err = offline.ScrubBackups(e.ctx, env, o)
-			return err
+			results, err := offline.ScrubBackups(e.ctx, env, o)
+			if err != nil || !o.Check {
+				return err
+			}
+			return scrubCheckResult(results)
 		}}
 	f := cmd.Flags()
 	f.BoolVar(&o.Check, "check", false, "Only report sets that still contain purged content; change nothing")
@@ -39,4 +44,20 @@ func scrubCommand(e *env) *cobra.Command {
 	f.BoolVar(&o.KeepRecoveryFiles, "keep-recovery-files", false, "Complete without deleting saved requests and drafts")
 	f.BoolVarP(&o.Yes, "yes", "y", false, "Delete recovery files without asking")
 	return cmd
+}
+
+// scrubCheckResult turns a successful `--check` run into exit 8 when any set
+// still holds purged content (Sean's ruling, 2026-10-29: scripts must be able
+// to detect it). A run with set errors has already failed with exit 1.
+func scrubCheckResult(results []offline.SetResult) error {
+	n := 0
+	for _, r := range results {
+		if r.Status == offline.SetStatusContains {
+			n++
+		}
+	}
+	if n == 0 {
+		return nil
+	}
+	return &checkFoundError{detail: fmt.Sprintf("%d backup set(s) still contain purged content; run `tkr scrub-backups` to rewrite them", n)}
 }

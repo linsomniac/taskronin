@@ -46,6 +46,7 @@ func TestExitCodes(t *testing.T) {
 		{nil, 0}, {client.ErrNotSent, 3}, {client.ErrOutcomeUnknown, 3}, {&client.OutcomeUnknownError{Err: io.EOF}, 3},
 		{client.ErrTokenFile, 4}, {usagef("bad %s", "argument"), 2}, {context.Canceled, 130}, {context.DeadlineExceeded, 3},
 		{&client.OutcomeUnknownError{Err: context.Canceled}, 130}, {errors.New("plain"), 1},
+		{&checkFoundError{detail: "found"}, 8}, {fmt.Errorf("wrapped: %w", &checkFoundError{detail: "found"}), 8},
 	} {
 		if got := exitCode(tc.err); got != tc.want {
 			t.Errorf("%v = %d, want %d", tc.err, got, tc.want)
