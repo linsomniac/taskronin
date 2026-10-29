@@ -297,34 +297,10 @@ func prepareImport(ctx context.Context, e *Env, live *liveImportState, file *sto
 	if err := svc.Reconcile(ctx); err != nil {
 		return nil, err
 	}
-	if err := service.CheckAll(ctx, st.Writer, e.clock().Now(), svc.Zone()); err != nil {
+	if err := verifyAndSealStage(ctx, e, st, svc, staged.Path, true, &closed); err != nil {
 		return nil, err
 	}
-	if err := store.IntegrityCheck(ctx, st.Writer); err != nil {
-		return nil, offlineError(err)
-	}
-	if err := store.ForeignKeyCheck(ctx, st.Writer); err != nil {
-		return nil, offlineError(err)
-	}
-	if err := store.FTSIntegrityCheck(ctx, st.Writer); err != nil {
-		return nil, offlineError(err)
-	}
-	closed = true
-	if err := st.Close(); err != nil {
-		return nil, offlineError(err)
-	}
-	for _, suffix := range []string{"-wal", "-shm", "-journal"} {
-		if _, err := os.Lstat(staged.Path + suffix); err == nil {
-			return nil, domain.Errorf(domain.CodeInternal, "staged database sidecar remains: %s", filepath.Base(staged.Path+suffix))
-		} else if !errors.Is(err, fs.ErrNotExist) {
-			return nil, offlineError(err)
-		}
-	}
-	f, err := os.Open(staged.Path)
-	if err != nil {
-		return nil, offlineError(err)
-	}
-	return counts, offlineError(errors.Join(f.Sync(), f.Close()))
+	return counts, nil
 }
 
 // importStaged is A§12.5 steps 3-4: carry over the live auth state and tokens,

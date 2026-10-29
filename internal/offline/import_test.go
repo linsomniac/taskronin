@@ -326,6 +326,21 @@ func TestImportRejectsBadRows(t *testing.T) {
 		"bidi title": {func(d map[string]any) {
 			tableRows(d, "tasks")[0].(map[string]any)["title"] = "evil\u202etitle"
 		}, domain.CodeValidation, "tasks/1"},
+		"control char title": {func(d map[string]any) {
+			tableRows(d, "tasks")[0].(map[string]any)["title"] = "bell\x07title"
+		}, domain.CodeValidation, "tasks/1"},
+		"oversized title": {func(d map[string]any) {
+			tableRows(d, "tasks")[0].(map[string]any)["title"] = strings.Repeat("x", 501)
+		}, domain.CodeValidation, "tasks/1"},
+		"dangling entry task": {func(d map[string]any) {
+			for _, r := range tableRows(d, "log_entries") {
+				if row := r.(map[string]any); row["task_id"] != nil {
+					row["task_id"] = json.Number("987654")
+					return
+				}
+			}
+			panic("fixture has no linked entry")
+		}, domain.CodeValidation, ""},
 		"bidi entry notes": {func(d map[string]any) {
 			tableRows(d, "log_entries")[0].(map[string]any)["notes"] = "a\u202eb"
 		}, domain.CodeValidation, "log_entries/"},

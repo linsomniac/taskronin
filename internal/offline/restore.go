@@ -227,32 +227,8 @@ func prepareStaged(ctx context.Context, e *Env, set backup.FileSet, staged *back
 	if err := svc.Reconcile(ctx); err != nil {
 		return "", err
 	}
-	if err := service.CheckAll(ctx, st.Writer, e.clock().Now(), svc.Zone()); err != nil {
+	if err := verifyAndSealStage(ctx, e, st, svc, staged.Path, false, &closed); err != nil {
 		return "", err
-	}
-	if err := store.IntegrityCheck(ctx, st.Writer); err != nil {
-		return "", offlineError(err)
-	}
-	if err := store.FTSIntegrityCheck(ctx, st.Writer); err != nil {
-		return "", offlineError(err)
-	}
-	closed = true
-	if err := st.Close(); err != nil {
-		return "", offlineError(err)
-	}
-	for _, suffix := range []string{"-wal", "-shm", "-journal"} {
-		if _, err := os.Lstat(staged.Path + suffix); err == nil {
-			return "", domain.Errorf(domain.CodeInternal, "staged database sidecar remains: %s", filepath.Base(staged.Path+suffix))
-		} else if !errors.Is(err, fs.ErrNotExist) {
-			return "", offlineError(err)
-		}
-	}
-	f, err := os.Open(staged.Path)
-	if err != nil {
-		return "", offlineError(err)
-	}
-	if err := errors.Join(f.Sync(), f.Close()); err != nil {
-		return "", offlineError(err)
 	}
 	return owner, nil
 }
