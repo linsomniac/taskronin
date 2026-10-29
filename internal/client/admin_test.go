@@ -71,17 +71,28 @@ func TestExportFailureNeverAppendsRetry(t *testing.T) {
 				_ = http.NewResponseController(w).Flush()
 				dropResponse(t, w)
 			}))
+			pending := pendingFor(t, c)
 			var out io.Writer = new(bytes.Buffer)
+			cause := io.ErrUnexpectedEOF
 			if mode == "writer" {
 				out = failingExportWriter{err: sentinel}
+				cause = sentinel
 			}
 			err := c.Export(t.Context(), out)
-			if err == nil || (mode == "writer" && !errors.Is(err, sentinel)) {
-				t.Fatalf("export error=%v", err)
+			if !errors.Is(err, ErrOutcomeUnknown) || errors.Is(err, ErrNotSent) {
+				t.Errorf("export error=%v; want outcome unknown", err)
+			}
+			if !errors.Is(err, cause) {
+				t.Errorf("export error=%v; want preserved cause %v", err, cause)
+			}
+			var unknown *OutcomeUnknownError
+			if !errors.As(err, &unknown) || unknown.Saved || unknown.Key != "" {
+				t.Errorf("export error=%v; want unsaved outcome unknown with no key", err)
 			}
 			if got := len(rec.at("/api/v1/export")); got != 1 {
 				t.Fatalf("stream attempts=%d", got)
 			}
+			noPending(t, pending)
 		})
 	}
 }

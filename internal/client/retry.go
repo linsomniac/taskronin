@@ -92,8 +92,9 @@ func (c *Client) do(ctx context.Context, k call, out any) (*http.Response, error
 		if err != nil {
 			// AIDEV-NOTE: A stream may already be visible to its caller. Never
 			// append a retried document after a truncated body or writer failure.
+			// Preserve failure classification and the cause without retrying.
 			if k.Stream != nil && resp != nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
-				return resp, err
+				return resp, c.failed(k, body, key, who, mayHaveSent, err)
 			}
 			if sent {
 				unresolved = errors.Join(unresolved, err)
