@@ -29,12 +29,24 @@ func addCommand(e *env) *cobra.Command {
 			}
 			req.Title = args[0]
 			var placement string
-			for _, flag := range []string{"top", "bottom", "after", "before", "defer", "block", "now"} {
-				if cmd.Flags().Changed(flag) {
+			// AIDEV-NOTE: explicit false booleans are changed flags too, but
+			// must neither select placement nor conflict with an active one.
+			for _, flag := range []struct {
+				name   string
+				active bool
+			}{
+				{"top", top}, {"bottom", bottom},
+				{"after", cmd.Flags().Changed("after")},
+				{"before", cmd.Flags().Changed("before")},
+				{"defer", cmd.Flags().Changed("defer")},
+				{"block", cmd.Flags().Changed("block")},
+				{"now", now},
+			} {
+				if flag.active {
 					if placement != "" {
 						return usagef("at most one placement flag")
 					}
-					placement = flag
+					placement = flag.name
 				}
 			}
 			if placement != "" {

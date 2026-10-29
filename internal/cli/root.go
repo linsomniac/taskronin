@@ -20,6 +20,7 @@ type env struct {
 	argv               []string
 	in                 io.Reader
 	out, err           io.Writer
+	opOutputErr        error
 	sys                sysDeps
 	jsonOut            bool
 	socket, tokenFile  string

@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -88,6 +89,39 @@ func TestTRI09_OnePlacementFlag(t *testing.T) {
 	}
 	if task := captureTask(t, srv, "first saved task"); task.ID != 1 {
 		t.Fatalf("invalid command saved a task: %+v", task)
+	}
+}
+
+func TestAddFalsePlacementFlags(t *testing.T) {
+	for _, tc := range []struct {
+		name, action, view string
+		flags              []string
+	}{
+		{"top false", "added to triage (new)", "triage", []string{"--top=false"}},
+		{"bottom false", "added to triage (new)", "triage", []string{"--bottom=false"}},
+		{"now false", "added to triage (new)", "triage", []string{"--now=false"}},
+		{"all false", "added to triage (new)", "triage", []string{"--top=false", "--bottom=false", "--now=false"}},
+		{"false with true", "added to backlog (top)", "backlog", []string{"--top=true", "--bottom=false", "--now=false"}},
+		{"false with date", "added, deferred to Thu 2026-10-29", "upcoming", []string{"--top=false", "--bottom=false", "--now=false", "--defer", "tomorrow"}},
+		{"true then false", "added to triage (new)", "triage", []string{"--now", "--now=false"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, sys := captureServer(t)
+			captureTask(t, srv, "Existing focus")
+			logFocus(t, srv)
+			out := captureRun(t, sys, "", append([]string{"add", "New task"}, tc.flags...)...)
+			if want := "#2 'New task' " + tc.action + "\n"; out != want {
+				t.Errorf("stdout=%q; want %q", out, want)
+			}
+			task, err := srv.Client.GetTask(t.Context(), 2)
+			if err != nil || task.View != tc.view || len(task.Interruptions) != 0 {
+				t.Fatalf("task=%+v, err=%v", task, err)
+			}
+			status, _, _, err := srv.Client.Status(t.Context(), "")
+			if err != nil || status.Focus == nil || status.Focus.ID != 1 {
+				t.Fatalf("focus changed: status=%+v, err=%v", status, err)
+			}
+		})
 	}
 }
 
@@ -484,5 +518,66 @@ func TestCaptureEffectsSanitized(t *testing.T) {
 	e.printOp(res, taskHeadline(res.Task, "added to triage (new)"))
 	if !strings.HasSuffix(out.String(), "b7 slipped\n#2 +new\n") || strings.Contains(out.String(), "#1 created") {
 		t.Fatalf("incorrect effect suppression: %q", out.String())
+	}
+}
+
+type captureFailWriter struct {
+	bytes.Buffer
+	remaining, writes int
+	err               error
+}
+
+func (w *captureFailWriter) Write(p []byte) (int, error) {
+	w.writes++
+	if w.remaining == 0 {
+		return 0, w.err
+	}
+	w.remaining--
+	return w.Buffer.Write(p)
+}
+
+func TestCaptureOutputFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		remaining int
+	}{
+		{"headline", 0}, {"effect", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, sys := captureServer(t)
+			captureTask(t, srv, "Set up keycloak")
+			writeErr := errors.New("output destination is full")
+			out := &captureFailWriter{remaining: tc.remaining, err: writeErr}
+			var stderr bytes.Buffer
+			code := run(t.Context(), []string{"done", "1"}, strings.NewReader(""), out, &stderr, sys)
+			if code != 1 || !strings.Contains(stderr.String(), writeErr.Error()) || strings.Contains(stderr.String(), "nothing was saved") {
+				t.Errorf("exit=%d stdout=%q stderr=%q", code, out.String(), stderr.String())
+			}
+			if out.writes != tc.remaining+1 {
+				t.Errorf("writes=%d; want %d (stop on failure)", out.writes, tc.remaining+1)
+			}
+			if tc.remaining == 1 && out.String() != "#1 'Set up keycloak' completed; ✓ logged Wed 2026-10-28\n" {
+				t.Errorf("headline=%q", out.String())
+			}
+			task, err := srv.Client.GetTask(t.Context(), 1)
+			if err != nil || task.Status != "done" || len(logEntries(t, srv)) != 1 {
+				t.Fatalf("confirmed mutation must stay applied: task=%+v, err=%v", task, err)
+			}
+		})
+	}
+}
+
+func TestCapturePrintOpPreservesError(t *testing.T) {
+	first := errors.New("first output failure")
+	out := &captureFailWriter{err: first}
+	e := &env{out: out}
+	res := &api.OpResponse{Effects: []api.Effect{{Kind: "slipped", BlockID: 7}}}
+	e.printOp(res, "Headline")
+	out.err = errors.New("later output failure")
+	if err := e.outputOp(res, "Next headline"); !errors.Is(err, first) {
+		t.Fatalf("outputOp error=%v; want original write error", err)
+	}
+	if out.writes != 1 {
+		t.Fatalf("writes=%d; want no more writes after the first failure", out.writes)
 	}
 }

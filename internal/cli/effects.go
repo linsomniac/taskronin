@@ -18,15 +18,27 @@ func (e *env) outputOp(resp *api.OpResponse, headline string) error {
 		return json.NewEncoder(e.out).Encode(resp)
 	}
 	e.printOp(resp, headline)
+	if e.opOutputErr != nil {
+		return fmt.Errorf("write operation output: %w", e.opOutputErr)
+	}
 	return nil
 }
 
 // printOp echoes all consequences except those already stated in the headline.
 func (e *env) printOp(resp *api.OpResponse, headline string) {
-	_, _ = fmt.Fprintln(e.out, textsafe.SanitizeLine(headline))
+	// AIDEV-NOTE: preserve this void interface while retaining the first
+	// write error for outputOp. The mutation has already succeeded.
+	if e.opOutputErr != nil {
+		return
+	}
+	if _, e.opOutputErr = fmt.Fprintln(e.out, textsafe.SanitizeLine(headline)); e.opOutputErr != nil {
+		return
+	}
 	for _, effect := range resp.Effects {
 		if !effectInHeadline(resp, effect, headline) {
-			_, _ = fmt.Fprintln(e.out, textsafe.SanitizeLine(effectLine(effect)))
+			if _, e.opOutputErr = fmt.Fprintln(e.out, textsafe.SanitizeLine(effectLine(effect))); e.opOutputErr != nil {
+				return
+			}
 		}
 	}
 }
