@@ -44,7 +44,7 @@ type TUIRequest struct {
 }
 
 // launchTUI is assigned by Plan C's cmd_tui.go init().
-var launchTUI func(cmd *cobra.Command, req TUIRequest) error //nolint:unused // Task 24b consumes this hook; Plan C assigns it.
+var launchTUI func(cmd *cobra.Command, req TUIRequest) error
 
 var commandFactories []func(*env) *cobra.Command
 

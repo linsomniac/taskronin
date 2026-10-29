@@ -44,7 +44,7 @@ func (e *env) printOp(resp *api.OpResponse, headline string) {
 }
 
 func effectInHeadline(resp *api.OpResponse, effect api.Effect, headline string) bool {
-	if headline == effectLine(effect) || schedulingEffectInHeadline(resp, effect, headline) {
+	if headline == effectLine(effect) || schedulingEffectInHeadline(resp, effect, headline) || metadataEffectInHeadline(resp, effect, headline) {
 		return true
 	}
 	if resp.Task == nil || effect.TaskID != resp.Task.ID {
@@ -82,6 +82,29 @@ func effectInHeadline(resp *api.OpResponse, effect api.Effect, headline string) 
 	default:
 		return false
 	}
+}
+
+func metadataEffectInHeadline(resp *api.OpResponse, effect api.Effect, headline string) bool {
+	if task := resp.Task; task != nil && effect.TaskID == task.ID {
+		if effect.Kind == "reason_added" && effect.Reason == "manual" {
+			return headline == fmt.Sprintf("#%d sent to triage (manual)", task.ID)
+		}
+		if effect.Kind == "updated" {
+			for _, verb := range []string{"tag", "project", "priority"} {
+				if headline == metadataHeadline(task, verb) {
+					return true
+				}
+			}
+		}
+	}
+	if len(resp.Tasks) > 0 && headline == fmt.Sprintf("accepted %d new tasks into the backlog", len(resp.Tasks)) {
+		for _, task := range resp.Tasks {
+			if effect.TaskID == task.ID {
+				return effect.Kind == "placed" || effect.Kind == "moved" || (effect.Kind == "reason_removed" && effect.Reason == "new")
+			}
+		}
+	}
+	return false
 }
 
 func schedulingEffectInHeadline(resp *api.OpResponse, effect api.Effect, headline string) bool {
