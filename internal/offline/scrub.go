@@ -145,7 +145,8 @@ func ScrubBackups(ctx context.Context, e *Env, o ScrubOptions) (results []SetRes
 	if o.Check {
 		return results, nil
 	}
-	return results, e.completeScrub(ctx, ledger, health, results, o)
+	_, err = e.completeScrub(ctx, ledger, health, results, o, "")
+	return results, err
 }
 
 // resumeScrubJournal finishes an interrupted scrub swap (always, A§12.7 step 2;
@@ -181,42 +182,51 @@ func (e *Env) printResults(results []SetResult) {
 	}
 }
 
-// completeScrub is A§12.7 step 7. results are all clean or rewritten here.
-func (e *Env) completeScrub(ctx context.Context, ledger *backup.Ledger, health backup.LedgerHealth, results []SetResult, o ScrubOptions) error {
+// completeScrub is A§12.7 step 7 (also A§12.6 steps 8-9). results are all
+// clean or rewritten here. It returns the recovery-file mode only when it
+// appended the complete lines ("" when there was nothing to complete or it
+// could not). A non-empty crashAt names a crash point (purge:before-complete)
+// between the recovery-file cleanup and the first complete line.
+func (e *Env) completeScrub(ctx context.Context, ledger *backup.Ledger, health backup.LedgerHealth, results []SetResult, o ScrubOptions, crashAt string) (string, error) {
 	for _, r := range results {
 		if r.Status != scrubClean && r.Status != scrubRewritten {
-			return nil
+			return "", nil
 		}
 	}
 	pending, err := ledger.Pending()
 	if err != nil {
-		return offlineError(err)
+		return "", offlineError(err)
 	}
 	if len(pending) == 0 {
-		return nil
+		return "", nil
 	}
 	if health.Damaged {
 		_, err := fmt.Fprintln(e.Out, "the purge ledger is damaged, so the purge cannot be marked complete: run `tkr purge --repair-ledger`")
-		return offlineError(err)
+		return "", offlineError(err)
 	}
 	mode, err := CleanRecoveryFiles(ctx, e.Paths, o.KeepRecoveryFiles, o.Yes, e.Confirm)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if mode == "" {
 		_, err := fmt.Fprintln(e.Out, "recovery files were kept: re-run with --keep-recovery-files to complete without deleting them")
-		return offlineError(err)
+		return "", offlineError(err)
+	}
+	if crashAt != "" {
+		if err := crashPoint(ctx, crashAt); err != nil {
+			return "", err
+		}
 	}
 	for _, rec := range pending {
 		if err := ctx.Err(); err != nil {
-			return offlineError(err)
+			return "", offlineError(err)
 		}
 		if err := ledger.Append(backup.LedgerRecord{V: 1, Rec: rec.Rec, At: e.clock().Now().UnixMilli(),
 			State: backup.LedgerComplete, RecoveryFiles: mode}); err != nil {
-			return offlineError(err)
+			return "", offlineError(err)
 		}
 	}
-	return nil
+	return mode, nil
 }
 
 // hasSidecarBytes reports whether the ORIGINAL set has a non-empty -wal or -shm.
