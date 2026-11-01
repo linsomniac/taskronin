@@ -1,0 +1,35 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "cursor": {
+      "description": "next_cursor from an earlier page",
+      "type": "string"
+    },
+    "limit": {
+      "description": "page size, 1 to 200; default 50",
+      "maximum": 200,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "project": {
+      "description": "only tasks in this project",
+      "type": "string"
+    },
+    "tag": {
+      "description": "only tasks carrying this tag",
+      "type": "string"
+    },
+    "view": {
+      "description": "which tasks to list; default backlog",
+      "enum": [
+        "triage",
+        "backlog",
+        "upcoming",
+        "done",
+        "all"
+      ],
+      "type": "string"
+    }
+  },
+  "type": "object"
+}

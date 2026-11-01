@@ -1,0 +1,29 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "kind": {
+      "description": "what to search; default all",
+      "enum": [
+        "task",
+        "entry",
+        "all"
+      ],
+      "type": "string"
+    },
+    "limit": {
+      "description": "page size, 1 to 200; default 50",
+      "maximum": 200,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "query": {
+      "description": "text to search for",
+      "minLength": 1,
+      "type": "string"
+    }
+  },
+  "required": [
+    "query"
+  ],
+  "type": "object"
+}

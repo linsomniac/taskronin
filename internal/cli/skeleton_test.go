@@ -326,3 +326,17 @@ func TestTerminalPasswordDoesNotEchoOrLoseInput(t *testing.T) {
 		t.Fatalf("unexpected terminal echo: %d bytes, %v", n, err)
 	}
 }
+
+func TestMCPMissingTokenFile(t *testing.T) {
+	sys, paths := testSys(t)
+	_, stderr, code := runCLI(t, sys, "", "mcp")
+	want := "MCP token file " + paths.TokenFile("mcp") + " not found — run `tkr token create mcp --mcp --write-file` (or `tkr init --mcp-token`)"
+	if code != 4 || !strings.Contains(stderr, want) {
+		t.Fatalf("code=%d stderr=%q, want exit 4 containing %q", code, stderr, want)
+	}
+	flagged := filepath.Join(privateDir(t), "other.token")
+	_, stderr, code = runCLI(t, sys, "", "mcp", "--token-file", flagged)
+	if code != 4 || !strings.Contains(stderr, "MCP token file "+flagged+" not found") {
+		t.Fatalf("flag: code=%d stderr=%q", code, stderr)
+	}
+}

@@ -1,0 +1,13 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "description": "task id",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "id"
+  ],
+  "type": "object"
+}

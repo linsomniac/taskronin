@@ -1,0 +1,26 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "from": {
+      "description": "first day: today, yesterday, a weekday (mon...sun), -2d, or YYYY-MM-DD; default the start of this week",
+      "type": "string"
+    },
+    "include_todo": {
+      "description": "also list the current triage and backlog",
+      "type": "boolean"
+    },
+    "project": {
+      "description": "only work on tasks in this project",
+      "type": "string"
+    },
+    "tag": {
+      "description": "only work on tasks carrying this tag",
+      "type": "string"
+    },
+    "to": {
+      "description": "last day, same forms as from; default today",
+      "type": "string"
+    }
+  },
+  "type": "object"
+}

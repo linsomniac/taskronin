@@ -1,0 +1,231 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "items": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "completed_at": {
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "completed_date": {
+            "format": "date",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "defer": {
+            "additionalProperties": false,
+            "properties": {
+              "date": {
+                "format": "date",
+                "type": "string"
+              },
+              "time": {
+                "pattern": "^([01]?\\d|2[0-3]):[0-5]\\d$",
+                "type": [
+                  "null",
+                  "string"
+                ]
+              }
+            },
+            "required": [
+              "date",
+              "time"
+            ],
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "deferred": {
+            "type": "boolean"
+          },
+          "deleted_at": {
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "due": {
+            "additionalProperties": false,
+            "properties": {
+              "date": {
+                "format": "date",
+                "type": "string"
+              },
+              "time": {
+                "pattern": "^([01]?\\d|2[0-3]):[0-5]\\d$",
+                "type": [
+                  "null",
+                  "string"
+                ]
+              }
+            },
+            "required": [
+              "date",
+              "time"
+            ],
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "due_phase": {
+            "type": "string"
+          },
+          "due_soon": {
+            "type": "boolean"
+          },
+          "etag": {
+            "type": "string"
+          },
+          "id": {
+            "type": "integer"
+          },
+          "last_placed_at": {
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "notes": {
+            "type": "string"
+          },
+          "origin": {
+            "type": "string"
+          },
+          "priority": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "project": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "reasons": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "reason": {
+                  "type": "string"
+                },
+                "since": {
+                  "format": "date-time",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "reason",
+                "since"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "slips": {
+            "additionalProperties": false,
+            "properties": {
+              "lifetime": {
+                "type": "integer"
+              },
+              "since_triage": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "lifetime",
+              "since_triage"
+            ],
+            "type": "object"
+          },
+          "status": {
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "version": {
+            "type": "integer"
+          },
+          "view": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "notes",
+          "status",
+          "view",
+          "reasons",
+          "defer",
+          "deferred",
+          "due",
+          "due_phase",
+          "due_soon",
+          "project",
+          "tags",
+          "priority",
+          "origin",
+          "slips",
+          "last_placed_at",
+          "completed_at",
+          "completed_date",
+          "created_at",
+          "updated_at",
+          "deleted_at",
+          "version",
+          "etag"
+        ],
+        "type": "object"
+      },
+      "type": [
+        "null",
+        "array"
+      ]
+    },
+    "next_cursor": {
+      "type": [
+        "null",
+        "string"
+      ]
+    }
+  },
+  "required": [
+    "items",
+    "next_cursor"
+  ],
+  "type": "object"
+}
