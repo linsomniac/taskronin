@@ -116,8 +116,8 @@ Plan B (server, client, CLI, offline operations, MCP) was executed 2026-10-28..1
 - `internal/cli/cmd_pending.go:144-147`: a resend that ends outcome-unknown is stored with a misleading `last_error` (advice shown is correct).
 - From final review B, deliberately not changed: a backup set that can never be scrubbed blocks purge completion forever (B-M6); exit 8 under `--json` comes with an `internal`/500 problem object (B-M8); a declined `tkr delete` exits 0 silently (B-M10); `passwd --reset` checkpoints without replaying the ledger (B-M11).
 
-## Questions for the owner (checkpoint)
+## Owner decisions at the checkpoint (2026-11-01)
 
-1. Should purge-ledger records be bound to a lasting database instance ID? (`tkr init` now refuses over a leftover ledger, which closes the case found; an ID would also cover a ledger and DB from different histories meeting some other way.)
-2. MCP `search` and `list_tasks` take `limit` 1–200, default 50 — right?
-3. Any of the parked B-M6 / B-M8 / B-M10 / B-M11 behaviors worth changing?
+- Q1 (delegated): Ruling (owner delegated Q1 to controller judgment, 2026-11-01): do NOT bind purge-ledger records to a database instance ID — `tkr init` now refuses over a leftover ledger, which closes the realistic path; the remaining path (restoring/importing data from a different instance into this data dir) is documented in the README instead. An instance ID would need a new migration, a ledger record-format change and new replay/import/restore semantics in the most security-critical code, for a single-user, single-instance tool — the boring choice is the guard plus documentation — if wrong: restoring another instance's snapshot here could scrub same-numbered tasks/entries; the cost then is adding the ID later (new migration + ledger field).
+- Q2: Owner decision (Q2, 2026-11-01): MCP limit 1–200 default 50 confirmed; the tools must say so — list_tasks/search descriptions now state the per-call limit, the default and next_cursor, and search gained the cursor input list_tasks already had (A§10 row updated) so a client can page past the default.
+- Q3: Owner decision (Q3, 2026-11-01): keep B-M6, B-M8, B-M10 and B-M11 as they are.

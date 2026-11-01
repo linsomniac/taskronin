@@ -1,6 +1,10 @@
 {
   "additionalProperties": false,
   "properties": {
+    "cursor": {
+      "description": "next_cursor from an earlier page",
+      "type": "string"
+    },
     "kind": {
       "description": "what to search; default all",
       "enum": [

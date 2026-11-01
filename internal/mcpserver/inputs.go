@@ -28,9 +28,10 @@ type getTaskInput struct {
 
 // searchInput is the input of search.
 type searchInput struct {
-	Query string `json:"query" jsonschema:"text to search for"`
-	Kind  string `json:"kind,omitempty" jsonschema:"what to search; default all"`
-	Limit int    `json:"limit,omitempty" jsonschema:"page size, 1 to 200; default 50"`
+	Query  string `json:"query" jsonschema:"text to search for"`
+	Kind   string `json:"kind,omitempty" jsonschema:"what to search; default all"`
+	Limit  int    `json:"limit,omitempty" jsonschema:"page size, 1 to 200; default 50"`
+	Cursor string `json:"cursor,omitempty" jsonschema:"next_cursor from an earlier page"`
 }
 
 // workReportInput is the input of work_report.

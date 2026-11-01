@@ -60,8 +60,10 @@ func registerReadTools(s *mcp.Server, c *client.Client) {
 	})
 
 	addTool(s, &mcp.Tool{
-		Name:        "list_tasks",
-		Description: "List tasks in a view (triage, backlog, upcoming, done, all; default backlog), optionally filtered by tag or project.",
+		Name: "list_tasks",
+		Description: "List tasks in a view (triage, backlog, upcoming, done, all; default backlog), optionally filtered by tag or project. " +
+			"Returns at most `limit` tasks per call (1 to 200, default 50); a non-null next_cursor means more exist: " +
+			"call again with cursor set to it, or ask for a larger limit.",
 		Annotations: readAnnotations(),
 	}, outputSchema[api.Page[api.Task]](), func(ctx context.Context, in listTasksInput) (any, error) {
 		view := in.View
@@ -83,15 +85,17 @@ func registerReadTools(s *mcp.Server, c *client.Client) {
 	})
 
 	addTool(s, &mcp.Tool{
-		Name:        "search",
-		Description: "Full-text search over task titles and notes and over log entries.",
+		Name: "search",
+		Description: "Full-text search over task titles and notes and over log entries, best matches first. " +
+			"Returns at most `limit` hits per call (1 to 200, default 50); a non-null next_cursor means more matches exist: " +
+			"call again with cursor set to it, ask for a larger limit, or narrow the query.",
 		Annotations: readAnnotations(),
 	}, outputSchema[api.Page[api.SearchHit]](), func(ctx context.Context, in searchInput) (any, error) {
 		kind := in.Kind
 		if kind == "" {
 			kind = "all"
 		}
-		return c.Search(ctx, client.SearchQuery{Q: in.Query, Kind: kind, PageQuery: client.PageQuery{Limit: orDefault(in.Limit)}})
+		return c.Search(ctx, client.SearchQuery{Q: in.Query, Kind: kind, PageQuery: client.PageQuery{Limit: orDefault(in.Limit), Cursor: in.Cursor}})
 	}, enum("kind", "task", "entry", "all"), nonEmpty("query"), limitBounds)
 
 	addTool(s, &mcp.Tool{

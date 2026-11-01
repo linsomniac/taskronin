@@ -442,3 +442,62 @@ func TestWorkReportRejectsTimeOfDay(t *testing.T) {
 		}
 	}
 }
+
+// TestSearchPaging: search hits come back a page at a time and next_cursor
+// fetches the rest (owner decision 2026-11-01: clients must be able to tell
+// the default limit applies and page past it).
+func TestSearchPaging(t *testing.T) {
+	srv, cs := aiSession(t)
+	for i := range 3 {
+		if _, err := srv.Client.AddTask(t.Context(), client.Mut{}, api.AddTaskRequest{Title: fmt.Sprintf("pageable widget %d", i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seen := map[int64]bool{}
+	args := map[string]any{"query": "widget", "kind": "task", "limit": 2}
+	for range 3 {
+		res := call(t, cs, "search", args)
+		if res.IsError {
+			t.Fatalf("error: %s", structured(t, res))
+		}
+		var page api.Page[api.SearchHit]
+		if err := json.Unmarshal(structured(t, res), &page); err != nil {
+			t.Fatal(err)
+		}
+		for _, h := range page.Items {
+			seen[h.ID] = true
+		}
+		if page.NextCursor == nil {
+			break
+		}
+		args["cursor"] = *page.NextCursor
+	}
+	if len(seen) != 3 {
+		t.Fatalf("paged search found %d distinct tasks, want 3", len(seen))
+	}
+}
+
+// TestPagedToolDescriptionsStateLimit: the tool descriptions tell the client
+// about the per-call limit, its default and next_cursor.
+func TestPagedToolDescriptionsStateLimit(t *testing.T) {
+	_, cs := aiSession(t)
+	tools, err := cs.ListTools(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked := 0
+	for _, tool := range tools.Tools {
+		if tool.Name != "list_tasks" && tool.Name != "search" {
+			continue
+		}
+		checked++
+		for _, want := range []string{"1 to 200", "default 50", "next_cursor"} {
+			if !strings.Contains(tool.Description, want) {
+				t.Errorf("%s description lacks %q: %s", tool.Name, want, tool.Description)
+			}
+		}
+	}
+	if checked != 2 {
+		t.Fatalf("checked %d tools, want 2", checked)
+	}
+}

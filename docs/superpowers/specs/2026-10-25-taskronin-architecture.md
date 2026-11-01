@@ -2886,7 +2886,7 @@ without ID/`-N` → usage error. The API request always carries explicit `task_i
 | `today` | `{}` | `api.Today` | read | readOnly, openWorld=false |
 | `list_tasks` | `{view?: triage\|backlog\|upcoming\|done\|all = backlog, tag?, project?, limit? (1–200, 50), cursor?}` | `api.Page[api.Task]` | read | readOnly |
 | `get_task` | `{id: int}` | `api.TaskDetail` | read | readOnly |
-| `search` | `{query: string, kind?: task\|entry\|all, limit?}` | `api.Page[api.SearchHit]` | read | readOnly |
+| `search` | `{query: string, kind?: task\|entry\|all = all, limit? (1–200, 50), cursor?}` | `api.Page[api.SearchHit]` | read | readOnly |
 | `work_report` | `{from?: datespec (Past, default week start), to?: datespec (Past, default today), tag?, project?, include_todo?: bool}` | `api.Report` | read | readOnly |
 | `add_task` | `{title, notes?, due?: datespec (Future), tags?: [string], project?, priority?: H\|M\|L}` | `api.OpResponse` | capture | destructive=false, idempotent=false; never accepts placement (always lands in triage) |
 | `log_work` | `{task_id: int\|null (required), title, notes?, date?: datespec (Past, default today), time?: "HH:MM"}` | `api.OpResponse` | capture | destructive=false |

@@ -133,6 +133,13 @@ systemctl --user start taskronin.socket
 `purge` and `scrub-backups` need the owner password typed on a terminal. Exports
 and log lines made before a purge are out of its reach.
 
+The purge ledger (`~/.local/share/taskronin/purge-ledger`) belongs to the
+database in the same data directory: every restore, import and server start
+re-applies it by task and entry ID. Only restore snapshots and import exports
+that came from this instance, and never copy a ledger between instances. `tkr
+init` refuses to start over a leftover ledger; to begin again from scratch,
+move the old data directory aside rather than deleting just the database.
+
 ## Security model
 
 - Processes running as you are trusted. They can run `tkr` (which reads
