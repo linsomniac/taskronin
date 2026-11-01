@@ -170,12 +170,14 @@ func (s *Server) Start(t testing.TB) {
 		s.mu.Unlock()
 		t.Fatal(err)
 	}
+	var level slog.Level
+	_ = level.UnmarshalText([]byte(cfg.Log.Level)) // validated by LoadServer
 	ctx, cancel := context.WithCancel(context.Background())
 	done, started := make(chan error, 1), make(chan server.Startup, 1)
 	s.cancel, s.done, s.t = cancel, done, t
 	s.mu.Unlock()
 	go func() {
-		done <- server.Run(ctx, cfg, server.Deps{Paths: s.Paths, Clock: s.Clock, Logger: slog.New(slog.NewJSONHandler(s.Log, nil)), Started: func(v server.Startup) { started <- v }})
+		done <- server.Run(ctx, cfg, server.Deps{Paths: s.Paths, Clock: s.Clock, Logger: slog.New(slog.NewJSONHandler(s.Log, &slog.HandlerOptions{Level: level})), Started: func(v server.Startup) { started <- v }})
 	}()
 	timer := time.NewTimer(10 * time.Second)
 	defer timer.Stop()

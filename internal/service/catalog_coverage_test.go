@@ -13,10 +13,7 @@ import (
 // IDs whose tests live in other plans (catalog §17). Plans B and C remove
 // their IDs here when they add Test<PFX><NN>_<suffix> scenario tests.
 var notPlanA = map[string]string{
-	"TRI-17": "C", "FOC-04": "B", "FOC-05": "B", "FOC-06": "B", "FOC-07": "B", "FOC-08": "B", "FOC-09": "B",
-	"FOC-10": "B", "FOC-11": "B", "FOC-12": "B", "INT-06": "B", "IDM-09": "B", "SCP-05": "B", "SCP-06": "B",
-	"RPT-03": "B", "RPT-04": "B", "PRG-01": "B", "PRG-02": "B", "PRG-03": "B", "PRG-12": "B", "PRG-18": "B",
-	"PRG-20": "B", "PRG-21": "B", "PRG-22": "B",
+	"TRI-17": "C",
 }
 
 func TestCatalogCoverage(t *testing.T) {
