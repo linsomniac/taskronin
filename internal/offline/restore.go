@@ -129,6 +129,7 @@ func Restore(ctx context.Context, e *Env, snapshot string, yes bool) (_ RestoreR
 		OwnerTokenPending: res.OwnerTokenMinted, StartedAt: e.clock().Now().UTC(),
 	}, onInstalled)
 	if err != nil {
+		e.swapFailureHint("restore")
 		return res, err
 	}
 	_, err = fmt.Fprintf(e.Out, "restored %s; the previous database is in %s\n",
@@ -171,6 +172,15 @@ func prepareStaged(ctx context.Context, e *Env, set backup.FileSet, staged *back
 	if err := ctx.Err(); err != nil {
 		return "", offlineError(err)
 	}
+	if cur == nil && !liveDBUnusable(readErr) {
+		// Permission, I/O, busy, lock and every other failure: the live DB may
+		// be intact, so the destructive path below must not run (B-I2).
+		mapped, _ := domain.AsError(store.MapErr(readErr))
+		failed := *mapped
+		failed.Detail = "cannot read the current database (" + textsafe.SanitizeLine(readErr.Error()) +
+			"); the restore was not started and nothing was changed — fix the cause and run it again"
+		return "", &failed
+	}
 	if cur == nil {
 		// Unreadable live DB: recover the best sequence marks from the staged
 		// copy and every readable snapshot (BF24: the live marks are lost).
@@ -202,9 +212,12 @@ func prepareStaged(ctx context.Context, e *Env, set backup.FileSet, staged *back
 			return "", err
 		}
 	}
-	ledger, _, err := backup.OpenLedger(e.Paths.LedgerFile)
+	ledger, health, err := backup.OpenLedger(e.Paths.LedgerFile)
 	if err != nil {
 		return "", offlineError(err)
+	}
+	if err := e.warnDamagedLedger(health, "restore"); err != nil {
+		return "", err
 	}
 	recs, err := ledger.Records()
 	if err != nil {
@@ -231,6 +244,28 @@ func prepareStaged(ctx context.Context, e *Env, set backup.FileSet, staged *back
 		return "", err
 	}
 	return owner, nil
+}
+
+// swapFailureHint says how to recover once Swap has written its journal: from
+// then on the server refuses to start until --resume or --rollback (B-M3). A
+// failure before the journal exists changed nothing and needs no hint.
+func (e *Env) swapFailureHint(kind string) {
+	if _, err := os.Lstat(e.Paths.SwapJournal()); err != nil {
+		return
+	}
+	_, _ = fmt.Fprintf(e.Err, "the %s stopped while replacing the database: run `tkr restore --resume` to finish it, "+
+		"or `tkr restore --rollback` to put the previous database back\n", kind)
+}
+
+// warnDamagedLedger warns, without refusing, that records on a damaged ledger
+// line are not replayed into the restored or imported data (B-M4).
+func (e *Env) warnDamagedLedger(health backup.LedgerHealth, kind string) error {
+	if !health.Damaged {
+		return nil
+	}
+	_, err := fmt.Fprintf(e.Err, "WARNING: the purge ledger is damaged: a purge recorded on a damaged line is not replayed, "+
+		"so its content may come back with this %s. Run `tkr purge --repair-ledger` afterwards.\n", kind)
+	return offlineError(err)
 }
 
 // stampRestore is A§12.2 step 4 in one writer transaction on the staged store:
@@ -338,16 +373,49 @@ func raiseStaged(ctx context.Context, st *store.Store, marks map[string]int64) (
 	return offlineError(tx.Commit())
 }
 
+// errLiveStructure marks a live database that opens and passes quick_check but
+// lacks the tables or the auth_state row a Taskronin database always has.
+var errLiveStructure = errors.New("the current database lacks Taskronin's required tables or auth_state row")
+
+// liveTables are the tables readCurrent reads; every initialized DB has them.
+var liveTables = []string{"auth_state", "api_tokens", "sqlite_sequence"}
+
+// liveDBUnusable classifies a readCurrent failure (A§12.2 step 3).
+//
+// AIDEV-NOTE: final review B-I2. ONLY a missing live DB or a genuinely damaged
+// one (SQLite CORRUPT/NOTADB, a failed quick_check, or a failed structural
+// check) may take the unreadable path, which revokes every token, mints a new
+// owner token, disables web login and jumps every id sequence by 10 000 —
+// effects that cannot be undone once the swap runs. Permission (EACCES on the
+// DB or a root-owned -wal/-shm), I/O, busy, lock, out-of-memory, too many open
+// files and any unclassified error must fail the restore before anything
+// changes, with the cause shown. When in doubt, refuse.
+func liveDBUnusable(err error) bool {
+	return errors.Is(err, fs.ErrNotExist) || errors.Is(err, errLiveStructure) || store.IsCorrupt(err)
+}
+
 // readCurrent reads the live DB's auth state, tokens and sequences. It returns
-// nil and the reason when the database is missing or unreadable (A§12.2 step 3).
+// nil and the reason when the database cannot be read; liveDBUnusable decides
+// whether that reason permits the unreadable path (A§12.2 step 3).
 func readCurrent(ctx context.Context, e *Env) (*currentState, error) {
 	st, err := store.Open(ctx, e.Paths.DB)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = st.Close() }()
+	for _, table := range liveTables {
+		var n int
+		if err := st.Reader.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?", table).Scan(&n); err != nil {
+			return nil, store.MapErr(err)
+		}
+		if n != 1 {
+			return nil, fmt.Errorf("%w: no %s table", errLiveStructure, table)
+		}
+	}
 	var cur currentState
-	if cur.Auth, err = store.GetAuthState(ctx, st.Reader); err != nil {
+	if cur.Auth, err = store.GetAuthState(ctx, st.Reader); errors.Is(err, store.ErrNotFound) {
+		return nil, fmt.Errorf("%w: no auth_state row", errLiveStructure)
+	} else if err != nil {
 		return nil, err
 	}
 	if cur.Tokens, err = store.ListTokens(ctx, st.Reader); err != nil {
@@ -480,10 +548,15 @@ func RestoreResume(ctx context.Context, e *Env) error {
 	}
 	if j.OwnerTokenPending {
 		ok, err := ownerTokenWorks(ctx, e)
-		if err != nil {
-			return err
-		}
-		if !ok {
+		switch {
+		case err != nil:
+			// The swap is already complete: a failed check must not turn it into
+			// a bare failure. Warn with the remedy and finish (B-M12).
+			if _, err := fmt.Fprintf(e.Err, "could not check the new owner token (%s) — if the server rejects it, run `tkr passwd --reset`\n",
+				causeOf(err)); err != nil {
+				return offlineError(err)
+			}
+		case !ok:
 			if _, err := fmt.Fprintln(e.Err, "the new owner token was not saved — run `tkr passwd --reset`"); err != nil {
 				return offlineError(err)
 			}

@@ -77,6 +77,9 @@ func Init(ctx context.Context, e *Env, o InitOptions) (result InitResult, err er
 	} else if exists {
 		return result, domain.Errorf(domain.CodeConflict, "already initialized")
 	}
+	if err := refuseInitLeftovers(e.Paths); err != nil {
+		return result, err
+	}
 	zoneName, err := initTimezone(e, o)
 	if err != nil {
 		return result, err
@@ -97,6 +100,16 @@ func Init(ctx context.Context, e *Env, o InitOptions) (result InitResult, err er
 	allow, err := initLoopback(e, o)
 	if err != nil {
 		return result, err
+	}
+	// AIDEV-NOTE: final review B-I3. The MCP expiry is read and validated here,
+	// after the password and loopback answers (stdin order) but BEFORE any
+	// config, token or DB is written: a bad answer used to fail after the DB
+	// was published, leaving a half-initialized instance.
+	var mcpExpiry sql.Null[time.Time]
+	if o.MCPToken {
+		if mcpExpiry, err = initMCPExpiry(e, reader); err != nil {
+			return result, err
+		}
 	}
 	if !serverExists {
 		e.Server.Web.AllowPlainLoopback = allow
@@ -134,7 +147,7 @@ func Init(ctx context.Context, e *Env, o InitOptions) (result InitResult, err er
 	}
 	result = InitResult{DB: e.Paths.DB, OwnerToken: e.Paths.OwnerToken, AllowPlainLoopback: e.Server.Web.AllowPlainLoopback}
 	if o.MCPToken {
-		if err := initMCPToken(ctx, e, reader); err != nil {
+		if err := initMCPToken(ctx, e, mcpExpiry); err != nil {
 			return result, err
 		}
 		result.MCPToken = e.Paths.TokenFile("mcp")
@@ -152,6 +165,37 @@ func Init(ctx context.Context, e *Env, o InitOptions) (result InitResult, err er
 	}
 	_, err = fmt.Fprintln(e.Out, "Next: tkr add \"…\"\nShell/tmux status line: tkr status --short")
 	return result, err
+}
+
+// refuseInitLeftovers refuses a fresh init over files an earlier database left
+// in the data dir (A§8.5 step 1).
+//
+// AIDEV-NOTE: final review B-C1. Ledger records carry bare row ids with no
+// lineage, and every server start, offline command and import replays the
+// data dir's purge-ledger against whatever database lives there. A new DB
+// restarts its sequences at 1, so a leftover ledger would silently scrub the
+// new tasks and entries that reuse the purged ids; a stray -wal could even be
+// replayed into the newly published file. Never delete or ignore these files
+// here: the owner must restore (same lineage) or move them aside deliberately.
+// begin refuses both journals first, with --resume/--rollback guidance; they
+// are listed again as defence in depth should begin's policy change.
+func refuseInitLeftovers(p config.Paths) error {
+	var found []string
+	for _, path := range []string{p.LedgerFile, p.DB + "-wal", p.DB + "-shm", p.SwapJournal(), config.ScrubJournal(p.BackupDir)} {
+		exists, err := initFileExists(path)
+		if err != nil {
+			return err
+		}
+		if exists {
+			found = append(found, textsafe.SanitizeLine(path))
+		}
+	}
+	if len(found) == 0 {
+		return nil
+	}
+	return domain.Errorf(domain.CodeConflict, "refusing to initialize: no database exists, but %s remain from an earlier one "+
+		"(a leftover purge ledger would scrub the new database's tasks). `tkr restore SNAPSHOT` recovers that database from a backup; "+
+		"to start fresh instead, deliberately move these files aside first", strings.Join(found, ", "))
 }
 
 func initFileExists(path string) (bool, error) {
@@ -387,30 +431,32 @@ func bootstrapInit(ctx context.Context, e *Env, path, hash string) (token string
 	return auth.FormatToken(id, secret), nil
 }
 
-func initMCPToken(ctx context.Context, e *Env, reader *bufio.Reader) (err error) {
-	var expires sql.Null[time.Time]
-	if e.TTY {
-		if _, err := fmt.Fprint(e.Err, "MCP token expiry (duration, YYYY-MM-DD, or never): "); err != nil {
-			return err
-		}
-		line, err := initReadLine(reader)
-		if err != nil {
-			return err
-		}
-		if line != "never" {
-			if duration, err := time.ParseDuration(line); err == nil && duration > 0 {
-				expires = sql.Null[time.Time]{V: e.Clock.Now().Add(duration), Valid: true}
-			} else if date, err := civil.ParseDate(line); err == nil {
-				zone, err := e.Server.Zone()
-				if err != nil {
-					return err
-				}
-				expires = sql.Null[time.Time]{V: zone.StartOfDay(date), Valid: true}
-			} else {
-				return domain.Errorf(domain.CodeValidation, "MCP expiry must be a positive duration, YYYY-MM-DD, or never")
-			}
-		}
+// initMCPExpiry prompts on a terminal for the MCP token expiry and parses it
+// with the `tkr token create` grammar. Without a terminal the token never
+// expires, as before. An invalid answer is a usage error (ErrUsage).
+func initMCPExpiry(e *Env, reader *bufio.Reader) (sql.Null[time.Time], error) {
+	if !e.TTY {
+		return sql.Null[time.Time]{}, nil
 	}
+	if _, err := fmt.Fprint(e.Err, "MCP token expiry (e.g. 30d, 2026-12-31, never): "); err != nil {
+		return sql.Null[time.Time]{}, err
+	}
+	line, err := initReadLine(reader)
+	if err != nil {
+		return sql.Null[time.Time]{}, err
+	}
+	zone, err := e.Server.Zone()
+	if err != nil {
+		return sql.Null[time.Time]{}, err
+	}
+	expires, err := domain.ParseTokenExpiry(strings.TrimSpace(line), e.Clock.Now(), zone)
+	if err != nil {
+		return expires, &domain.Error{Code: domain.CodeValidation, Detail: "MCP token expiry " + err.Error(), Err: ErrUsage}
+	}
+	return expires, nil
+}
+
+func initMCPToken(ctx context.Context, e *Env, expires sql.Null[time.Time]) (err error) {
 	st, err := e.openStore(ctx)
 	if err != nil {
 		return err

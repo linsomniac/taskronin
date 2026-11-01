@@ -442,6 +442,46 @@ func TestOpenRejectsFailedQuickCheck(t *testing.T) {
 	}
 }
 
+// TestIsCorrupt separates a damaged file from one that merely cannot be opened
+// right now; offline restore relies on it (final review B-I2).
+func TestIsCorrupt(t *testing.T) {
+	dir := t.TempDir()
+	notADB := filepath.Join(dir, "corrupt.db")
+	if err := os.WriteFile(notADB, []byte(strings.Repeat("not a SQLite database", 100)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, notADBErr := Open(t.Context(), notADB)
+	failed := stagingStore(t)
+	execSQL(t, failed.Writer, "CREATE TABLE t(x INTEGER CHECK (x > 0)) STRICT")
+	execSQL(t, failed.Writer, "PRAGMA ignore_check_constraints=ON")
+	execSQL(t, failed.Writer, "INSERT INTO t VALUES (?)", -1)
+	if err := failed.Close(); err != nil {
+		t.Fatal(err)
+	}
+	_, checkErr := Open(t.Context(), failed.Path)
+	_, missingErr := Open(t.Context(), filepath.Join(dir, "missing.db"))
+	for _, tc := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"not a database", notADBErr, true},
+		{"quick_check failed", checkErr, true},
+		{"wrapped integrity", fmt.Errorf("x: %w", MapErr(checkErr)), true},
+		{"missing", missingErr, false},
+		{"busy", &domain.Error{Code: domain.CodeBusy, Err: errors.New("database is locked")}, false},
+		{"permission", fs.ErrPermission, false},
+		{"nil", nil, false},
+	} {
+		if got := IsCorrupt(tc.err); got != tc.want {
+			t.Errorf("%s: IsCorrupt(%v) = %v, want %v", tc.name, tc.err, got, tc.want)
+		}
+	}
+	if !errors.Is(checkErr, ErrIntegrity) || !strings.Contains(checkErr.Error(), "PRAGMA quick_check: CHECK constraint failed") {
+		t.Fatalf("quick_check failure = %v", checkErr)
+	}
+}
+
 func TestCheckVersion(t *testing.T) {
 	for _, tc := range []struct {
 		version string

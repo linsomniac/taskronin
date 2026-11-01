@@ -178,9 +178,16 @@ func problemFor(err error) api.Problem {
 	if errors.As(err, &pe) {
 		return pe.Problem
 	}
-	p := api.Problem{Code: string(domain.CodeInternal), Detail: err.Error(), Status: http.StatusInternalServerError}
+	p := api.Problem{Code: string(domain.CodeInternal), Detail: textsafe.SanitizeLine(err.Error()), Status: http.StatusInternalServerError}
 	if de, ok := domain.AsError(err); ok {
 		p.Code, p.Detail, p.Status = string(de.Code), de.Detail, problemStatus(de.Code)
+		// AIDEV-NOTE: domain errors here are local (offline commands, config,
+		// the CLI itself): API failures arrive as ProblemError above and never
+		// carry a cause. A local internal failure shows its sanitized cause to
+		// the owner's own terminal instead of a bare "internal" (B-I1).
+		if p.Detail == "" && de.Code == domain.CodeInternal && de.Err != nil {
+			p.Detail = textsafe.SanitizeLine(de.Err.Error())
+		}
 		if p.Detail == "" {
 			p.Detail = string(de.Code)
 		}

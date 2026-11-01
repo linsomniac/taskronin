@@ -534,6 +534,113 @@ func TestRestoreUnreadableCurrent(t *testing.T) {
 	}
 }
 
+// TestRestoreLiveReadErrorClassification is final review B-I2: only a missing
+// or genuinely unusable live DB may take the destructive unreadable path
+// (revoke every token, new owner token, web login off, ids +10 000). Any other
+// failure to read it must stop the restore before anything changes.
+func TestRestoreLiveReadErrorClassification(t *testing.T) {
+	setup := func(t *testing.T) (*testutil.Server, string) {
+		srv := testutil.StartServer(t)
+		restoreAdd(t, srv.Client, "a")
+		snap, err := srv.Client.RunBackup(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		restoreAdd(t, srv.Client, "b")
+		srv.Stop()
+		return srv, snap.Name
+	}
+	refusals := map[string]func(t *testing.T, srv *testutil.Server) func(){
+		"permission denied": func(t *testing.T, srv *testutil.Server) func() {
+			if os.Geteuid() == 0 {
+				t.Skip("root ignores file permissions")
+			}
+			if err := os.Chmod(srv.Paths.DB, 0); err != nil {
+				t.Fatal(err)
+			}
+			return func() {
+				if err := os.Chmod(srv.Paths.DB, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+		},
+		"wal is not a file": func(t *testing.T, srv *testutil.Server) func() {
+			wal := srv.Paths.DB + "-wal"
+			if err := os.RemoveAll(wal); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Mkdir(wal, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			return func() {
+				if err := os.Remove(wal); err != nil {
+					t.Fatal(err)
+				}
+			}
+		},
+	}
+	for name, breakLive := range refusals {
+		t.Run("refused/"+name, func(t *testing.T) {
+			srv, snap := setup(t)
+			owner := fileBytes(t, srv.Paths.OwnerToken)
+			dbHash := fileHash(t, srv.Paths.DB)
+			undo := breakLive(t, srv)
+			e := passwdEnv(t, srv, "")
+			_, err := offline.Restore(t.Context(), e, snap, true)
+			if err == nil {
+				t.Fatal("restore over an unreadable-but-intact live DB succeeded")
+			}
+			if detail := detailOf(err); !strings.Contains(detail, "nothing was changed") || !strings.Contains(detail, "current database") {
+				t.Fatalf("refusal detail = %q", detail)
+			} else {
+				t.Logf("refusal: %s", detail)
+			}
+			if strings.Contains(e.Err.(*bytes.Buffer).String(), "WARNING") {
+				t.Fatalf("took the unreadable path: %q", e.Err.(*bytes.Buffer).String())
+			}
+			requireNoLeftovers(t, srv)
+			if asides, _ := filepath.Glob(srv.Paths.DB + ".pre-restore-*"); len(asides) != 0 {
+				t.Fatalf("aside created: %v", asides)
+			}
+			undo()
+			if fileHash(t, srv.Paths.DB) != dbHash || !bytes.Equal(owner, fileBytes(t, srv.Paths.OwnerToken)) {
+				t.Fatal("the live DB or owner.token changed")
+			}
+			srv.Start(t) // the original owner token still works and nothing was lost
+			requireTitles(t, srv.Client, "a", "b")
+		})
+	}
+	unusable := map[string]func(t *testing.T, srv *testutil.Server){
+		"missing": func(t *testing.T, srv *testutil.Server) {
+			if err := os.Remove(srv.Paths.DB); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"not a database": corruptLiveDB,
+		"no schema": func(t *testing.T, srv *testutil.Server) {
+			if err := os.WriteFile(srv.Paths.DB, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		},
+	}
+	for name, breakLive := range unusable {
+		t.Run("unreadable path/"+name, func(t *testing.T) {
+			srv, snap := setup(t)
+			breakLive(t, srv)
+			e := passwdEnv(t, srv, "")
+			res, err := offline.Restore(t.Context(), e, snap, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !res.OwnerTokenMinted || !strings.Contains(e.Err.(*bytes.Buffer).String(), "WARNING") {
+				t.Fatalf("result = %+v, stderr = %q", res, e.Err.(*bytes.Buffer).String())
+			}
+			srv.Start(t)
+			requireTitles(t, srv.Client, "a")
+		})
+	}
+}
+
 func TestRestoreOwnerTokenPendingResume(t *testing.T) {
 	setup := func(t *testing.T) (*testutil.Server, string) {
 		srv := testutil.StartServer(t)
@@ -701,5 +808,120 @@ func TestRestoreEveryCrashPoint(t *testing.T) {
 				requireTitles(t, srv.Client, want...)
 			})
 		}
+	}
+}
+
+// writeDamagedLedger installs a purge ledger whose middle line fails its
+// checksum (A§12.6: damaged; the valid records still replay).
+func writeDamagedLedger(t *testing.T, path string) {
+	t.Helper()
+	scratch := filepath.Join(t.TempDir(), "scratch")
+	sl, _, err := backup.OpenLedger(scratch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rec := range []string{randomRec(t), randomRec(t)} {
+		if err := sl.Append(backup.LedgerRecord{V: 1, Rec: rec, At: 1, State: backup.LedgerPending, Tasks: []domain.TaskID{99}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw, err := os.ReadFile(scratch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.SplitAfter(string(raw), "\n")
+	damaged := lines[0] + "{\"v\":1,\"rec\":\"zz\",\"at\":1,\"state\":\"pending\",\"tasks\":[2],\"sum\":\"bad\"}\n" + lines[1]
+	if err := os.WriteFile(path, []byte(damaged), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestRestoreSwapFailureHint is final review B-M3: once the swap journal is
+// written, an interrupted or failed swap says how to finish or undo it.
+func TestRestoreSwapFailureHint(t *testing.T) {
+	srv := testutil.StartServer(t)
+	restoreAdd(t, srv.Client, "one")
+	snap, err := srv.Client.RunBackup(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.Stop()
+	e := passwdEnv(t, srv, "")
+	if _, err := offline.Restore(crashAtSwap(t.Context(), "moved-old"), e, snap.Name, true); !errors.Is(err, errRestoreCrash) {
+		t.Fatalf("crash = %v", err)
+	}
+	for _, want := range []string{"tkr restore --resume", "tkr restore --rollback"} {
+		if !strings.Contains(e.Err.(*bytes.Buffer).String(), want) {
+			t.Fatalf("stderr %q does not mention %q", e.Err.(*bytes.Buffer).String(), want)
+		}
+	}
+	if err := offline.RestoreRollback(t.Context(), passwdEnv(t, srv, "")); err != nil {
+		t.Fatal(err)
+	}
+	// A refusal before any journal exists must not send the user to --resume.
+	junk := filepath.Join(t.TempDir(), "junk.db")
+	if err := os.WriteFile(junk, []byte("not a database"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e = passwdEnv(t, srv, "")
+	_, err = offline.Restore(t.Context(), e, junk, true)
+	testutil.RequireCode(t, err, domain.CodeValidation)
+	if strings.Contains(e.Err.(*bytes.Buffer).String(), "--resume") {
+		t.Fatalf("hint without a journal: %q", e.Err.(*bytes.Buffer).String())
+	}
+}
+
+// TestRestoreResumeOwnerTokenCheckError is final review B-M12: after a
+// completed resume, an I/O error while checking owner.token still finishes
+// with the `tkr passwd --reset` hint instead of a bare failure.
+func TestRestoreResumeOwnerTokenCheckError(t *testing.T) {
+	srv := testutil.StartServer(t)
+	restoreAdd(t, srv.Client, "a")
+	snap, err := srv.Client.RunBackup(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.Stop()
+	corruptLiveDB(t, srv)
+	if _, err := offline.Restore(crashAtSwap(t.Context(), "installed"), passwdEnv(t, srv, ""), snap.Name, true); !errors.Is(err, errRestoreCrash) {
+		t.Fatalf("crash = %v", err)
+	}
+	// owner.token cannot be read at all (here: a directory, EISDIR).
+	if err := os.Remove(srv.Paths.OwnerToken); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(srv.Paths.OwnerToken, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	e := passwdEnv(t, srv, "")
+	if err := offline.RestoreResume(t.Context(), e); err != nil {
+		t.Fatalf("resume after a completed swap = %v", err)
+	}
+	if stderr := e.Err.(*bytes.Buffer).String(); !strings.Contains(stderr, "tkr passwd --reset") || !strings.Contains(stderr, "is a directory") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if !strings.Contains(e.Out.(*bytes.Buffer).String(), "resumed and completed") {
+		t.Fatalf("stdout = %q", e.Out.(*bytes.Buffer).String())
+	}
+	requireNoLeftovers(t, srv)
+}
+
+// TestRestoreWarnsDamagedLedger is final review B-M4: a record lost to a
+// damaged ledger line is not replayed into the restored data, so say so.
+func TestRestoreWarnsDamagedLedger(t *testing.T) {
+	srv := testutil.StartServer(t)
+	restoreAdd(t, srv.Client, "a")
+	snap, err := srv.Client.RunBackup(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.Stop()
+	writeDamagedLedger(t, srv.Paths.LedgerFile)
+	e := passwdEnv(t, srv, "")
+	if _, err := offline.Restore(t.Context(), e, snap.Name, true); err != nil {
+		t.Fatal(err)
+	}
+	if stderr := e.Err.(*bytes.Buffer).String(); !strings.Contains(stderr, "purge ledger is damaged") || !strings.Contains(stderr, "tkr purge --repair-ledger") {
+		t.Fatalf("stderr = %q", stderr)
 	}
 }

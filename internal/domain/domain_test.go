@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"taskronin/internal/civil"
 )
@@ -356,4 +357,32 @@ func FuzzCursor(f *testing.F) {
 			t.Fatalf("cursor round trip: %#v -> %#v, %v", got, again, err)
 		}
 	})
+}
+
+func TestParseTokenExpiry(t *testing.T) {
+	zone, err := civil.LoadZone("America/Denver")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 10, 28, 16, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		in   string
+		want sql.Null[time.Time]
+	}{
+		{"never", sql.Null[time.Time]{}},
+		{"12h", sql.Null[time.Time]{V: now.Add(12 * time.Hour), Valid: true}},
+		{"30d", sql.Null[time.Time]{V: now.Add(30 * 24 * time.Hour), Valid: true}},
+		{"36500d", sql.Null[time.Time]{V: now.Add(36500 * 24 * time.Hour), Valid: true}},
+		{"2026-12-31", sql.Null[time.Time]{V: zone.StartOfDay(civil.MustDate("2026-12-31")), Valid: true}},
+	} {
+		got, err := ParseTokenExpiry(tc.in, now, zone)
+		if err != nil || got.Valid != tc.want.Valid || !got.V.Equal(tc.want.V) {
+			t.Errorf("%q = %v, %v; want %v", tc.in, got, err, tc.want)
+		}
+	}
+	for _, in := range []string{"", "soon", "720", "1h30m", "90m", "0h", "0d", "36501d", "999999d", "1234567h", "-1d", " 30d", "2026-10-28", "2020-01-01", "Never"} {
+		if got, err := ParseTokenExpiry(in, now, zone); err == nil || got.Valid {
+			t.Errorf("%q accepted: %v", in, got)
+		}
+	}
 }

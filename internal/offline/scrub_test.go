@@ -460,9 +460,13 @@ func TestScrubBatchErrors(t *testing.T) {
 	requireStatus(t, results, f.s1, "rewritten")
 	requireStatus(t, results, f.p1, "rewritten")
 	for _, r := range results {
-		if r.Path == corrupt && r.Err == "" {
-			t.Fatal("error result has no message")
+		// B-I1: the cause, not a bare code, so the owner can tell why.
+		if r.Path == corrupt && (r.Err == "" || r.Err == string(domain.CodeInternal)) {
+			t.Fatalf("error result has no cause: %q", r.Err)
 		}
+	}
+	if out := f.e.Out.(*bytes.Buffer).String(); strings.Contains(out, "error (internal)") || !strings.Contains(out, filepath.Base(corrupt)+": error (") {
+		t.Fatalf("per-set lines = %q", out)
 	}
 	if len(completeLines(ledgerRecords(t, f.srv))) != 0 {
 		t.Fatal("completed although a set failed")

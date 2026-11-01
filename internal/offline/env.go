@@ -35,6 +35,11 @@ type Env struct {
 	Logger       *slog.Logger
 }
 
+// ErrUsage marks a refusal caused by an invalid answer or argument the user
+// can correct (an invalid `tkr init --mcp-token` expiry). It is wrapped in a
+// domain validation error; the CLI reports it as a usage error (exit 2).
+var ErrUsage = errors.New("invalid input")
+
 type journalPolicy uint8
 
 const (
@@ -226,12 +231,35 @@ func checkpoint(ctx context.Context, st *store.Store) error {
 	return offlineError(st.CheckpointTruncate(ctx))
 }
 
+// offlineError maps err to the domain vocabulary for the CLI.
+//
+// AIDEV-NOTE: final review B-I1. Offline output reaches only the local owner's
+// own terminal, so an internal failure without a safe detail carries its
+// sanitized cause instead of a bare "internal" (the API rule that a cause is
+// never sent protects remote clients, not this path). Causes here are SQLite,
+// filesystem, journal and systemctl errors; never wrap a password or token
+// secret into an error on an offline path. The original is never mutated.
 func offlineError(err error) error {
 	if err == nil {
 		return nil
 	}
 	de, _ := domain.AsError(store.MapErr(err))
+	if de.Code == domain.CodeInternal && de.Detail == "" && de.Err != nil {
+		withCause := *de
+		withCause.Detail = textsafe.SanitizeLine(de.Err.Error())
+		return &withCause
+	}
 	return de
+}
+
+// causeOf is the sanitized, user-facing reason for err, for warnings that do
+// not fail the command.
+func causeOf(err error) string {
+	de, _ := domain.AsError(offlineError(err))
+	if de.Detail != "" {
+		return de.Detail
+	}
+	return string(de.Code)
 }
 
 type crashHookKey struct{}

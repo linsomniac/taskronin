@@ -266,7 +266,8 @@ func scrubSets(ctx context.Context, e *Env, recs []backup.LedgerRecord, check bo
 		status, err := e.scrubOne(ctx, recs, path, check)
 		res := SetResult{Path: path, Status: status}
 		if err != nil {
-			res.Status, res.Err = scrubError, err.Error()
+			// offlineError: service failures carry their cause too (B-I1).
+			res.Status, res.Err = scrubError, offlineError(err).Error()
 		}
 		results = append(results, res)
 		if err != nil {

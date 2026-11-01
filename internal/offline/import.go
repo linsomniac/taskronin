@@ -117,6 +117,7 @@ func Import(ctx context.Context, e *Env, path string, yes bool) (_ ImportResult,
 	if err := backup.Swap(ctx, e.Paths.SwapJournal(), &backup.SwapJournal{
 		Kind: backup.SwapImport, New: staged.Path, Target: e.Paths.DB, Aside: res.Aside, StartedAt: e.clock().Now().UTC(),
 	}, nil); err != nil {
+		e.swapFailureHint("import")
 		return res, err
 	}
 	_, err = fmt.Fprintf(e.Out, "imported %d tasks, %d entries and %d blocks; the previous database is in %s\n",
@@ -270,9 +271,12 @@ func prepareImport(ctx context.Context, e *Env, live *liveImportState, file *sto
 	if err != nil {
 		return nil, err
 	}
-	ledger, _, err := backup.OpenLedger(e.Paths.LedgerFile)
+	ledger, health, err := backup.OpenLedger(e.Paths.LedgerFile)
 	if err != nil {
 		return nil, offlineError(err)
+	}
+	if err := e.warnDamagedLedger(health, "import"); err != nil {
+		return nil, err
 	}
 	recs, err := ledger.Records()
 	if err != nil {

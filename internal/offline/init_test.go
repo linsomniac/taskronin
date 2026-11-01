@@ -168,6 +168,101 @@ func TestInitRefusesExisting(t *testing.T) {
 	}
 }
 
+// reinitEnv models `tkr init --password-stdin --yes` run again over an existing
+// instance whose server.toml is kept.
+func reinitEnv(srv *testutil.Server) (*offline.Env, offline.InitOptions) {
+	return &offline.Env{Paths: srv.Paths, Clock: srv.Clock, In: strings.NewReader(testutil.Password + "\n"),
+			Out: new(bytes.Buffer), Err: new(bytes.Buffer)},
+		offline.InitOptions{Timezone: "America/Denver", PasswordStdin: true, NoSystemd: true, Yes: true}
+}
+
+// TestInitRefusesLeftovers is final-review probe B-C1: a purge ledger left by
+// an earlier database replays with delete semantics against whatever database
+// lives in the data dir next, so a fresh init must not silently arm it.
+func TestInitRefusesLeftovers(t *testing.T) {
+	t.Run("purge ledger after the database was deleted", func(t *testing.T) {
+		f := purgeFixture(t)
+		if _, err := offline.Purge(t.Context(), f.e, purgeTask1()); err != nil {
+			t.Fatal(err)
+		}
+		srv := f.srv
+		for _, suffix := range []string{"", "-wal", "-shm"} {
+			if err := os.Remove(srv.Paths.DB + suffix); err != nil && !errors.Is(err, os.ErrNotExist) {
+				t.Fatal(err)
+			}
+		}
+		ownerBefore := fileBytes(t, srv.Paths.OwnerToken)
+		e, o := reinitEnv(srv)
+		_, err := offline.Init(t.Context(), e, o)
+		testutil.RequireCode(t, err, domain.CodeConflict)
+		for _, want := range []string{srv.Paths.LedgerFile, "tkr restore", "move"} {
+			if !strings.Contains(detailOf(err), want) {
+				t.Errorf("refusal %q does not mention %q", detailOf(err), want)
+			}
+		}
+		requireAbsent(t, srv.Paths.DB)
+		if !bytes.Equal(ownerBefore, fileBytes(t, srv.Paths.OwnerToken)) {
+			t.Fatal("a refused init rewrote owner.token")
+		}
+
+		// Deliberately moving the ledger aside is how the owner starts fresh.
+		if err := os.Rename(srv.Paths.LedgerFile, srv.Paths.LedgerFile+".old"); err != nil {
+			t.Fatal(err)
+		}
+		e, o = reinitEnv(srv)
+		if _, err := offline.Init(t.Context(), e, o); err != nil {
+			t.Fatal(err)
+		}
+		srv.Start(t)
+		if id := restoreAdd(t, srv.Client, "fresh task"); id != 1 {
+			t.Fatalf("first task of the new database = #%d, want #1 (the purged id)", id)
+		}
+		srv.Stop()
+		srv.Start(t) // startup replays whatever ledger the data dir holds
+		task, err := srv.Client.GetTask(t.Context(), 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if task.Title != "fresh task" || task.DeletedAt != nil {
+			t.Fatalf("new task #1 after a restart = %q (deleted %v)", task.Title, task.DeletedAt != nil)
+		}
+	})
+	for _, name := range []string{"taskronin.db-wal", "taskronin.db-shm"} {
+		t.Run("stray "+name, func(t *testing.T) {
+			e, o := initEnv(t)
+			if err := os.MkdirAll(e.Paths.DataDir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			stray := filepath.Join(e.Paths.DataDir, name)
+			writeFile(t, stray, "frames of an earlier database")
+			_, err := offline.Init(t.Context(), e, o)
+			testutil.RequireCode(t, err, domain.CodeConflict)
+			if !strings.Contains(detailOf(err), stray) || !strings.Contains(detailOf(err), "tkr restore") {
+				t.Fatalf("refusal = %q", detailOf(err))
+			}
+			requireAbsent(t, e.Paths.DB)
+			requireAbsent(t, e.Paths.OwnerToken)
+			requireAbsent(t, e.Paths.ServerConfig)
+		})
+	}
+	// begin already refuses both journals (naming --resume/--rollback); keep
+	// that guarded here so a fresh init can never run over a pending swap.
+	t.Run("journals", func(t *testing.T) {
+		for _, journal := range []func(config.Paths) string{config.Paths.SwapJournal, func(p config.Paths) string { return config.ScrubJournal(p.BackupDir) }} {
+			e, o := initEnv(t)
+			path := journal(e.Paths)
+			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			writeFile(t, path, "{}")
+			_, err := offline.Init(t.Context(), e, o)
+			testutil.RequireCode(t, err, domain.CodeConflict)
+			requireAbsent(t, e.Paths.DB)
+			requireAbsent(t, e.Paths.OwnerToken)
+		}
+	})
+}
+
 func TestInitInterruptedBeforePublish(t *testing.T) {
 	for _, point := range []string{"init:staged", "init:token-written"} {
 		t.Run(point, func(t *testing.T) {
@@ -295,7 +390,7 @@ func TestInitSingleUser(t *testing.T) {
 }
 
 func TestInitMCPToken(t *testing.T) {
-	for _, expiry := range []string{"non-TTY", "never", "2027-01-01", "24h"} {
+	for _, expiry := range []string{"non-TTY", "never", "2027-01-01", "24h", "30d"} {
 		t.Run(expiry, func(t *testing.T) {
 			e, o := initEnv(t)
 			o.MCPToken = true
@@ -315,11 +410,15 @@ func TestInitMCPToken(t *testing.T) {
 			if token.Name != "mcp" || token.IsOwner || token.Scopes.String() != "read,capture,write" || token.MutationsPerHour != 60 {
 				t.Fatalf("MCP metadata = %+v", token)
 			}
-			if token.ExpiresAt.Valid != (expiry == "2027-01-01" || expiry == "24h") {
+			if token.ExpiresAt.Valid != (expiry == "2027-01-01" || expiry == "24h" || expiry == "30d") {
 				t.Fatal("wrong expiry choice")
 			}
 			if expiry == "24h" && !token.ExpiresAt.V.Equal(e.Clock.Now().Add(24*time.Hour)) {
 				t.Fatal("wrong duration expiry")
+			}
+			// B-I3: the same grammar as `tkr token create`, whose prompt suggests 30d.
+			if expiry == "30d" && !token.ExpiresAt.V.Equal(e.Clock.Now().Add(30*24*time.Hour)) {
+				t.Fatalf("30d expiry = %v", token.ExpiresAt.V)
 			}
 			var count int
 			if err := st.Reader.QueryRowContext(t.Context(), "SELECT count(*) FROM ops WHERE kind = ?", domain.OpTokenCreate).Scan(&count); err != nil || count != 1 {
@@ -328,6 +427,34 @@ func TestInitMCPToken(t *testing.T) {
 			if !strings.Contains(e.Out.(*bytes.Buffer).String(), `{"command": "tkr", "args": ["mcp"]}`) {
 				t.Fatal("missing MCP snippet")
 			}
+		})
+	}
+}
+
+// TestInitMCPExpiryValidatedFirst is final review B-I3: an invalid MCP expiry
+// answer is a usage error found before anything is created, never a failure
+// after the DB is published (which left a half-initialized instance).
+func TestInitMCPExpiryValidatedFirst(t *testing.T) {
+	for _, answer := range []string{"soon", "720", "1h30m", "0d", "999999d", "2020-01-01", ""} {
+		t.Run(answer, func(t *testing.T) {
+			e, o := initEnv(t)
+			o.MCPToken, e.TTY = true, true
+			e.In = strings.NewReader(testutil.Password + "\n" + answer + "\n")
+			_, err := offline.Init(t.Context(), e, o)
+			if !errors.Is(err, offline.ErrUsage) {
+				t.Fatalf("Init with MCP expiry %q = %v, want a usage error", answer, err)
+			}
+			if !strings.Contains(detailOf(err), "MCP token expiry") {
+				t.Fatalf("detail = %q", detailOf(err))
+			}
+			entries, err := os.ReadDir(e.Paths.DataDir)
+			if err != nil || len(entries) != 1 || entries[0].Name() != "taskronin.lock" {
+				t.Fatalf("invalid expiry left data: %v, %v", entries, err)
+			}
+			requireAbsent(t, e.Paths.OwnerToken)
+			requireAbsent(t, e.Paths.ServerConfig)
+			requireAbsent(t, e.Paths.ClientConfig)
+			requireAbsent(t, e.Paths.TokenFile("mcp"))
 		})
 	}
 }

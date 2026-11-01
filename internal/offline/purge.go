@@ -38,6 +38,7 @@ const (
 	purgeCrashCommitted      = "purge:committed"
 	purgeCrashCheckpointed   = "purge:checkpointed"
 	purgeCrashBeforeComplete = "purge:before-complete"
+	repairCrashRepaired      = "repair:repaired"
 	purgeTitleWidth          = 60
 	purgeOutOfReachNotice    = "Exports and log lines made earlier are out of reach."
 	purgeRepairLedgerAdvice  = "run `tkr purge --repair-ledger`"
@@ -349,16 +350,9 @@ func RepairLedger(ctx context.Context, e *Env) (dropped []int, err error) {
 	if err != nil {
 		return nil, offlineError(err)
 	}
-	svc, err := e.newService(st, ledger)
-	if err != nil {
-		return dropped, err
-	}
-	if err := svc.ReapplyLedger(ctx); err != nil {
-		return dropped, err
-	}
-	if err := checkpoint(ctx, st); err != nil {
-		return dropped, err
-	}
+	// AIDEV-NOTE: B-M5. The ledger is already rewritten without the dropped
+	// lines, so report their numbers NOW: a replay or checkpoint failure below
+	// must not lose the only record of what was dropped.
 	msg := "the purge ledger had no damaged lines"
 	if len(dropped) != 0 {
 		nums := make([]string, len(dropped))
@@ -367,6 +361,18 @@ func RepairLedger(ctx context.Context, e *Env) (dropped []int, err error) {
 		}
 		msg = "dropped damaged ledger line(s): " + strings.Join(nums, ", ")
 	}
-	_, err = fmt.Fprintln(e.Out, msg)
-	return dropped, offlineError(err)
+	if _, err := fmt.Fprintln(e.Out, msg); err != nil {
+		return dropped, offlineError(err)
+	}
+	if err := crashPoint(ctx, repairCrashRepaired); err != nil {
+		return dropped, err
+	}
+	svc, err := e.newService(st, ledger)
+	if err != nil {
+		return dropped, err
+	}
+	if err := svc.ReapplyLedger(ctx); err != nil {
+		return dropped, err
+	}
+	return dropped, checkpoint(ctx, st)
 }

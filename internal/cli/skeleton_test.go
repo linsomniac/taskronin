@@ -87,6 +87,31 @@ func TestInitCommand(t *testing.T) {
 	}
 }
 
+// TestInitMCPExpiryUsage is final review B-I3 at the CLI: `30d` (the grammar
+// `tkr token create` suggests) works, and an invalid answer exits 2 before
+// anything is created.
+func TestInitMCPExpiryUsage(t *testing.T) {
+	args := []string{"init", "--password-stdin", "--no-systemd", "--yes", "--timezone", "America/Denver", "--mcp-token"}
+	s, p := testSys(t)
+	s.StdinTTY = true
+	_, stderr, code := runCLI(t, s, testutil.Password+"\nsoon\n", args...)
+	if code != 2 || !strings.Contains(stderr, "MCP token expiry") {
+		t.Fatalf("invalid expiry: %d %q", code, stderr)
+	}
+	for _, path := range []string{p.DB, p.OwnerToken, p.ServerConfig, p.TokenFile("mcp")} {
+		if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("%s exists after a usage error: %v", path, err)
+		}
+	}
+	out, stderr, code := runCLI(t, s, testutil.Password+"\n30d\n", args...)
+	if code != 0 || !strings.Contains(out, `{"command": "tkr", "args": ["mcp"]}`) {
+		t.Fatalf("30d: %d %q %q", code, out, stderr)
+	}
+	if _, err := os.Stat(p.TokenFile("mcp")); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestColorPolicy(t *testing.T) {
 	for _, tc := range []struct {
 		mode, noColor string

@@ -250,3 +250,30 @@ func TestUnusableTokenFiles(t *testing.T) {
 		}
 	}
 }
+
+// TestLocalInternalErrorShowsCause is final review B-I1: a local (offline)
+// internal failure prints its sanitized cause; only the owner's own terminal
+// sees it. API problems are unaffected: they never carry a cause.
+func TestLocalInternalErrorShowsCause(t *testing.T) {
+	cause := errors.New("backup: decode swap journal: invalid character '\x1b'")
+	p := problemFor(fmt.Errorf("wrapped: %w", &domain.Error{Code: domain.CodeInternal, Err: cause}))
+	if p.Code != string(domain.CodeInternal) || p.Status != http.StatusInternalServerError || p.Detail != "backup: decode swap journal: invalid character '�'" {
+		t.Fatalf("problem = %+v", p)
+	}
+	if p := problemFor(errors.New("plain\x1b[2J failure")); p.Detail != "plain�[2J failure" {
+		t.Fatalf("non-domain detail = %q", p.Detail)
+	}
+	if p := problemFor(&domain.Error{Code: domain.CodeInternal}); p.Detail != string(domain.CodeInternal) {
+		t.Fatalf("no cause: %q", p.Detail)
+	}
+	// End to end: the final review's probe printed exactly "tkr: internal".
+	srv, sys := captureServer(t)
+	srv.Stop()
+	if err := os.WriteFile(srv.Paths.SwapJournal(), []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, code := runCLI(t, sys, "", "restore", "--resume")
+	if code != 1 || stderr == "tkr: internal\n" || !strings.Contains(stderr, "decode swap journal") {
+		t.Fatalf("restore --resume over a damaged journal: %d %q", code, stderr)
+	}
+}

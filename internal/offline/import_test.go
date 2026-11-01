@@ -505,3 +505,33 @@ func TestImportCrashResumeRollback(t *testing.T) {
 		requireTitles(t, b.Client)
 	})
 }
+
+// TestImportSwapFailureHintAndDamagedLedger covers final review B-M3 and B-M4
+// for import: the --resume/--rollback hint after a failed swap, and a warning
+// (not a refusal) when the purge ledger is damaged.
+func TestImportSwapFailureHintAndDamagedLedger(t *testing.T) {
+	data := importSource(t)
+	t.Run("swap hint", func(t *testing.T) {
+		b, _ := emptyDest(t)
+		e := passwdEnv(t, b, "")
+		if _, err := offline.Import(crashAtSwap(t.Context(), "installed"), e, writeExport(t, data), true); !errors.Is(err, errRestoreCrash) {
+			t.Fatalf("crash = %v", err)
+		}
+		for _, want := range []string{"tkr restore --resume", "tkr restore --rollback"} {
+			if !strings.Contains(e.Err.(*bytes.Buffer).String(), want) {
+				t.Fatalf("stderr %q does not mention %q", e.Err.(*bytes.Buffer).String(), want)
+			}
+		}
+	})
+	t.Run("damaged ledger", func(t *testing.T) {
+		b, _ := emptyDest(t)
+		writeDamagedLedger(t, b.Paths.LedgerFile)
+		e := passwdEnv(t, b, "")
+		if _, err := offline.Import(t.Context(), e, writeExport(t, data), true); err != nil {
+			t.Fatal(err)
+		}
+		if stderr := e.Err.(*bytes.Buffer).String(); !strings.Contains(stderr, "purge ledger is damaged") || !strings.Contains(stderr, "tkr purge --repair-ledger") {
+			t.Fatalf("stderr = %q", stderr)
+		}
+	})
+}

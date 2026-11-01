@@ -56,3 +56,22 @@ func MapErr(err error) error {
 	}
 	return mapped
 }
+
+// IsCorrupt reports whether err shows a damaged database file: SQLite CORRUPT
+// or NOTADB (including extended codes), or a consistency check that ran and
+// failed (ErrIntegrity). Permission, I/O, busy, lock, out-of-memory and every
+// other failure are not corruption: the file may be intact.
+func IsCorrupt(err error) bool {
+	if errors.Is(err, ErrIntegrity) {
+		return true
+	}
+	var se *sqlite.Error
+	if !errors.As(err, &se) {
+		return false
+	}
+	switch se.Code() & 0xff {
+	case sqlite3.SQLITE_CORRUPT, sqlite3.SQLITE_NOTADB:
+		return true
+	}
+	return false
+}

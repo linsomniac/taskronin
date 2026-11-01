@@ -9,10 +9,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -30,8 +28,6 @@ const mcpScopes, mcpRate = "read,capture,write", 60
 
 // writeFileDefault is the NoOptDefVal marking `--write-file` without a path.
 const writeFileDefault = "\x00default"
-
-var durationExpiry = regexp.MustCompile(`^([0-9]{1,6})([hd])$`)
 
 func tokenCommand(e *env) *cobra.Command {
 	cmd := &cobra.Command{Use: "token", Short: "Manage API tokens", Args: cobra.NoArgs,
@@ -147,7 +143,8 @@ func (e *env) promptExpiry() (string, error) {
 }
 
 // parseExpiry resolves DUR against the server's now and DATE to 00:00 in the
-// server's zone, so a token never expires at a surprising local time.
+// server's zone, so a token never expires at a surprising local time. The
+// grammar is domain.ParseTokenExpiry, shared with `tkr init --mcp-token`.
 func (e *env) parseExpiry(s string) (api.Opt[api.Time], error) {
 	if s == "never" {
 		return api.Opt[api.Time]{Set: true, Null: true}, nil
@@ -156,31 +153,15 @@ func (e *env) parseExpiry(s string) (api.Opt[api.Time], error) {
 	if err != nil {
 		return api.Opt[api.Time]{}, err
 	}
-	var at time.Time
-	if m := durationExpiry.FindStringSubmatch(s); m != nil {
-		n, _ := strconv.Atoi(m[1])
-		unit := time.Hour
-		if m[2] == "d" {
-			unit = 24 * time.Hour
-		}
-		// Bound the product so it cannot overflow time.Duration.
-		if n == 0 || time.Duration(n) > 100*365*24*time.Hour/unit {
-			return api.Opt[api.Time]{}, usagef("--expires duration must be between 1h and 100 years")
-		}
-		at = clock.Now.Add(time.Duration(n) * unit)
-	} else if date, dateErr := civil.ParseDate(s); dateErr == nil {
-		zone, err := civil.LoadZone(clock.Timezone)
-		if err != nil {
-			return api.Opt[api.Time]{}, err
-		}
-		at = zone.StartOfDay(date)
-	} else {
-		return api.Opt[api.Time]{}, usagef("--expires must be a duration like 12h or 30d, a date like 2026-12-31, or never")
+	zone, err := civil.LoadZone(clock.Timezone)
+	if err != nil {
+		return api.Opt[api.Time]{}, err
 	}
-	if !at.After(clock.Now.Time) {
-		return api.Opt[api.Time]{}, usagef("--expires must be in the future")
+	at, err := domain.ParseTokenExpiry(s, clock.Now.Time, zone)
+	if err != nil {
+		return api.Opt[api.Time]{}, usagef("--expires %s", err)
 	}
-	return api.Opt[api.Time]{Set: true, V: api.Time{Time: at}}, nil
+	return api.Opt[api.Time]{Set: true, V: api.Time{Time: at.V}}, nil
 }
 
 func writeTokenFile(e *env, path, secret string) error {

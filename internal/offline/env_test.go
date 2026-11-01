@@ -454,3 +454,20 @@ func TestWithCrashHook(t *testing.T) {
 		t.Fatalf("hook leaked to parent context: %v", err)
 	}
 }
+
+// TestOfflineErrorsShowCause is final review B-I1: a non-domain failure on an
+// offline path reaches the owner's terminal with its sanitized cause, never as
+// a bare "internal".
+func TestOfflineErrorsShowCause(t *testing.T) {
+	e := newEnv(t)
+	writeFile(t, e.Paths.SwapJournal(), "{not json\x1b[2J")
+	err := offline.RestoreResume(t.Context(), e)
+	testutil.RequireCode(t, err, domain.CodeInternal)
+	detail := detailOf(err)
+	if !strings.Contains(detail, "decode swap journal") || strings.ContainsRune(detail, '\x1b') {
+		t.Fatalf("detail = %q, want the sanitized cause", detail)
+	}
+	if err.Error() == string(domain.CodeInternal) {
+		t.Fatalf("bare %q", err.Error())
+	}
+}

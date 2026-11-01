@@ -436,6 +436,28 @@ func TestPRG15_RepairLedger(t *testing.T) {
 	requireNoSecrets(t, f.srv)
 }
 
+// TestRepairLedgerReportsDroppedFirst is final review B-M5: the rewritten
+// ledger no longer holds the dropped lines, so their numbers are printed right
+// after the repair, before a replay or checkpoint that could still fail.
+func TestRepairLedgerReportsDroppedFirst(t *testing.T) {
+	f := purgeFixture(t)
+	writeDamagedLedger(t, f.srv.Paths.LedgerFile)
+	failure := errors.New("simulated replay failure")
+	ctx := offline.WithCrashHook(t.Context(), func(p string) error {
+		if p == "repair:repaired" {
+			return failure
+		}
+		return nil
+	})
+	dropped, err := offline.RepairLedger(ctx, f.e)
+	if !errors.Is(err, failure) || !slices.Equal(dropped, []int{2}) {
+		t.Fatalf("dropped = %v, err = %v", dropped, err)
+	}
+	if out := f.e.Out.(*bytes.Buffer).String(); out != "dropped damaged ledger line(s): 2\n" {
+		t.Fatalf("output = %q", out)
+	}
+}
+
 func TestRepairLedgerNeedsPassword(t *testing.T) {
 	f := purgeFixture(t)
 	f.e.TTY = false

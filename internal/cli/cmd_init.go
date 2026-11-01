@@ -24,6 +24,10 @@ func initCommand(e *env) *cobra.Command {
 		RunE: func(_ *cobra.Command, _ []string) error {
 			fsutil.SetUmask(0o077)
 			_, err := offline.Init(e.ctx, e.offlineEnv(), options)
+			if errors.Is(err, offline.ErrUsage) {
+				de, _ := domain.AsError(err)
+				return usagef("%s", de.Detail) // exit 2 (B-I3); nothing was created
+			}
 			return err
 		}}
 	f := cmd.Flags()

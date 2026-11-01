@@ -2521,6 +2521,12 @@ Missing client config → defaults from §8.1 (the CLI works without the file).
 Flags: `--timezone TZ`, `--password-stdin`, `--no-systemd`, `--yes`, `--mcp-token`,
 `--units-only` (re-render and reinstall the systemd units from the existing config; touches nothing else).
 1. Refuse if `<data>/taskronin.db` exists ("already initialized"). Only `init` creates a DB (D§6).
+   Also refuse when no DB exists but files of an earlier one remain: `<data>/purge-ledger`,
+   `taskronin.db-wal`/`-shm`, or a swap/scrub journal (the journals are already refused by the shared
+   offline preamble with its `--resume`/`--rollback` advice). The message names the files, says that
+   `tkr restore` recovers that database from a backup, and that starting fresh requires deliberately
+   moving them aside: ledger records carry bare row ids, so a leftover ledger would scrub the new
+   database's tasks (final review B-C1).
 2. Timezone: resolve `/etc/localtime` symlink → IANA name; confirm on TTY (or `--timezone`).
 3. Password: prompt twice with `x/term` (or one line from stdin); `auth.ValidateNewPassword`.
 4. Single-user check: list `/etc/passwd` accounts with UID ≥ 1000 and a login shell; if only the current user, confirm and set `allow_plain_loopback = true`; otherwise warn and leave it false.
@@ -2528,6 +2534,10 @@ Flags: `--timezone TZ`, `--password-stdin`, `--no-systemd`, `--yes`, `--mcp-toke
 6. Write `server.toml` and `client.toml` (if absent) with resolved absolute paths.
 7. Stage the DB in a fresh dir under `<data>/staging/` (`mode=rwc`; covered by `CleanupTemps`): `Migrate` (no pre-migrate backup for an empty DB); insert `db_generation`, `UPDATE` `tz_last_seen`, `auth_state` (hash, random `idem_hmac_key`), the owner token row; close and fsync. Write `owner.token` (`WriteFileAtomic`). **Publish the DB last**: rename the staged file to `<data>/taskronin.db`, fsync the dir. If interrupted before that rename no DB exists and `init` can simply be re-run (it rewrites the token).
 8. `--mcp-token`: create `mcp` token (MCP preset, expiry prompted) → `<state>/tokens/mcp.token`; print the MCP client snippet (`{"command": "tkr", "args": ["mcp"]}`).
+   The expiry is prompted (TTY only; otherwise it never expires) right after the step 3–4 answers and
+   validated **before any file is written**, with the `tkr token create` grammar (`Nh`, `Nd`,
+   `YYYY-MM-DD`, `never`; `domain.ParseTokenExpiry`); an invalid answer is a usage error (exit 2) and
+   nothing is created (B-I3).
 9. Unless `--no-systemd`: write units (§8.6), `systemctl --user daemon-reload`, `enable --now taskronin.socket`, `enable taskronin.service`.
 10. Print next steps (status-line snippet for shell/tmux, `tkr add`).
 
@@ -2765,6 +2775,9 @@ without ID/`-N` → usage error. The API request always carries explicit `task_i
 
 - Human rendering (stderr): `tkr: <detail>`, then `  <field>: <message>` per
   field error, conflicts as `  op <8 hex> <kind> by <actor> at <time> (<entity> <id>)`.
+  A local (offline) `internal` failure has no safe detail of its own: its detail, and an offline
+  per-set `error (…)` line, is the cause sanitized with `textsafe.SanitizeLine` (B-I1). This output
+  reaches only the owner's own terminal; API problems still never carry a cause.
   `--json`: the problem object on stdout.
 - Not sent — server unreachable before any byte was written (exit 3):
   ```
@@ -3053,11 +3066,19 @@ On failure: delete the temp, set `last_backup_error`, keep older snapshots; bann
 1. `Stage` the snapshot file set (the original is only read, never opened read-write, R4-5).
 2. `Verify` the staged copy; `schema ≤ binary`; `Migrate` it to the binary schema.
 3. Open the current DB if possible (`mode=rw`, `quick_check`): read `auth_state`, `api_tokens`, sequences.
+   Only a **missing** DB or a **genuinely damaged** one (SQLite `CORRUPT`/`NOTADB`, a failed
+   `quick_check`, or a failed structural check: no `auth_state`/`api_tokens`/`sqlite_sequence` table or
+   no `auth_state` row) counts as unreadable below. Any other failure (permission, I/O, busy, lock, …)
+   fails the restore before anything changes, with the cause shown (B-I2).
 4. In the staged copy: replace `auth_state` and `api_tokens` with the current ones; `RaiseSequences(max)`; new `db_generation`; `DELETE FROM web_sessions`; `DELETE FROM idempotency`; record a `system.restore` op + content-free event.
    Current DB unreadable: revoke every token, mint a new owner token, set `web_login_disabled=1`, sequences = max over snapshot and all readable snapshots + 10 000; print a loud notice.
 5. Over the staged store (a temporary `service.Service`): `ReplayLedger(live)` → `Reconcile` (real clock) → `CheckAll`; `integrity_check`; FTS integrity-check; close; assert no sidecars; fsync.
+   A damaged ledger does not refuse the restore, but prints a warning naming `tkr purge --repair-ledger`
+   (a record on a damaged line is not replayed; B-M4).
 6. `Swap(ctx, <data>/swap.journal, &SwapJournal{Kind: restore, Aside: <live>.pre-restore-<ts>/}, onInstalled)` where `onInstalled` writes `owner.token` if one was minted — it runs after `installed` and **before** the journal is removed (R4-10).
-- `tkr restore --resume` / `--rollback` drive `ResumeSwap`/`RollbackSwap` on `<data>/swap.journal` (also for an interrupted import). If `OwnerTokenPending` and the token file was not written, `--resume` tells the user to run `tkr passwd --reset`.
+   If the swap fails or is interrupted after its journal was written, the command prints the
+   `tkr restore --resume` / `tkr restore --rollback` hint (B-M3; import likewise).
+- `tkr restore --resume` / `--rollback` drive `ResumeSwap`/`RollbackSwap` on `<data>/swap.journal` (also for an interrupted import). If `OwnerTokenPending` and the token file was not written, `--resume` tells the user to run `tkr passwd --reset`; if the check itself fails (e.g. an I/O error reading the file), `--resume` still completes and prints that hint with the cause (B-M12).
 
 ### 12.3 Migrate (`offline/migrate.go`)
 
@@ -3091,7 +3112,7 @@ settings. The client writes `-o` via temp + fsync + rename, mode 0600.
    b. `RaiseSequences(max(file, live))` (R4-10);
    c. re-insert the live DB's bootstrap history (`token.*`/`auth.*` ops and their events, e.g. from `init --mcp-token` or `passwd --reset`) with **fresh** `seq`/`id` allocated by AUTOINCREMENT above the raised marks, preserving their `op_id`s (`undo_stack` and `events` reference `op_id`). An op whose `op_id` is already in the file is skipped after checking it is identical (kind, actor, channel, at, scopes, and its events); a difference → error (R4-4);
    d. `system.import` op with a content-free event (row counts).
-5. Over the staged store: `ReplayLedger(live)` → `Reconcile` → `CheckAll`; `integrity_check`, `foreign_key_check`, FTS integrity-check; close; fsync.
+5. Over the staged store: `ReplayLedger(live)` → `Reconcile` → `CheckAll`; `integrity_check`, `foreign_key_check`, FTS integrity-check; close; fsync. A damaged ledger prints the same warning as restore (B-M4).
 6. `Swap{Kind: import, Aside: <live>.pre-import-<ts>/}`.
 Any failure before step 6 leaves the live DB untouched; `CleanupTemps` removes the staging copy, so the import can simply be retried.
 
@@ -3132,7 +3153,7 @@ func (l *Ledger) Repair() ([]int, error)          // rewrite from valid records 
 9. **Completion** — only if step 7 left every set clean or rewritten, step 8 returned a mode, and the ledger is not damaged: `Append` `complete` lines for **all** still-`pending` records, each carrying `recovery_files = mode` (the durable record of the cleanup or opt-out). Otherwise leave them `pending` and tell the user to run `tkr scrub-backups`.
 10. Print: scrubbed IDs, linked entries left alone, per-set results, and that earlier exports and log lines are out of reach.
 - Re-running on an already-purged item changes nothing and appends no new record if one already covers the set.
-- `tkr purge --repair-ledger` (lock + password): `Repair()`, prints the dropped lines, then `ReplayLedger(live)` + checkpoint.
+- `tkr purge --repair-ledger` (lock + password): `Repair()`, prints the dropped lines **immediately** (before a replay or checkpoint that could fail; B-M5), then `ReplayLedger(live)` + checkpoint.
 - `ReapplyLedger(ctx)` = `ReplayLedger(live)` over all valid records; it never writes `complete` lines (only purge step 9 and scrub-backups step 7 do, after the recovery-file step). Runs at server startup (then checkpoint before listeners) and in every staged copy. While a record is `pending` the dashboard shows a `purge_incomplete` banner; a damaged ledger shows `purge_ledger_damaged`.
 
 ### 12.7 Scrub backups — offline (`offline/scrub.go`)
