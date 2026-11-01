@@ -87,6 +87,14 @@ func ValidateServer(s *Server) error {
 	if err := validatePath("backup.dir", s.Backup.Dir, true); err != nil {
 		return err
 	}
+	// AIDEV-NOTE: final review B-M13. backup.CleanupTemps removes everything
+	// under <data>/staging (and sweeps temp names in the data dir) at every
+	// server start and offline command, so snapshots there would be wiped.
+	// Both paths are absolute, clean and free of symlink components here.
+	staging := filepath.Join(s.Paths.DataDir, "staging")
+	if s.Backup.Dir == s.Paths.DataDir || s.Backup.Dir == staging || strings.HasPrefix(s.Backup.Dir, staging+string(filepath.Separator)) {
+		return fmt.Errorf("backup.dir must not be the data directory %s or inside its staging directory (emptied at every start)", s.Paths.DataDir)
+	}
 	if _, err := s.BackupMinute(); err != nil {
 		return err
 	}

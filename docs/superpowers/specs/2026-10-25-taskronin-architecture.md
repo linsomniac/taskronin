@@ -2516,7 +2516,9 @@ Missing client config → defaults from §8.1 (the CLI works without the file).
 - `web.listen` host is a loopback IP literal (`127.0.0.0/8`, `::1`) or `localhost`
   (mapped to `127.0.0.1`); non-loopback → error (v1, D§10.2). If `web.enabled`
   and `!allow_plain_loopback` → web listener refused with an explanation (no TLS in v1).
-- `backup.time` parses as `HH:MM`; `backup.dir` absolute.
+- `backup.time` parses as `HH:MM`; `backup.dir` absolute, and neither the data dir itself nor
+  `<data>/staging` or anything inside it (`CleanupTemps` empties staging at every start and
+  offline command, which would wipe the snapshots; final review B-M13).
 - Durations parse with `time.ParseDuration`; `status_timeout ≤ 2s`.
 
 ### 8.5 `tkr init` (`offline/init.go`)

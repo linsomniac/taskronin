@@ -206,6 +206,53 @@ func TestValidateServer(t *testing.T) {
 	}
 }
 
+// TestValidateServerBackupDir is final review B-M13: CleanupTemps deletes all
+// of <data>/staging at every start and offline command, so snapshots must
+// never live there (or in the data dir itself, whose temp sweep they share).
+func TestValidateServerBackupDir(t *testing.T) {
+	for _, tc := range []struct {
+		name, dir string
+		ok        bool
+	}{
+		{"data dir itself", "", false},
+		{"staging", "staging", false},
+		{"inside staging", "staging/backups", false},
+		{"deep inside staging", "staging/a/b", false},
+		{"default", "backups", true},
+		{"staging-like sibling", "staging-backups", true},
+		{"outside data", "/elsewhere/backups", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := config.DefaultServer(configPaths(t), "UTC")
+			switch {
+			case strings.HasPrefix(tc.dir, "/"):
+				s.Backup.Dir = tc.dir
+			case tc.dir == "":
+				s.Backup.Dir = s.Paths.DataDir
+			default:
+				s.Backup.Dir = filepath.Join(s.Paths.DataDir, tc.dir)
+			}
+			err := config.ValidateServer(s)
+			if tc.ok != (err == nil) {
+				t.Fatalf("ValidateServer(backup.dir = %s) = %v; want ok = %v", s.Backup.Dir, err, tc.ok)
+			}
+			if err != nil && (!strings.Contains(err.Error(), "backup.dir") || !strings.Contains(err.Error(), s.Paths.DataDir)) {
+				t.Fatalf("error = %v", err)
+			}
+		})
+	}
+	// LoadServer applies the same rule to a hand-edited server.toml.
+	const line = `dir  = "/home/sean/.local/share/taskronin/backups"`
+	example := serverExample(t)
+	if !strings.Contains(example, line) {
+		t.Fatal("testdata/server.toml changed; update this test")
+	}
+	path := writeConfig(t, strings.Replace(example, line, `dir  = "/home/sean/.local/share/taskronin/staging/snapshots"`, 1))
+	if _, err := config.LoadServer(path); err == nil || !strings.Contains(err.Error(), "backup.dir") {
+		t.Fatalf("LoadServer = %v; want a backup.dir error", err)
+	}
+}
+
 func TestValidateServerWorldWritableParents(t *testing.T) {
 	parent := t.TempDir()
 	if err := os.Chmod(parent, 0o777); err != nil {
