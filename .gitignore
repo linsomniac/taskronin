@@ -1,1 +1,7 @@
 /bin/
+
+# Test temp roots created next to the package under test (testutil, cli, offline, config tests); left behind only by killed test runs.
+.tkr-*/
+.t-*/
+.init-*/
+.paths-*/

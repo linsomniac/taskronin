@@ -3335,10 +3335,12 @@ COMMIT      := $(shell git rev-parse --short HEAD 2>/dev/null)
 LDFLAGS     := -s -w -X $(MODULE)/internal/buildinfo.Version=$(VERSION) -X $(MODULE)/internal/buildinfo.Commit=$(COMMIT)
 GOVULNCHECK := golang.org/x/vuln/cmd/govulncheck@v1.9.0
 FUZZTIME    ?= 30s
+PREFIX      ?= $(HOME)/.local
 
-.PHONY: build test fmt fmt-check vet lint vuln mod-verify assets-verify fuzz check rename-module
+.PHONY: build install test fmt fmt-check vet lint vuln mod-verify assets-verify fuzz check rename-module
 
 build:         ; CGO_ENABLED=0 go build -trimpath -ldflags '$(LDFLAGS)' -o bin/tkr ./cmd/tkr
+install:       build ; install -D -m 0755 bin/tkr $(PREFIX)/bin/tkr
 fmt:           ; golangci-lint fmt ./...
 fmt-check:     ; @out=$$(gofmt -l $$(git ls-files '*.go')); test -z "$$out" || { echo "$$out"; exit 1; }
 vet:           ; go vet ./...

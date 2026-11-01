@@ -10,14 +10,13 @@ tasks. It ships as one Go binary, `tkr`, over a single SQLite database.
 Taskronin needs Go (see `go.mod` for the toolchain) and runs on Linux.
 
 ```
-make build                       # writes bin/tkr
-install -m 0755 bin/tkr ~/.local/bin/tkr
+make install                     # builds and installs ~/.local/bin/tkr
 tkr init
 ```
 
-Run `tkr init` from the installed copy: the systemd units it writes point at
-the binary that ran it. There is no `make install` target; the copy above is
-the install step.
+`make install PREFIX=/some/dir` installs to `/some/dir/bin/tkr` instead. Make
+sure that directory is on your `PATH`, and run `tkr init` from the installed
+copy: the systemd units it writes point at the binary that ran it.
 
 `tkr init` asks for an owner password (8 to 1024 bytes), creates the private
 data, state and config directories, the database, the `owner` token
