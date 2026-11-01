@@ -116,12 +116,12 @@ func (c *Client) do(ctx context.Context, k call, out any) (*http.Response, error
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			var p api.Problem
 			if err := json.Unmarshal(data, &p); err != nil {
-				return resp, fmt.Errorf("HTTP %d: decode problem: %w", resp.StatusCode, err)
+				return resp, c.answered(k, body, key, who, unresolved, fmt.Errorf("HTTP %d: decode problem: %w", resp.StatusCode, err))
 			}
 			problem := &ProblemError{Status: resp.StatusCode, Problem: p}
 			if !k.NoRetry && resp.StatusCode == http.StatusPreconditionFailed && problem.Code() == domain.CodeGenerationMismatch {
 				_, _ = c.RefreshGeneration(ctx)
-				return resp, problem
+				return resp, c.answered(k, body, key, who, unresolved, problem)
 			}
 			if resp.StatusCode == http.StatusServiceUnavailable && problem.Code() == domain.CodeBusy {
 				var busyErr error = problem
@@ -143,7 +143,7 @@ func (c *Client) do(ctx context.Context, k call, out any) (*http.Response, error
 				}
 				return resp, busyErr
 			}
-			return resp, problem
+			return resp, c.answered(k, body, key, who, unresolved, problem)
 		}
 		if out != nil && resp.StatusCode != http.StatusNoContent {
 			if err := json.Unmarshal(data, out); err != nil {
@@ -152,6 +152,24 @@ func (c *Client) do(ctx context.Context, k call, out any) (*http.Response, error
 		}
 		return resp, nil
 	}
+}
+
+// answered returns a retry's non-success answer as definitive, unless an
+// earlier attempt of this mutation was transmitted without a response.
+//
+// AIDEV-NOTE: final review (A§4.11). A lost response leaves the first attempt's
+// outcome unknown, and no later answer can resolve it: a 401 (token expired or
+// revoked in the retry window), a 500, a generation_mismatch or any other
+// problem — including one after the idempotency lookup — may follow a commit
+// of attempt 1. Only a success (incl. an idempotent replay) settles it. So a
+// mutation stays outcome-unknown and a keyed one is saved as pending (failed
+// keeps exempt/password requests and guarded resends unsaved). Reads have no
+// outcome to lose and keep the definitive answer.
+func (c *Client) answered(k call, body []byte, key string, who api.WhoAmI, unresolved, answer error) error {
+	if unresolved == nil || k.Kind == callRead {
+		return answer
+	}
+	return c.failed(k, body, key, who, true, errors.Join(unresolved, answer))
 }
 
 func mutationIdentityError(err error) error {

@@ -44,6 +44,37 @@ func TestListenAPIStale(t *testing.T) {
 	checkListenerAccepts(t, ln, path)
 }
 
+// TestListenAPIRefusesLiveSocket is final review A-Minor-4: `tkr serve` run by
+// hand while taskronin.socket is active must not unlink systemd's socket (that
+// kills socket activation until the unit is restarted). Only a stale socket,
+// one that refuses connections, is removed.
+func TestListenAPIRefusesLiveSocket(t *testing.T) {
+	clearActivation(t)
+	path := filepath.Join(t.TempDir(), "sock")
+	live, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = live.Close() })
+	err = assertListenError(t, path)
+	for _, want := range []string{"in use", "taskronin.socket", "systemctl --user start taskronin.service"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("listenAPI error %q does not mention %q", err, want)
+		}
+	}
+	// The live socket file is untouched and still reaches its listener (after
+	// the probe's own connection is drained from the accept queue).
+	if err := live.SetDeadline(clock.Real{}.Now().Add(5 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	probe, err := live.Accept()
+	if err != nil {
+		t.Fatalf("the probe never connected: %v", err)
+	}
+	_ = probe.Close()
+	checkListenerAccepts(t, live, path)
+}
+
 func TestListenAPITightensDir(t *testing.T) {
 	clearActivation(t)
 	dir := t.TempDir()
@@ -60,7 +91,7 @@ func TestListenAPIPathTooLong(t *testing.T) {
 	clearActivation(t)
 	prefix := t.TempDir() + "/"
 	path := prefix + strings.Repeat("s", 108-len(prefix))
-	ln, created, err := listenAPI(path)
+	ln, created, err := listenAPI(t.Context(), path)
 	if ln != nil {
 		_ = ln.Close()
 	}
@@ -202,7 +233,7 @@ func TestListenAPIActivationHelper(t *testing.T) {
 		t.Fatal(err)
 	}
 	fallback := filepath.Join(t.TempDir(), "private", "sock")
-	ln, created, err := listenAPI(fallback)
+	ln, created, err := listenAPI(t.Context(), fallback)
 	if ln != nil {
 		t.Cleanup(func() { _ = ln.Close() })
 	}
@@ -263,7 +294,7 @@ func clearActivation(t *testing.T) {
 
 func listenCreatedAPI(t *testing.T, path string) net.Listener {
 	t.Helper()
-	ln, created, err := listenAPI(path)
+	ln, created, err := listenAPI(t.Context(), path)
 	if ln != nil {
 		t.Cleanup(func() { _ = ln.Close() })
 	}
@@ -275,7 +306,7 @@ func listenCreatedAPI(t *testing.T, path string) net.Listener {
 
 func assertListenError(t *testing.T, path string) error {
 	t.Helper()
-	ln, created, err := listenAPI(path)
+	ln, created, err := listenAPI(t.Context(), path)
 	if ln != nil {
 		_ = ln.Close()
 	}

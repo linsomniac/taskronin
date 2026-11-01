@@ -18,6 +18,17 @@ import (
 	"taskronin/internal/fsutil"
 )
 
+// PendingResendWindow bounds a resendable pending request's age: the server's
+// idempotency retention (service.IdemTTL, 7 d) minus a 1-hour safety margin.
+//
+// AIDEV-NOTE: final review A-Minor-3. CreatedAt is stamped when the file is
+// saved, up to the 20 s call budget AFTER the server committed, while the
+// server forgets rows 7 d after the commit. Without the margin, a resend of an
+// op without If-Match (add, log, focus, undo/redo/revert) near 7 d could
+// re-execute instead of replaying; undo/redo would hit a different stack
+// entry. Keep this in step with service.IdemTTL (pending_test.go asserts it).
+const PendingResendWindow = 7*24*time.Hour - time.Hour
+
 // ResendResult holds exactly one successful keyed response: an operation or
 // revoked token metadata.
 // AIDEV-NOTE: BF18 requires typed revocation recovery; it cannot be decoded as
@@ -167,9 +178,10 @@ func (s *PendingStore) Discard(key string) error {
 
 // Resend checks expiry, generation and actor before retrying the saved request.
 // The caller discards a success or marks a definitive failure; Resend never
-// changes pending files, including after another uncertain outcome.
+// changes pending files, including after another uncertain outcome. A request
+// whose age reaches PendingResendWindow is refused with ErrPendingExpired.
 func (c *Client) Resend(ctx context.Context, p PendingRequest) (*ResendResult, error) {
-	if c.opts.Clock.Now().Sub(p.CreatedAt) > 7*24*time.Hour {
+	if c.opts.Clock.Now().Sub(p.CreatedAt) >= PendingResendWindow {
 		return nil, ErrPendingExpired
 	}
 	ctx, cancel := context.WithTimeout(ctx, c.opts.Timeout)

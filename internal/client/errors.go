@@ -14,7 +14,7 @@ var (
 	ErrOutcomeUnknown     = errors.New("request outcome unknown")
 	ErrGenerationMismatch = errors.New("database generation changed")
 	ErrTokenFile          = errors.New("token file unusable")
-	ErrPendingExpired     = errors.New("pending request older than 7 days")
+	ErrPendingExpired     = errors.New("pending request too old to resend safely (the server keeps idempotency records for 7 days)")
 	ErrActorMismatch      = errors.New("pending request belongs to another actor")
 )
 

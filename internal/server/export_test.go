@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"time"
@@ -22,7 +23,16 @@ var (
 	ExemptMeta   = (*Server).exemptMeta
 	LongCtx      = (*Server).longCtx
 	PathInt      = pathInt
+	Authn        = (*Server).authn
 )
+
+// WithRequestState installs the per-request state that the outer wrappers
+// (recoverer) create, for tests that drive one middleware on its own.
+func WithRequestState(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), requestStateKey{}, &requestState{})))
+	})
+}
 
 func DecodeBody[T any](r *http.Request) (T, []byte, error) { return decodeBody[T](r) }
 

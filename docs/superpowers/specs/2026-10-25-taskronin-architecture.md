@@ -1214,7 +1214,7 @@ Startup (`server.Run(ctx, cfg, deps) error`):
 8. `OpenLedger` (truncates a torn tail; a damaged ledger only raises the `purge_ledger_damaged` banner, §12.6); `ReapplyLedger`; then **always** `wal_checkpoint(TRUNCATE)` and confirm truncation (`busy=0`, `log=0`) — no other connection is in use yet; failure → refuse to start (R3-2). A `pending` record raises the `purge_incomplete` banner.
 9. If `settings.tz_last_seen ≠ config tz` → warn (floating wall-clock semantics, D§5.12) and `UPDATE` it.
 10. `Reconcile`.
-11. Listeners (§6.1): `systemd.Listeners()` (`LISTEN_PID`/`LISTEN_FDS`/`LISTEN_FDNAMES`, name `api`) else create the socket (unlink a stale one — lock is held — then bind, `chmod 0600`). Web TCP listener only if `web.enabled` and plan D handlers exist; loopback only.
+11. Listeners (§6.1): `systemd.Listeners()` (`LISTEN_PID`/`LISTEN_FDS`/`LISTEN_FDNAMES`, name `api`) else create the socket (unlink a stale one — lock is held — then bind, `chmod 0600`). Stale means a connect to it is refused; if a connect succeeds (e.g. `taskronin.socket` is active while the service is stopped) or fails otherwise, refuse to start and keep the file: "socket in use — is taskronin.socket active? use `systemctl --user start taskronin.service`" (final review A-Minor-4). Web TCP listener only if `web.enabled` and plan D handlers exist; loopback only.
 12. If plain-loopback web is enabled, warn if other human accounts exist (UID ≥ 1000 with a login shell, other than ours, from `/etc/passwd`).
 13. Start schedulers; `systemd.Notify("READY=1")`.
 
@@ -1253,7 +1253,10 @@ Long routes set their write deadline to their budget with
 **not sent** (dial/connection refused before any byte was written → safe to
 re-run; the CLI echoes the command) or **outcome unknown** (written, no complete
 response → retried with the same idempotency key; if still unknown, the CLI
-saves the request as a pending request, §9.6).
+saves the request as a pending request, §9.6). Once an attempt of a mutation was
+written without a complete response, **any** non-success answer to a retry
+(`401`, `500`, `generation_mismatch`, `409`, `422`, `503` …) leaves it outcome-unknown
+(saved as pending if keyed); only a success settles it (final review A-Minor-2).
 
 ---
 
@@ -1694,7 +1697,7 @@ API (socket), outermost first:
 4. `socketGuard` → `ConnInfo.Transport == unix && PeerOK && PeerUID == os.Getuid()`, and no `Forwarded`, `X-Forwarded-*`, or `Via` header; else 403 `peer_rejected`.
 5. `routeClass(api)` → only `/api/v1/` and `/healthz` (else 404); strip `Cookie`.
 6. `bodyLimit` → `http.MaxBytesReader(1 MiB)`; bodies require `Content-Type: application/json` (415).
-7. `authn` → `svc.AuthenticateToken(ctx, bearer, verifiedSocket, channel, remoteKey)` → `domain.Actor` in ctx; 401 + `WWW-Authenticate: Bearer` on failure; skipped only for `/healthz`. `X-Taskronin-Channel` ∈ {cli, tui, mcp, api} (default api); owner token + `mcp` channel → 403 (defence in depth for D§9.4).
+7. `authn` → `svc.AuthenticateToken(ctx, bearer, verifiedSocket, channel, remoteKey)` → `domain.Actor` in ctx, where authn itself derives `verifiedSocket` from `ConnInfo` exactly as step 4 does (never a constant; final review A-Minor-1); 401 + `WWW-Authenticate: Bearer` on failure; skipped only for `/healthz`. `X-Taskronin-Channel` ∈ {cli, tui, mcp, api} (default api); owner token + `mcp` channel → 403 (defence in depth for D§9.4).
 8. `apiHeaders` → `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`, `X-Taskronin-Version`.
 9. Handler (`decode` strict → one service call → `respond`).
 
@@ -2238,7 +2241,7 @@ var (
 	ErrOutcomeUnknown     = errors.New("request outcome unknown")      // written, no complete response after retries
 	ErrGenerationMismatch = errors.New("database generation changed")  // restored since the generation was read
 	ErrTokenFile          = errors.New("token file unusable")          // missing, wrong owner or mode
-	ErrPendingExpired     = errors.New("pending request older than 7 days")
+	ErrPendingExpired     = errors.New("pending request too old to resend safely (the server keeps idempotency records for 7 days)")
 	ErrActorMismatch      = errors.New("pending request belongs to another actor")
 )
 type OutcomeUnknownError struct{ Key string; Saved bool; Err error } // errors.Is(err, ErrOutcomeUnknown); Saved = written to Pending
@@ -2259,7 +2262,7 @@ func (s *PendingStore) List() ([]PendingRequest, error)
 func (s *PendingStore) MarkFailed(key, lastError string) error // keeps the file, records the error
 func (s *PendingStore) Discard(key string) error              // explicit user discard, or after success
 func (c *Client) Resend(ctx context.Context, p PendingRequest) (*api.OpResponse, error)
-	// refuses with ErrPendingExpired (> 7 d), ErrGenerationMismatch (saved ≠ current generation)
+	// refuses with ErrPendingExpired (age ≥ PendingResendWindow = 7 d − 1 h), ErrGenerationMismatch (saved ≠ current generation)
 	// or ErrActorMismatch (saved Actor ≠ the current token's WhoAmI.Actor);
 	// only a success (incl. an idempotent replay of a success) lets the caller Discard the file;
 	// an unsuccessful definitive answer → MarkFailed (the body is kept until `tkr pending discard`)
@@ -2802,8 +2805,10 @@ without ID/`-N` → usage error. The API request always carries explicit `task_i
   success) deletes the file. An unsuccessful definitive answer (any 4xx/5xx
   problem) keeps the file and records the error in it (`last_error`); the user
   removes it explicitly with `tkr pending discard KEY` (M1).
-  Password-bearing requests are never saved. A pending request older than the
-  7-day idempotency window is never resent automatically: `tkr pending retry`
+  Password-bearing requests are never saved. A pending request whose age reaches the
+  7-day idempotency window minus a 1-hour safety margin (`client.PendingResendWindow`:
+  `created_at` is stamped up to the 20 s call budget after the server's commit; final
+  review A-Minor-3) is never resent automatically: `tkr pending retry`
   refuses it and tells the user to check the outcome manually (`tkr show`,
   `tkr entries`) and then `tkr pending discard` it (R2-10). It likewise refuses a
   request whose saved generation differs from the server's current one (the DB

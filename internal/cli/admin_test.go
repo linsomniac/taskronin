@@ -284,24 +284,28 @@ func TestIDM09_PendingFlow(t *testing.T) {
 		t.Fatalf("pending list: %d %q", code, out)
 	}
 
-	// An expired request is refused without being resent or deleted.
+	// An expired request is refused without being resent or deleted. Final
+	// review A-Minor-3: the window ends 1 h before the server's 7-day
+	// idempotency retention, so 6 d 23 h 30 m is already too old.
 	var saved map[string]any
 	data, _ := os.ReadFile(file)
 	if err := json.Unmarshal(data, &saved); err != nil {
 		t.Fatal(err)
 	}
-	saved["created_at"] = (clock.Real{}).Now().Add(-8 * 24 * time.Hour).Format(time.RFC3339)
-	aged, _ := json.Marshal(saved)
-	if err := os.WriteFile(file, aged, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	mode.Store(1)
-	_, stderr, code = run("pending", "retry")
-	if code != 1 || !strings.Contains(stderr, "tkr pending discard "+key[1]) {
-		t.Fatalf("expired retry: %d %q", code, stderr)
-	}
-	if _, err := os.Stat(file); err != nil {
-		t.Fatal("expired file removed")
+	for _, age := range []time.Duration{8 * 24 * time.Hour, 7*24*time.Hour - 30*time.Minute} {
+		saved["created_at"] = (clock.Real{}).Now().Add(-age).Format(time.RFC3339)
+		aged, _ := json.Marshal(saved)
+		if err := os.WriteFile(file, aged, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		mode.Store(1)
+		_, stderr, code = run("pending", "retry")
+		if code != 1 || !strings.Contains(stderr, "tkr pending discard "+key[1]) || !strings.Contains(stderr, "tkr show") {
+			t.Fatalf("expired retry (age %v): %d %q", age, code, stderr)
+		}
+		if _, err := os.Stat(file); err != nil {
+			t.Fatal("expired file removed")
+		}
 	}
 	if err := os.WriteFile(file, data, 0o600); err != nil {
 		t.Fatal(err)

@@ -742,3 +742,87 @@ func TestMutationIdentityFailure(t *testing.T) {
 		}
 	}
 }
+
+// TestNonSuccessAfterDroppedResponse is final review A-Minor-2 (A§4.11): once
+// an attempt was transmitted and its response lost, a retry answered by ANY
+// non-success (here before or after the idempotency lookup) cannot prove that
+// first attempt failed. The mutation is outcome-unknown and saved as pending.
+func TestNonSuccessAfterDroppedResponse(t *testing.T) {
+	for _, tc := range []struct {
+		status int
+		code   domain.Code
+	}{
+		{http.StatusUnauthorized, domain.CodeUnauthenticated},
+		{http.StatusForbidden, domain.CodeForbidden},
+		{http.StatusInternalServerError, domain.CodeInternal},
+		{http.StatusPreconditionFailed, domain.CodeGenerationMismatch},
+		{http.StatusPreconditionFailed, domain.CodePrecondition},
+		{http.StatusConflict, domain.CodeConflict},
+		{http.StatusUnprocessableEntity, domain.CodeValidation},
+		{http.StatusTooManyRequests, domain.CodeRateLimited},
+		{http.StatusInternalServerError, ""}, // an undecodable problem body
+	} {
+		t.Run(fmt.Sprintf("%d_%s", tc.status, tc.code), func(t *testing.T) {
+			attempts := 0
+			c, rec := newFake(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				attempts++
+				switch {
+				case attempts == 1:
+					dropResponse(t, w)
+				case tc.code == "":
+					w.WriteHeader(tc.status)
+					_, _ = w.Write([]byte("not a problem document"))
+				default:
+					writeProblem(w, tc.status, tc.code)
+				}
+			}))
+			p := pendingFor(t, c)
+			k := mutation()
+			err := doCall(t.Context(), c, k, nil)
+			requests := rec.at("/api/v1/tasks")
+			if len(requests) != 2 {
+				t.Fatalf("attempts = %d, want 2", len(requests))
+			}
+			key := requests[0].Header.Get(api.HeaderIdempotencyKey)
+			var unknown *OutcomeUnknownError
+			if !errors.As(err, &unknown) || !unknown.Saved || unknown.Key != key || !errors.Is(err, ErrOutcomeUnknown) || !errors.Is(err, io.EOF) {
+				t.Fatalf("error after a lost response = %#v (%v), want saved outcome-unknown", err, err)
+			}
+			if tc.code != "" && !IsCode(err, tc.code) {
+				t.Fatalf("lost the retry's answer %s: %v", tc.code, err)
+			}
+			if _, err := os.Stat(filepath.Join(p.Dir, key+".json")); err != nil {
+				t.Fatalf("not saved as pending: %v", err)
+			}
+		})
+	}
+	t.Run("without a lost response the answer is definitive", func(t *testing.T) {
+		c, rec := newFake(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			writeProblem(w, http.StatusUnauthorized, domain.CodeUnauthenticated)
+		}))
+		p := pendingFor(t, c)
+		err := doCall(t.Context(), c, mutation(), nil)
+		var problem *ProblemError
+		if !errors.As(err, &problem) || errors.Is(err, ErrOutcomeUnknown) || len(rec.at("/api/v1/tasks")) != 1 {
+			t.Fatalf("error = %#v", err)
+		}
+		noPending(t, p)
+	})
+	t.Run("reads stay definitive", func(t *testing.T) {
+		attempts := 0
+		c, _ := newFake(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			attempts++
+			if attempts == 1 {
+				dropResponse(t, w)
+				return
+			}
+			writeProblem(w, http.StatusUnauthorized, domain.CodeUnauthenticated)
+		}))
+		p := pendingFor(t, c)
+		err := doCall(t.Context(), c, call{Kind: callRead, Method: http.MethodGet, Path: "/today"}, nil)
+		if !IsCode(err, domain.CodeUnauthenticated) || errors.Is(err, ErrOutcomeUnknown) {
+			t.Fatalf("read error = %#v", err)
+		}
+		noPending(t, p)
+	})
+}

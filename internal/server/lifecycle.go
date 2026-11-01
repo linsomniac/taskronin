@@ -163,7 +163,7 @@ func Run(ctx context.Context, cfg *config.Server, deps Deps) (err error) {
 	if err := svc.Reconcile(ctx); err != nil {
 		return err
 	}
-	apiListener, created, err = listenAPI(paths.Socket)
+	apiListener, created, err = listenAPI(ctx, paths.Socket)
 	if err != nil {
 		return err
 	}

@@ -18,6 +18,7 @@ import (
 	"taskronin/internal/api"
 	"taskronin/internal/clock"
 	"taskronin/internal/domain"
+	"taskronin/internal/service"
 )
 
 func pendingClock() *clock.Fake {
@@ -131,17 +132,34 @@ func TestResendExpired(t *testing.T) {
 	}
 }
 
+// TestResendAtExpiryBoundary is final review A-Minor-3: CreatedAt is stamped
+// up to the 20 s call budget after the server committed, and the server keeps
+// idempotency rows for exactly 7 d by commit time. A resend therefore stops one
+// hour short of 7 d, or an op without If-Match could re-execute (undo/redo on
+// a different stack entry) instead of replaying.
 func TestResendAtExpiryBoundary(t *testing.T) {
+	if PendingResendWindow != service.IdemTTL-time.Hour {
+		t.Fatalf("PendingResendWindow = %v, want the server's IdemTTL (%v) minus 1h", PendingResendWindow, service.IdemTTL)
+	}
 	c, rec := newFake(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = io.WriteString(w, `{"replayed":false,"effects":[],"warnings":[]}`)
 	}))
 	c.opts.Clock = pendingClock()
-	p := pendingRequest(c.opts.Clock.Now().Add(-7 * 24 * time.Hour))
+	for _, age := range []time.Duration{7*24*time.Hour - time.Hour, 7 * 24 * time.Hour} {
+		p := pendingRequest(c.opts.Clock.Now().Add(-age))
+		if out, err := c.Resend(t.Context(), p); out != nil || !errors.Is(err, ErrPendingExpired) {
+			t.Fatalf("age %v: Resend() = %+v, %v; want ErrPendingExpired", age, out, err)
+		}
+	}
+	if len(rec.at("/api/v1/tasks")) != 0 {
+		t.Fatal("a resend at the safety boundary was sent")
+	}
+	p := pendingRequest(c.opts.Clock.Now().Add(-(7*24*time.Hour - time.Hour - time.Millisecond)))
 	if out, err := c.Resend(t.Context(), p); err != nil || out == nil || out.Op == nil || out.Op.Replayed {
-		t.Fatalf("exactly seven days: Resend() = %+v, %v", out, err)
+		t.Fatalf("just inside the window: Resend() = %+v, %v", out, err)
 	}
 	if len(rec.at("/api/v1/tasks")) != 1 {
-		t.Fatal("exactly seven days was not sent")
+		t.Fatal("a resend inside the window was not sent")
 	}
 }
 

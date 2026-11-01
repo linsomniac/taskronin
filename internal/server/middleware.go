@@ -105,8 +105,8 @@ func (s *Server) socketGuard(next http.Handler) http.Handler {
 		ci := ConnInfoFrom(r.Context())
 		// AIDEV-NOTE: Only SO_PEERCRED from the accepted Unix socket establishes
 		// trust. Fail closed on missing credentials, foreign UIDs and proxy
-		// headers (even empty ones). authn may pass verifiedSocket=true only
-		// behind this guard: owner tokens are valid exclusively on this socket.
+		// headers (even empty ones). authn re-derives verifiedSocket from the
+		// same ConnInfo: owner tokens are valid exclusively on this socket.
 		if ci.Transport != TransportUnix || !ci.PeerOK || ci.PeerUID != ourUID() {
 			s.writeProblem(w, r, domain.Errorf(domain.CodePeerRejected, "unverified socket peer"))
 			return
@@ -187,7 +187,14 @@ func (s *Server) authn(next http.Handler) http.Handler {
 			s.writeProblem(w, r, domain.Errorf(domain.CodeUnauthenticated, "bearer token required"))
 			return
 		}
-		actor, err := s.svc.AuthenticateToken(r.Context(), parts[1], true, channel, "socket")
+		// AIDEV-NOTE: A§6.1 (final review A-Minor-1). authn enforces "owner
+		// token only on a verified socket" ITSELF, from the accepted
+		// connection's SO_PEERCRED, instead of trusting that socketGuard ran
+		// first. A later chain without the guard (a TCP mount of the API, a
+		// refactor) must still reject the owner token; keep the guard outermost.
+		ci := ConnInfoFrom(r.Context())
+		verified := ci.Transport == TransportUnix && ci.PeerOK && ci.PeerUID == ourUID()
+		actor, err := s.svc.AuthenticateToken(r.Context(), parts[1], verified, channel, "socket")
 		if err != nil {
 			s.writeProblem(w, r, err)
 			return

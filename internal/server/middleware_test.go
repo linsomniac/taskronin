@@ -140,6 +140,41 @@ func TestOwnerTokenRequiresVerifiedSocketAndRejectsMCP(t *testing.T) {
 	}
 }
 
+// TestAuthnVerifiesSocketItself is final review A-Minor-1 (A§6.1): authn
+// enforces "owner token only on a verified socket" on its own, so the rule
+// survives a chain without socketGuard (a later TCP mount of the API).
+func TestAuthnVerifiesSocketItself(t *testing.T) {
+	s, svc, _ := newTestServer(t, nil)
+	raw, err := auth.NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := svc.ResetPasswordOffline(t.Context(), service.ResetPasswordIn{NewPassword: testutil.Password, OwnerSecret: raw})
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := auth.FormatToken(id, raw)
+	// The reset revoked every earlier token; mint a fresh non-owner one.
+	created, err := svc.CreateToken(t.Context(), service.Meta{Actor: testutil.Owner(), Gen: svc.Generation()}, service.CreateTokenIn{Name: "after-reset", Scopes: domain.AllScopes})
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := created.Secret
+	h := server.WithRequestState(server.Authn(s, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })))
+	unverified := []server.ConnInfo{{}, {Transport: server.TransportTCP, PeerOK: true, PeerUID: sock.PeerUID},
+		{Transport: server.TransportUnix, PeerUID: sock.PeerUID}, {Transport: server.TransportUnix, PeerOK: true, PeerUID: sock.PeerUID + 1}}
+	for _, ci := range unverified {
+		problem(t, do(t, h, ci, request(http.MethodGet, "/api/v1/x", owner, "")), domain.CodeUnauthenticated)
+		// A non-owner token does not depend on the transport.
+		if w := do(t, h, ci, request(http.MethodGet, "/api/v1/x", token, "")); w.Code != http.StatusNoContent {
+			t.Fatalf("API token over %+v: %d", ci, w.Code)
+		}
+	}
+	if w := do(t, h, sock, request(http.MethodGet, "/api/v1/x", owner, "")); w.Code != http.StatusNoContent {
+		t.Fatalf("owner token on the verified socket: %d %s", w.Code, w.Body)
+	}
+}
+
 func TestBodyRules(t *testing.T) {
 	s, _, token := newTestServer(t, nil)
 	h := server.HandlerFor(s, []server.Route{decodingRoute(s)})
