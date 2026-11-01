@@ -65,7 +65,16 @@ func New(ctx context.Context, o Options) (*mcp.Server, error) {
 	return s, nil
 }
 
-var errNeedsOwnToken = errors.New("tkr mcp needs its own token: run `tkr token create mcp --mcp --write-file`")
+// needsOwnTokenError is a token problem, so the CLI exits 4 (A§9.6) via client.ErrTokenFile.
+type needsOwnTokenError struct{}
+
+func (needsOwnTokenError) Error() string {
+	return "tkr mcp needs its own token: run `tkr token create mcp --mcp --write-file`"
+}
+
+func (needsOwnTokenError) Is(target error) bool { return target == client.ErrTokenFile }
+
+var errNeedsOwnToken error = needsOwnTokenError{}
 
 // Run serves MCP on stdin/stdout until ctx ends or the peer disconnects.
 func Run(ctx context.Context, o Options) error {
@@ -185,7 +194,7 @@ func decodeArgs[In any](rin *jsonschema.Resolved, raw json.RawMessage) (In, erro
 	return in, nil
 }
 
-// errorOut is the structured content of a failed tool call.
+// errorOut is the JSON carried in the text content of a failed tool call.
 type errorOut struct {
 	Code       string `json:"code"`
 	Detail     string `json:"detail"`
@@ -194,8 +203,14 @@ type errorOut struct {
 	Current json.RawMessage `json:"current,omitempty"`
 }
 
-// toolError converts err into an IsError result whose structured content and
-// text content carry the same {"code","detail","retry_after"} JSON.
+// toolError converts err into an IsError result whose only content is a
+// TextContent holding {"code","detail","retry_after"} (plus "current" on a 412).
+//
+// AIDEV-NOTE: errors deliberately carry NO StructuredContent. Every tool declares
+// an OutputSchema, and the official TypeScript SDK client validates
+// structuredContent against it even when isError is true, throwing so the model
+// never sees the error. TextContent-only error results are allowed by that client
+// and by the MCP spec. Do not add StructuredContent here (A§10).
 func toolError(err error) *mcp.CallToolResult {
 	out := errorOut{Code: string(domain.CodeInternal), Detail: "internal error: " + err.Error()}
 	var problem *client.ProblemError
@@ -214,9 +229,8 @@ func toolError(err error) *mcp.CallToolResult {
 		body = []byte(`{"code":"internal","detail":"internal error","retry_after":0}`)
 	}
 	return &mcp.CallToolResult{
-		IsError:           true,
-		StructuredContent: json.RawMessage(body),
-		Content:           []mcp.Content{&mcp.TextContent{Text: string(body)}},
+		IsError: true,
+		Content: []mcp.Content{&mcp.TextContent{Text: string(body)}},
 	}
 }
 

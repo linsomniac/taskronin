@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -96,15 +97,27 @@ func requireMirror(t *testing.T, res *mcp.CallToolResult) {
 	}
 }
 
+// requireToolError checks an error result: IsError, no StructuredContent (the
+// TS SDK client validates it against the output schema), and Content[0] a
+// TextContent holding the problem JSON with the given code.
 func requireToolError(t *testing.T, res *mcp.CallToolResult, code string) map[string]any {
 	t.Helper()
 	if !res.IsError {
 		t.Fatalf("expected IsError, got %s", structured(t, res))
 	}
-	requireMirror(t, res)
+	if res.StructuredContent != nil {
+		t.Fatalf("error result carries StructuredContent: %v", res.StructuredContent)
+	}
+	if len(res.Content) != 1 {
+		t.Fatalf("error content = %d items, want 1", len(res.Content))
+	}
+	text, ok := res.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatalf("Content[0] is %T, want *mcp.TextContent", res.Content[0])
+	}
 	var got map[string]any
-	if err := json.Unmarshal(structured(t, res), &got); err != nil {
-		t.Fatal(err)
+	if err := json.Unmarshal([]byte(text.Text), &got); err != nil {
+		t.Fatalf("error text is not JSON: %v", err)
 	}
 	if got["code"] != code {
 		t.Fatalf("code = %v, want %s (%v)", got["code"], code, got)
@@ -256,6 +269,19 @@ func TestListTasksLimit(t *testing.T) {
 	for _, bad := range []any{0, -1} {
 		requireToolError(t, call(t, cs, "list_tasks", map[string]any{"limit": bad}), "validation")
 	}
+	// Defaults: 51 backlog tasks and one triage task; no arguments means the
+	// backlog view, 50 items and a continuation cursor.
+	for i := range 51 {
+		_, err := srv.Client.AddTask(t.Context(), client.Mut{}, api.AddTaskRequest{
+			Title: fmt.Sprintf("backlog %02d", i), Place: &api.AddPlacement{How: "bottom"},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := srv.Client.AddTask(t.Context(), client.Mut{}, api.AddTaskRequest{Title: "still in triage"}); err != nil {
+		t.Fatal(err)
+	}
 	res = call(t, cs, "list_tasks", map[string]any{})
 	if res.IsError {
 		t.Fatalf("error: %s", structured(t, res))
@@ -264,8 +290,13 @@ func TestListTasksLimit(t *testing.T) {
 	if err := json.Unmarshal(structured(t, res), &page); err != nil {
 		t.Fatal(err)
 	}
-	if len(page.Items) > 50 {
-		t.Fatalf("items = %d, want <= 50", len(page.Items))
+	if len(page.Items) != 50 || page.NextCursor == nil {
+		t.Fatalf("items = %d, next_cursor = %v; want 50 and a cursor", len(page.Items), page.NextCursor)
+	}
+	for _, it := range page.Items {
+		if it.Title == "still in triage" || it.View != "backlog" {
+			t.Fatalf("default view returned %q in view %q", it.Title, it.View)
+		}
 	}
 	requireMirror(t, res)
 	// Positive control: the log format really does record task list calls.
@@ -378,5 +409,36 @@ func TestToolErrorRateLimited(t *testing.T) {
 	got := requireToolError(t, res, "rate_limited")
 	if got["detail"] != "rate limit reached; retry after 42 s" || got["retry_after"] != float64(42) {
 		t.Fatalf("got %v", got)
+	}
+}
+
+func TestErrorResultHasNoStructuredContent(t *testing.T) {
+	_, cs := aiSession(t)
+	for _, res := range []*mcp.CallToolResult{
+		call(t, cs, "get_task", map[string]any{"id": 999}),
+		call(t, cs, "list_tasks", map[string]any{"limit": 201}),
+		toolError(errors.New("boom")),
+	} {
+		if !res.IsError || res.StructuredContent != nil || len(res.Content) != 1 {
+			t.Fatalf("error result = %+v", res)
+		}
+	}
+}
+
+func TestOwnerTokenRefusalIsTokenFileError(t *testing.T) {
+	srv := testutil.StartServer(t)
+	_, err := New(t.Context(), Options{Client: srv.Client, Logger: quietLogger()})
+	if !errors.Is(err, client.ErrTokenFile) {
+		t.Fatalf("err = %v, want client.ErrTokenFile (CLI exit 4)", err)
+	}
+}
+
+func TestWorkReportRejectsTimeOfDay(t *testing.T) {
+	_, cs := aiSession(t)
+	for _, args := range []map[string]any{{"from": "2026-10-20 17:00"}, {"to": "yesterday 09:30"}, {"from": "09:30"}} {
+		got := requireToolError(t, call(t, cs, "work_report", args), "validation")
+		if detail, _ := got["detail"].(string); !strings.Contains(detail, "without a time") {
+			t.Errorf("%v: detail %q", args, detail)
+		}
 	}
 }

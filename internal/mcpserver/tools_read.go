@@ -9,6 +9,7 @@ import (
 	"taskronin/internal/api"
 	"taskronin/internal/client"
 	"taskronin/internal/datespec"
+	"taskronin/internal/domain"
 )
 
 const (
@@ -104,12 +105,15 @@ func registerReadTools(s *mcp.Server, c *client.Client) {
 		}
 		from, _ := datespec.Week(ref)
 		to := ref.Today
-		// AIDEV-NOTE: work_report takes whole days; a trailing HH:MM in from/to is
-		// accepted by datespec but only the date is used.
+		// AIDEV-NOTE: work_report takes whole days; a time of day in from/to is a
+		// validation error (as in `tkr report`), never silently dropped.
 		if in.From != "" {
 			m, err := parseDate(in.From, datespec.Past, ref)
 			if err != nil {
 				return nil, err
+			}
+			if m.Min.Valid {
+				return nil, domain.Errorf(domain.CodeValidation, "from takes a date without a time (YYYY-MM-DD, today, a weekday, -2d), got %q", in.From)
 			}
 			from = m.Date
 		}
@@ -117,6 +121,9 @@ func registerReadTools(s *mcp.Server, c *client.Client) {
 			m, err := parseDate(in.To, datespec.Past, ref)
 			if err != nil {
 				return nil, err
+			}
+			if m.Min.Valid {
+				return nil, domain.Errorf(domain.CodeValidation, "to takes a date without a time (YYYY-MM-DD, today, a weekday, -2d), got %q", in.To)
 			}
 			to = m.Date
 		}

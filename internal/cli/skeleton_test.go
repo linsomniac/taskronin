@@ -340,3 +340,11 @@ func TestMCPMissingTokenFile(t *testing.T) {
 		t.Fatalf("flag: code=%d stderr=%q", code, stderr)
 	}
 }
+
+func TestMCPOwnerTokenExits4(t *testing.T) {
+	srv, sys := captureServer(t)
+	_, stderr, code := runCLI(t, sys, "", "mcp", "--socket", srv.Socket, "--token-file", srv.Paths.OwnerToken)
+	if code != 4 || !strings.Contains(stderr, "needs its own token") {
+		t.Fatalf("code=%d stderr=%q, want exit 4 with needs-its-own-token", code, stderr)
+	}
+}

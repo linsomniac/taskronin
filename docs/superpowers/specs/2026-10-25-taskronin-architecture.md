@@ -2847,8 +2847,11 @@ without ID/`-N` → usage error. The API request always carries explicit `task_i
 - Mutating tools accept optional `expected_etag` (the `etag` field of an earlier read); if absent the tool reads
   the current record and uses its ETag (fetch-then-act). On 412 the tool returns
   an error with the current representation.
-- Errors → `CallToolResult{IsError: true}` with structured
-  `{"code","detail","retry_after"}`. `429` (server-enforced cap, §4.3 step 10)
+- Errors → `CallToolResult{IsError: true}` whose only content is a `TextContent`
+  holding the JSON `{"code","detail","retry_after"}` (plus `current` on a 412);
+  error results carry **no** `structuredContent`, because the official TypeScript
+  SDK client validates `structuredContent` against the tool's `outputSchema` even
+  when `isError` is true and throws, hiding the error from the model. `429` (server-enforced cap, §4.3 step 10)
   → "rate limit reached; retry after N s".
 - User content is returned only inside structured fields (the SDK also mirrors
   structured output as JSON text content).
