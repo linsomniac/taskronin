@@ -32,6 +32,10 @@ import (
 const (
 	secretTitle = "secret keycloak"
 	secretNote  = "secret note"
+	// secretToken is a word of secretTitle that occurs nowhere else in the
+	// fixtures. FTS5 stores tokens, not phrases: a whole-phrase search cannot
+	// see a title left in the tasks_fts index (final review B-M14, parked 6).
+	secretToken = "keycloak"
 )
 
 type scrubFix struct {
@@ -62,9 +66,9 @@ func etagOf(t *testing.T, c *client.Client, id int64) string {
 // scrubFixture builds the PRG-10 world: a secret task and entry captured in a
 // snapshot (S1) and in a pre-restore set whose WAL still holds it (P1), then
 // deleted, with a pending purge intent on the ledger and the server stopped.
-func scrubFixture(t *testing.T) *scrubFix {
+func scrubFixture(t *testing.T, opts ...testutil.ServerOpt) *scrubFix {
 	t.Helper()
-	srv := testutil.StartServer(t)
+	srv := testutil.StartServer(t, opts...)
 	ctx := t.Context()
 	c := srv.Client
 	one, err := c.AddTask(ctx, client.Mut{}, api.AddTaskRequest{Title: secretTitle})
@@ -154,7 +158,7 @@ func rawBytes(t *testing.T, path string) []byte {
 func requireNoSecret(t *testing.T, path string) {
 	t.Helper()
 	raw := rawBytes(t, path)
-	for _, secret := range []string{secretTitle, secretNote} {
+	for _, secret := range []string{secretTitle, secretNote, secretToken} {
 		if bytes.Contains(raw, []byte(secret)) {
 			t.Fatalf("%s still holds %q", path, secret)
 		}
@@ -162,26 +166,33 @@ func requireNoSecret(t *testing.T, path string) {
 }
 
 // requireNoSecretAnywhere walks the whole data directory, including backups,
-// aside dirs, staging and sidecars.
+// aside dirs, staging and sidecars, and the configured backup dir even when it
+// lies outside the data dir (final review B-M14, parked item 8b).
 func requireNoSecretAnywhere(t *testing.T, srv *testutil.Server) {
 	t.Helper()
-	err := filepath.WalkDir(srv.DataDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return err
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		for _, secret := range []string{secretTitle, secretNote} {
-			if bytes.Contains(data, []byte(secret)) {
-				t.Errorf("%s still holds %q", path, secret)
+	dirs := []string{srv.DataDir}
+	if rel, err := filepath.Rel(srv.DataDir, srv.Paths.BackupDir); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		dirs = append(dirs, srv.Paths.BackupDir)
+	}
+	for _, dir := range dirs {
+		err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return err
 			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			for _, secret := range []string{secretTitle, secretNote, secretToken} {
+				if bytes.Contains(data, []byte(secret)) {
+					t.Errorf("%s still holds %q", path, secret)
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
 		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
 }
 
@@ -317,6 +328,38 @@ func TestPRG10_ScrubRewritesSets(t *testing.T) {
 	}
 	requireStatus(t, results, f.s1, "clean")
 	requireStatus(t, results, f.p1, "clean")
+}
+
+// TestScrubOutOfTreeBackupDir is final review B-M14 (parked item 8b, in the
+// spirit of BF01): with backup.dir outside data_dir, scrub-backups still finds,
+// rewrites and verifies the snapshots there.
+func TestScrubOutOfTreeBackupDir(t *testing.T) {
+	var backupDir string
+	f := scrubFixture(t, testutil.WithConfig(func(c *config.Server) {
+		// <root>/d/taskronin -> <root>/elsewhere/backups: a sibling of the XDG data home.
+		backupDir = filepath.Join(filepath.Dir(filepath.Dir(c.Paths.DataDir)), "elsewhere", "backups")
+		c.Backup.Dir = backupDir
+	}))
+	if f.srv.Paths.BackupDir != backupDir || filepath.Dir(f.s1) != backupDir {
+		t.Fatalf("fixture: backup dir %s, snapshot %s; want both in %s", f.srv.Paths.BackupDir, f.s1, backupDir)
+	}
+	if rel, err := filepath.Rel(f.srv.DataDir, backupDir); err != nil || !strings.HasPrefix(rel, "..") {
+		t.Fatalf("fixture: %s is inside the data dir", backupDir)
+	}
+	results, err := offline.ScrubBackups(t.Context(), f.e, offline.ScrubOptions{Yes: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireStatus(t, results, f.s1, "rewritten")
+	requireStatus(t, results, f.p1, "rewritten")
+	requireNoSecret(t, f.s1)
+	requireNoSecretAnywhere(t, f.srv)
+	if done := completeLines(ledgerRecords(t, f.srv)); len(done) != 1 {
+		t.Fatalf("complete lines = %+v", done)
+	}
+	if prescrub, _ := filepath.Glob(filepath.Join(backupDir, "*-prescrub.db")); len(prescrub) != 1 {
+		t.Fatalf("prescrub snapshot in the configured dir = %v", prescrub)
+	}
 }
 
 func TestPRG22_CheckOnly(t *testing.T) {

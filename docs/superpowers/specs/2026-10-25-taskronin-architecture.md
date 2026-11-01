@@ -2622,7 +2622,8 @@ WantedBy=default.target
   `--socket PATH`, `--token-file PATH`, `--color auto|always|never`.
 - Requests carry `X-Taskronin-Channel: cli` (TUI: `tui`, MCP: `mcp`).
 - IDs: tasks `42` or `#42`; blocks `b7` or `7`; entries `e9` or `9`
-  (`cli/ids.go`). Output always prints the prefixed form.
+  (`cli/ids.go`). Output always prints the prefixed form. Every verb that takes
+  an ID uses these forms, including `tkr purge task|entry ID` (final review B-M9).
 - Mutations of existing records: `GET` the record, then send its ETag in
   `If-Match` (two requests over the socket). On 412 the CLI prints what changed
   and exits 6; it never retries.
@@ -2682,7 +2683,7 @@ func ParseClock(s string, allow2400 bool) (civil.Minute, error)
 | `tkr undo` / `tkr redo` | — | `POST /undo` / `/redo` | Prints the reverted op's effects. |
 | `tkr revert OPID` | — | `POST /ops/{op}/revert` | |
 | `tkr purge task\|entry ID` / `tkr purge --repair-ledger` | `--with-entries`, `--keep-recovery-files`, `-y` | `offline.Purge` | **Offline** (S4, §12.6): needs the server stopped; password prompt (TTY only). Scrubs the live DB and every backup set, then (unless `--keep-recovery-files`) deletes this host's pending requests and drafts after confirmation; prints scrubbed IDs, linked entries left alone, per-set results, and that earlier exports/log lines are out of reach (D§5.11). |
-| `tkr scrub-backups` | `--check`, `--resume`, `--keep-recovery-files`, `-y` | `offline.ScrubBackups` | Offline (S1, §12.7): the standalone/resumable form of purge steps 7–9; password prompt on a TTY. `--check` exits 8 when any set `contains` purged content (§9.6). |
+| `tkr scrub-backups` | `--check`, `--resume`, `--keep-recovery-files`, `-y` | `offline.ScrubBackups` | Offline (S1, §12.7): the standalone/resumable form of purge steps 7–9; password prompt on a TTY. `--check` exits 8 when any set `contains` purged content (§9.6); it rewrites no backup but still finishes an interrupted rewrite and replays the ledger on the live DB (§12.7 step 2–3), and its help says so (B-M7). |
 | `tkr pending` / `tkr pending retry [KEY]` / `tkr pending discard KEY` | — | lists (with last error) / resends with the original idempotency key / deletes a saved request | §9.6 |
 | `tkr plan` | — | TUI Plan mode | |
 | `tkr recap` | `--date D` | TUI Recap mode | |
@@ -2792,7 +2793,11 @@ without ID/`-N` → usage error. The API request always carries explicit `task_i
   tkr: start it with: systemctl --user start taskronin.socket
   ```
   The echo re-quotes argv with POSIX single quotes (`cli.quoteArgs`), sanitized;
-  if an editor draft exists its path is printed too.
+  if an editor draft exists its path is printed too. The "nothing was saved" line
+  and the echo belong to mutations only: a read omits them (B-M2). For
+  `tkr pending retry`, a not-sent or outcome-unknown resend says instead that the
+  saved request is still pending and to run `tkr pending retry` again (a resend
+  never re-saves and never touches its file; B-M1).
 - Client retries (`client/retry.go`): requests with an `Idempotency-Key`, and
   GETs, are retried up to 2 times (100 ms, 400 ms) on transport errors and once
   on `503 busy` (honouring `Retry-After` ≤ 2 s), always with the same key. 4xx

@@ -277,3 +277,57 @@ func TestLocalInternalErrorShowsCause(t *testing.T) {
 		t.Fatalf("restore --resume over a damaged journal: %d %q", code, stderr)
 	}
 }
+
+// TestFailureAdviceByCommandKind is final review B-M1/B-M2: "nothing was
+// saved. Your command was:" belongs to mutations only, and a failed `tkr
+// pending retry` leaves its saved request pending, so it says to run it again.
+func TestFailureAdviceByCommandKind(t *testing.T) {
+	s, p := testSys(t)
+	notSent := fmt.Errorf("%w: %w", client.ErrNotSent, &net.OpError{Op: "dial", Net: "unix", Err: &os.SyscallError{Syscall: "connect", Err: syscall.ECONNREFUSED}})
+	render := func(e *env, err error) string {
+		var stderr bytes.Buffer
+		e.err = &stderr
+		e.fail(err)
+		return stderr.String()
+	}
+	read := &env{sys: s, paths: p, out: io.Discard, argv: []string{"ls"}, socket: "/socket"}
+	if got := render(read, notSent); got != "tkr: cannot reach the Taskronin server at /socket: connection refused\ntkr: start it with: systemctl --user start taskronin.socket\n" {
+		t.Fatalf("read-only not-sent = %q", got)
+	}
+	retry := &env{sys: s, paths: p, out: io.Discard, argv: []string{"pending", "retry"}, socket: "/socket", resending: true}
+	got := render(retry, notSent)
+	if strings.Contains(got, "nothing was saved") || !strings.Contains(got, "still pending") || !strings.Contains(got, "tkr pending retry") {
+		t.Fatalf("pending retry not-sent = %q", got)
+	}
+	got = render(retry, &client.OutcomeUnknownError{Key: "request-key", Err: io.EOF})
+	if strings.Contains(got, "not saved for retry") || strings.Contains(got, "check with") || !strings.Contains(got, "request-key") ||
+		!strings.Contains(got, "still pending") || !strings.Contains(got, "run `tkr pending retry` again") {
+		t.Fatalf("pending retry outcome-unknown = %q", got)
+	}
+}
+
+// TestPendingRetryOutcomeUnknownE2E drives B-M1 through the real command: a
+// resend whose response is lost again keeps the file and says so.
+func TestPendingRetryOutcomeUnknownE2E(t *testing.T) {
+	sys, paths := testSys(t)
+	socket, token := fakeAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		conn, _, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		_ = conn.Close()
+	}))
+	flags := []string{"--socket", socket, "--token-file", token}
+	if _, stderr, code := runCLI(t, sys, "", append([]string{"add", "x"}, flags...)...); code != 3 || !strings.Contains(stderr, "saved as pending request") {
+		t.Fatalf("add: %d %q", code, stderr)
+	}
+	_, stderr, code := runCLI(t, sys, "", append([]string{"pending", "retry"}, flags...)...)
+	if code != 3 || !strings.Contains(stderr, "still pending") || strings.Contains(stderr, "not saved for retry") || strings.Contains(stderr, "Your command was") {
+		t.Fatalf("pending retry: %d %q", code, stderr)
+	}
+	if list, err := (&client.PendingStore{Dir: paths.PendingDir}).List(); err != nil || len(list) != 1 {
+		t.Fatalf("pending after an unknown resend = %v, %v", list, err)
+	}
+}

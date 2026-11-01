@@ -18,7 +18,8 @@ func scrubCommand(e *env) *cobra.Command {
 		Long: "Apply the purge ledger to every backup snapshot and pre-restore/pre-import set, rewriting each one that\n" +
 			"still holds purged content. The server must be stopped and the owner password is required on a terminal.\n" +
 			"After an interruption, `--resume` finishes the interrupted rewrite first (a plain run does too).\n" +
-			"`--check` only reports which sets still contain purged content, and exits 8 if any do. Once every set is clean, leftover client\n" +
+			"`--check` reports which sets still contain purged content and exits 8 if any do; it rewrites no backup, but still\n" +
+			"finishes an interrupted rewrite and applies the purge ledger to the live database. Once every set is clean, leftover client\n" +
 			"recovery files (saved requests and editor drafts) are deleted after confirmation, or kept with\n" +
 			"`--keep-recovery-files`, and the purge is marked complete.",
 		Args: cobra.NoArgs,
@@ -39,7 +40,7 @@ func scrubCommand(e *env) *cobra.Command {
 			return scrubCheckResult(results)
 		}}
 	f := cmd.Flags()
-	f.BoolVar(&o.Check, "check", false, "Only report sets that still contain purged content; change nothing")
+	f.BoolVar(&o.Check, "check", false, "Report sets that still contain purged content (exit 8 if any) without rewriting them")
 	f.BoolVar(&o.Resume, "resume", false, "Finish an interrupted rewrite first (a plain run does this too)")
 	f.BoolVar(&o.KeepRecoveryFiles, "keep-recovery-files", false, "Complete without deleting saved requests and drafts")
 	f.BoolVarP(&o.Yes, "yes", "y", false, "Delete recovery files without asking")

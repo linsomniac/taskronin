@@ -147,6 +147,7 @@ func requireNoSecrets(t *testing.T, srv *testutil.Server) {
 	t.Helper()
 	requireNoText(t, srv, secretTitle)
 	requireNoText(t, srv, secretNote)
+	requireNoText(t, srv, secretToken)
 }
 
 func requireNoLedger(t *testing.T, srv *testutil.Server) {

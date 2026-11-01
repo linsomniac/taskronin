@@ -1,8 +1,6 @@
 package cli
 
 import (
-	"strconv"
-
 	"github.com/spf13/cobra"
 
 	"taskronin/internal/config"
@@ -30,9 +28,15 @@ func purgeCommand(e *env) *cobra.Command {
 				if len(args) != 2 || (args[0] != "task" && args[0] != "entry") {
 					return usagef("purge needs `task ID` or `entry ID`, or --repair-ledger")
 				}
-				id, err := strconv.ParseInt(args[1], 10, 64)
-				if err != nil || id < 1 {
-					return usagef("invalid ID %q", args[1])
+				// The CLI's own ID forms (A§9.1; final review B-M9): #42 or 42
+				// for a task, e9 or 9 for an entry, as purge itself prints them.
+				parse := parseTaskID
+				if args[0] == "entry" {
+					parse = parseEntryID
+				}
+				id, err := parse(args[1])
+				if err != nil {
+					return err
 				}
 				if args[0] == "entry" && o.WithEntries {
 					return usagef("--with-entries applies to `purge task` only")

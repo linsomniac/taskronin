@@ -88,6 +88,7 @@ func ageText(d time.Duration) string {
 // A definitive problem keeps the file and records it; a transport failure stops
 // the run because the server is unreachable. The first error is returned.
 func (e *env) pendingRetry(args []string) error {
+	e.resending = true
 	store := e.pendingStore()
 	list, err := store.List()
 	if err != nil {

@@ -32,3 +32,26 @@ func TestScrubCheckResult(t *testing.T) {
 		t.Fatalf("count = %q", err.Error())
 	}
 }
+
+// TestScrubCheckHelp is final review B-M7: --check does not "change nothing"
+// (it finishes an interrupted rewrite and replays the ledger on the live DB),
+// and it exits 8 when a set still holds purged content.
+func TestScrubCheckHelp(t *testing.T) {
+	s, _ := testSys(t)
+	out, stderr, code := runCLI(t, s, "", "scrub-backups", "--help")
+	if code != 0 || stderr != "" {
+		t.Fatalf("%d %q", code, stderr)
+	}
+	flag := ""
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "--check") {
+			flag += line
+		}
+	}
+	if strings.Contains(flag, "change nothing") || !strings.Contains(flag, "exit 8") || !strings.Contains(flag, "rewrite") {
+		t.Fatalf("--check help = %q", flag)
+	}
+	if !strings.Contains(out, "live database") {
+		t.Fatalf("long help does not say what --check still changes: %q", out)
+	}
+}

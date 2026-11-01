@@ -26,8 +26,22 @@ func TestPurgeCLI(t *testing.T) {
 			t.Fatalf("%v: %d %q %q", args, code, out, stderr)
 		}
 	}
+	// Final review B-M9: purge takes the CLI's own ID forms (A§9.1), like
+	// every other verb; signs, leading zeros and the wrong prefix are refused.
+	for _, args := range [][]string{
+		{"purge", "task", "+1"},
+		{"purge", "task", "01"},
+		{"purge", "task", "e1"},
+		{"purge", "entry", "#1"},
+		{"purge", "entry", "e"},
+	} {
+		if out, stderr, code := runCLI(t, sys, "", args...); code != 2 || out != "" || stderr == "" {
+			t.Fatalf("%v: %d %q %q", args, code, out, stderr)
+		}
+	}
 	// No terminal: the password cannot be entered (-y never skips it) -> exit 4.
-	for _, args := range [][]string{{"purge", "task", "1", "-y"}, {"purge", "--repair-ledger"}} {
+	// Reaching the password check proves the ID form was accepted.
+	for _, args := range [][]string{{"purge", "task", "1", "-y"}, {"purge", "task", "#1", "-y"}, {"purge", "entry", "e1", "-y"}, {"purge", "entry", "1", "-y"}, {"purge", "--repair-ledger"}} {
 		if _, stderr, code := runCLI(t, sys, "", args...); code != 4 || stderr == "" {
 			t.Fatalf("%v: %d %q", args, code, stderr)
 		}

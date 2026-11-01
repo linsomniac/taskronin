@@ -114,9 +114,15 @@ func (e *env) fail(err error) int {
 	case errors.As(err, &unknown):
 		// AIDEV-NOTE: cancellation after writing is still outcome-unknown.
 		// Preserve recovery advice before returning the interrupted exit code.
-		if unknown.Saved {
+		switch {
+		case unknown.Saved:
 			e.errorLine("tkr: outcome unknown — saved as pending request %s; run `tkr pending retry`", unknown.Key)
-		} else {
+		case e.resending:
+			// AIDEV-NOTE: B-M1. A guarded resend never re-saves, and its pending
+			// file is untouched: retrying it again is exactly the safe next step.
+			e.errorLine("tkr: outcome unknown — pending request %s may or may not have been applied (%v)", unknown.Key, unknown.Err)
+			e.errorLine("tkr: it is still pending: run `tkr pending retry` again")
+		default:
 			e.errorLine("tkr: outcome unknown — the server may or may not have applied this, and it was not saved for retry (%v)", unknown.Err)
 			e.errorLine("tkr: check with `tkr show` / `tkr entries` before re-running. Your command was:")
 			e.commandEcho()
@@ -130,8 +136,15 @@ func (e *env) fail(err error) int {
 			socket = e.socket
 		}
 		e.errorLine("tkr: cannot reach the Taskronin server at %s: %s", socket, notSentCause(err))
-		e.errorLine("tkr: nothing was saved. Your command was:")
-		e.commandEcho()
+		// B-M2: "nothing was saved" is advice about a mutation; a read has
+		// nothing to save, and a pending resend keeps its saved request.
+		switch {
+		case e.resending:
+			e.errorLine("tkr: the saved request is still pending: run `tkr pending retry` again once the server is up")
+		case e.mutates:
+			e.errorLine("tkr: nothing was saved. Your command was:")
+			e.commandEcho()
+		}
 		e.errorLine("tkr: start it with: systemctl --user start taskronin.socket")
 	case errors.Is(err, client.ErrTokenFile):
 		e.errorLine("tkr: %s", err)

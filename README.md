@@ -128,7 +128,7 @@ systemctl --user start taskronin.socket
 | `tkr import FILE [-y]` | load a `tkr export` file into a freshly initialized, empty database |
 | `tkr passwd --reset [--password-stdin]` | set a new owner password; revokes every token |
 | `tkr purge task\|entry ID [--with-entries]` | permanently scrub a deleted task or entry from the database; `--repair-ledger` repairs a damaged purge ledger |
-| `tkr scrub-backups [--check] [--resume]` | remove purged content from every backup; `--check` changes nothing and exits 8 if any set still holds purged content |
+| `tkr scrub-backups [--check] [--resume]` | remove purged content from every backup; `--check` rewrites no backup (it still finishes an interrupted rewrite and applies the purge ledger to the live database) and exits 8 if any set still holds purged content |
 
 `purge` and `scrub-backups` need the owner password typed on a terminal. Exports
 and log lines made before a purge are out of its reach.

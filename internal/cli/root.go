@@ -33,6 +33,7 @@ type env struct {
 	clockLoaded        bool
 	clockErr           error
 	executing, mutates bool
+	resending          bool // `tkr pending retry`: failures leave the saved request pending
 	draftPath          string
 }
 
