@@ -1,0 +1,35 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "date": {
+      "description": "day the work happened: today, yesterday, a weekday (mon...sun), -2d or YYYY-MM-DD; default today",
+      "type": "string"
+    },
+    "notes": {
+      "description": "details",
+      "type": "string"
+    },
+    "task_id": {
+      "description": "task to log work against, or null for a standalone entry",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "time": {
+      "description": "time of day as HH:MM",
+      "pattern": "^([01]?\\d|2[0-3]):[0-5]\\d$",
+      "type": "string"
+    },
+    "title": {
+      "description": "what was done",
+      "minLength": 1,
+      "type": "string"
+    }
+  },
+  "required": [
+    "task_id",
+    "title"
+  ],
+  "type": "object"
+}

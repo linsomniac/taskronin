@@ -1,0 +1,45 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "due": {
+      "description": "due date: today, tomorrow, a weekday (mon...sun), +3d, +2w or YYYY-MM-DD, optionally followed by HH:MM",
+      "type": "string"
+    },
+    "notes": {
+      "description": "longer description",
+      "type": "string"
+    },
+    "priority": {
+      "description": "priority H, M or L",
+      "enum": [
+        "H",
+        "M",
+        "L"
+      ],
+      "type": "string"
+    },
+    "project": {
+      "description": "project name",
+      "type": "string"
+    },
+    "tags": {
+      "description": "tags to attach",
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "null",
+        "array"
+      ]
+    },
+    "title": {
+      "description": "task title",
+      "minLength": 1,
+      "type": "string"
+    }
+  },
+  "required": [
+    "title"
+  ],
+  "type": "object"
+}

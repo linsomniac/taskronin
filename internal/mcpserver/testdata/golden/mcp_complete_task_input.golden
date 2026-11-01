@@ -1,0 +1,33 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "as_title": {
+      "description": "title for the completion entry, if different from the task title",
+      "type": "string"
+    },
+    "date": {
+      "description": "day it was completed: today, yesterday, a weekday (mon...sun), -2d or YYYY-MM-DD; default today",
+      "type": "string"
+    },
+    "expected_etag": {
+      "description": "etag from an earlier read of the task; if omitted the current version is used",
+      "type": "string"
+    },
+    "id": {
+      "description": "task id",
+      "type": "integer"
+    },
+    "log_title": {
+      "description": "title of an extra work entry to log with the completion",
+      "type": "string"
+    },
+    "notes": {
+      "description": "notes for the completion entry",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id"
+  ],
+  "type": "object"
+}

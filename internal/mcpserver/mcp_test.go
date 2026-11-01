@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -178,9 +179,6 @@ func TestReadToolsList(t *testing.T) {
 			t.Errorf("%s annotations = %+v, want readOnly and openWorld=false", name, a)
 		}
 	}
-	if len(got) != len(readTools) {
-		t.Errorf("tools = %d, want %d", len(got), len(readTools))
-	}
 }
 
 func TestReadSchemasGolden(t *testing.T) {
@@ -190,6 +188,9 @@ func TestReadSchemasGolden(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, tool := range list.Tools {
+		if !slices.Contains(readTools, tool.Name) {
+			continue // write tools: TestWriteSchemasGolden
+		}
 		for kind, schema := range map[string]any{"input": tool.InputSchema, "output": tool.OutputSchema} {
 			b, err := json.MarshalIndent(schema, "", "  ")
 			if err != nil {

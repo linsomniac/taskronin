@@ -61,6 +61,7 @@ func New(ctx context.Context, o Options) (*mcp.Server, error) {
 		&mcp.ServerOptions{Instructions: instructions, Logger: logger},
 	)
 	registerReadTools(s, o.Client)
+	registerWriteTools(s, o.Client)
 	return s, nil
 }
 
@@ -77,14 +78,21 @@ func Run(ctx context.Context, o Options) error {
 
 func ptr[T any](v T) *T { return &v }
 
+// minutePattern is the HH:MM wire pattern (A§10).
+const minutePattern = `^([01]?\d|2[0-3]):[0-5]\d$`
+
 // schemaOptions maps the types jsonschema.For cannot derive to their wire form (A§10).
 func schemaOptions() *jsonschema.ForOptions {
-	minute := `^([01]?\d|2[0-3]):[0-5]\d$`
+	minute := minutePattern
 	return &jsonschema.ForOptions{TypeSchemas: map[reflect.Type]*jsonschema.Schema{
 		reflect.TypeFor[civil.Date]():      {Type: "string", Format: "date"},
 		reflect.TypeFor[civil.Minute]():    {Type: "string", Pattern: minute},
 		reflect.TypeFor[civil.EndMinute](): {Type: "string", Pattern: minute + `|^24:00$`},
 		reflect.TypeFor[api.Time]():        {Type: "string", Format: "date-time"},
+		// AIDEV-NOTE: Opt fields are present-or-absent on the wire; null is a
+		// meaningful value (clear / standalone), so the schema allows it.
+		reflect.TypeFor[api.Opt[string]](): {Types: []string{"string", "null"}},
+		reflect.TypeFor[api.Opt[int64]]():  {Types: []string{"integer", "null"}},
 	}}
 }
 
@@ -182,6 +190,8 @@ type errorOut struct {
 	Code       string `json:"code"`
 	Detail     string `json:"detail"`
 	RetryAfter int    `json:"retry_after"`
+	// Current is the server's current representation on a 412 (A§10).
+	Current json.RawMessage `json:"current,omitempty"`
 }
 
 // toolError converts err into an IsError result whose structured content and
@@ -192,7 +202,7 @@ func toolError(err error) *mcp.CallToolResult {
 	var de *domain.Error
 	switch {
 	case errors.As(err, &problem):
-		out = errorOut{Code: problem.Problem.Code, Detail: problem.Problem.Detail, RetryAfter: problem.Problem.RetryAfter}
+		out = errorOut{Code: problem.Problem.Code, Detail: problem.Problem.Detail, RetryAfter: problem.Problem.RetryAfter, Current: problem.Problem.Current}
 	case errors.As(err, &de):
 		out = errorOut{Code: string(de.Code), Detail: de.Detail, RetryAfter: int((de.RetryAfter + time.Second - 1) / time.Second)}
 	}

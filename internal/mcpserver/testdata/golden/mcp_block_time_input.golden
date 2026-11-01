@@ -1,0 +1,33 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "date": {
+      "description": "day of the block: today, tomorrow, a weekday (mon...sun), +3d or YYYY-MM-DD; default today",
+      "type": "string"
+    },
+    "end": {
+      "description": "end time as HH:MM; 24:00 means midnight",
+      "pattern": "^([01]?\\d|2[0-3]):[0-5]\\d$|^24:00$",
+      "type": "string"
+    },
+    "expected_etag": {
+      "description": "etag from an earlier read of the task; if omitted the current version is used",
+      "type": "string"
+    },
+    "start": {
+      "description": "start time as HH:MM",
+      "pattern": "^([01]?\\d|2[0-3]):[0-5]\\d$",
+      "type": "string"
+    },
+    "task_id": {
+      "description": "task to schedule time for",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "task_id",
+    "start",
+    "end"
+  ],
+  "type": "object"
+}

@@ -1,0 +1,17 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "expected_etag": {
+      "description": "etag from an earlier read of the task; if omitted the current version is used",
+      "type": "string"
+    },
+    "id": {
+      "description": "task id",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "id"
+  ],
+  "type": "object"
+}

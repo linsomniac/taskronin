@@ -1,0 +1,686 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "block": {
+      "additionalProperties": false,
+      "properties": {
+        "cancel_reason": {
+          "type": [
+            "null",
+            "string"
+          ]
+        },
+        "created_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "current": {
+          "type": "boolean"
+        },
+        "date": {
+          "format": "date",
+          "type": "string"
+        },
+        "end": {
+          "pattern": "^([01]?\\d|2[0-3]):[0-5]\\d$|^24:00$",
+          "type": "string"
+        },
+        "ended": {
+          "type": "boolean"
+        },
+        "etag": {
+          "type": "string"
+        },
+        "id": {
+          "type": "integer"
+        },
+        "needs_reblock": {
+          "type": "boolean"
+        },
+        "outcome_source": {
+          "type": [
+            "null",
+            "string"
+          ]
+        },
+        "resolved_at": {
+          "format": "date-time",
+          "type": [
+            "null",
+            "string"
+          ]
+        },
+        "slipped": {
+          "type": "boolean"
+        },
+        "slipped_at": {
+          "format": "date-time",
+          "type": [
+            "null",
+            "string"
+          ]
+        },
+        "start": {
+          "pattern": "^([01]?\\d|2[0-3]):[0-5]\\d$",
+          "type": "string"
+        },
+        "started": {
+          "type": "boolean"
+        },
+        "status": {
+          "type": "string"
+        },
+        "task_etag": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "integer"
+        },
+        "task_title": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "task_id",
+        "task_title",
+        "task_etag",
+        "date",
+        "start",
+        "end",
+        "status",
+        "outcome_source",
+        "cancel_reason",
+        "slipped",
+        "slipped_at",
+        "current",
+        "started",
+        "ended",
+        "needs_reblock",
+        "created_at",
+        "resolved_at",
+        "version",
+        "etag"
+      ],
+      "type": [
+        "null",
+        "object"
+      ]
+    },
+    "effects": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "block_id": {
+            "type": "integer"
+          },
+          "entry_id": {
+            "type": "integer"
+          },
+          "from": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "task_id": {
+            "type": "integer"
+          },
+          "to": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "type": "object"
+      },
+      "type": [
+        "null",
+        "array"
+      ]
+    },
+    "entry": {
+      "additionalProperties": false,
+      "properties": {
+        "created_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "deleted_at": {
+          "format": "date-time",
+          "type": [
+            "null",
+            "string"
+          ]
+        },
+        "etag": {
+          "type": "string"
+        },
+        "id": {
+          "type": "integer"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "notes": {
+          "type": "string"
+        },
+        "reopened": {
+          "type": "boolean"
+        },
+        "task_id": {
+          "type": [
+            "null",
+            "integer"
+          ]
+        },
+        "task_title": {
+          "type": [
+            "null",
+            "string"
+          ]
+        },
+        "time": {
+          "pattern": "^([01]?\\d|2[0-3]):[0-5]\\d$",
+          "type": [
+            "null",
+            "string"
+          ]
+        },
+        "title": {
+          "type": "string"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        },
+        "work_date": {
+          "format": "date",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "task_id",
+        "task_title",
+        "kind",
+        "title",
+        "notes",
+        "work_date",
+        "time",
+        "reopened",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+        "version",
+        "etag"
+      ],
+      "type": [
+        "null",
+        "object"
+      ]
+    },
+    "op_id": {
+      "type": [
+        "null",
+        "string"
+      ]
+    },
+    "replayed": {
+      "type": "boolean"
+    },
+    "task": {
+      "additionalProperties": false,
+      "properties": {
+        "completed_at": {
+          "format": "date-time",
+          "type": [
+            "null",
+            "string"
+          ]
+        },
+        "completed_date": {
+          "format": "date",
+          "type": [
+            "null",
+            "string"
+          ]
+        },
+        "created_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "defer": {
+          "additionalProperties": false,
+          "properties": {
+            "date": {
+              "format": "date",
+              "type": "string"
+            },
+            "time": {
+              "pattern": "^([01]?\\d|2[0-3]):[0-5]\\d$",
+              "type": [
+                "null",
+                "string"
+              ]
+            }
+          },
+          "required": [
+            "date",
+            "time"
+          ],
+          "type": [
+            "null",
+            "object"
+          ]
+        },
+        "deferred": {
+          "type": "boolean"
+        },
+        "deleted_at": {
+          "format": "date-time",
+          "type": [
+            "null",
+            "string"
+          ]
+        },
+        "due": {
+          "additionalProperties": false,
+          "properties": {
+            "date": {
+              "format": "date",
+              "type": "string"
+            },
+            "time": {
+              "pattern": "^([01]?\\d|2[0-3]):[0-5]\\d$",
+              "type": [
+                "null",
+                "string"
+              ]
+            }
+          },
+          "required": [
+            "date",
+            "time"
+          ],
+          "type": [
+            "null",
+            "object"
+          ]
+        },
+        "due_phase": {
+          "type": "string"
+        },
+        "due_soon": {
+          "type": "boolean"
+        },
+        "etag": {
+          "type": "string"
+        },
+        "id": {
+          "type": "integer"
+        },
+        "last_placed_at": {
+          "format": "date-time",
+          "type": [
+            "null",
+            "string"
+          ]
+        },
+        "notes": {
+          "type": "string"
+        },
+        "origin": {
+          "type": "string"
+        },
+        "priority": {
+          "type": [
+            "null",
+            "string"
+          ]
+        },
+        "project": {
+          "type": [
+            "null",
+            "string"
+          ]
+        },
+        "reasons": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "reason": {
+                "type": "string"
+              },
+              "since": {
+                "format": "date-time",
+                "type": "string"
+              }
+            },
+            "required": [
+              "reason",
+              "since"
+            ],
+            "type": "object"
+          },
+          "type": [
+            "null",
+            "array"
+          ]
+        },
+        "slips": {
+          "additionalProperties": false,
+          "properties": {
+            "lifetime": {
+              "type": "integer"
+            },
+            "since_triage": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "lifetime",
+            "since_triage"
+          ],
+          "type": "object"
+        },
+        "status": {
+          "type": "string"
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "null",
+            "array"
+          ]
+        },
+        "title": {
+          "type": "string"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        },
+        "view": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "notes",
+        "status",
+        "view",
+        "reasons",
+        "defer",
+        "deferred",
+        "due",
+        "due_phase",
+        "due_soon",
+        "project",
+        "tags",
+        "priority",
+        "origin",
+        "slips",
+        "last_placed_at",
+        "completed_at",
+        "completed_date",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+        "version",
+        "etag"
+      ],
+      "type": [
+        "null",
+        "object"
+      ]
+    },
+    "tasks": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "completed_at": {
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "completed_date": {
+            "format": "date",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "defer": {
+            "additionalProperties": false,
+            "properties": {
+              "date": {
+                "format": "date",
+                "type": "string"
+              },
+              "time": {
+                "pattern": "^([01]?\\d|2[0-3]):[0-5]\\d$",
+                "type": [
+                  "null",
+                  "string"
+                ]
+              }
+            },
+            "required": [
+              "date",
+              "time"
+            ],
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "deferred": {
+            "type": "boolean"
+          },
+          "deleted_at": {
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "due": {
+            "additionalProperties": false,
+            "properties": {
+              "date": {
+                "format": "date",
+                "type": "string"
+              },
+              "time": {
+                "pattern": "^([01]?\\d|2[0-3]):[0-5]\\d$",
+                "type": [
+                  "null",
+                  "string"
+                ]
+              }
+            },
+            "required": [
+              "date",
+              "time"
+            ],
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "due_phase": {
+            "type": "string"
+          },
+          "due_soon": {
+            "type": "boolean"
+          },
+          "etag": {
+            "type": "string"
+          },
+          "id": {
+            "type": "integer"
+          },
+          "last_placed_at": {
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "notes": {
+            "type": "string"
+          },
+          "origin": {
+            "type": "string"
+          },
+          "priority": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "project": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "reasons": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "reason": {
+                  "type": "string"
+                },
+                "since": {
+                  "format": "date-time",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "reason",
+                "since"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "slips": {
+            "additionalProperties": false,
+            "properties": {
+              "lifetime": {
+                "type": "integer"
+              },
+              "since_triage": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "lifetime",
+              "since_triage"
+            ],
+            "type": "object"
+          },
+          "status": {
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "version": {
+            "type": "integer"
+          },
+          "view": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "notes",
+          "status",
+          "view",
+          "reasons",
+          "defer",
+          "deferred",
+          "due",
+          "due_phase",
+          "due_soon",
+          "project",
+          "tags",
+          "priority",
+          "origin",
+          "slips",
+          "last_placed_at",
+          "completed_at",
+          "completed_date",
+          "created_at",
+          "updated_at",
+          "deleted_at",
+          "version",
+          "etag"
+        ],
+        "type": "object"
+      },
+      "type": [
+        "null",
+        "array"
+      ]
+    },
+    "warnings": {
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "null",
+        "array"
+      ]
+    }
+  },
+  "required": [
+    "op_id",
+    "replayed",
+    "effects",
+    "warnings"
+  ],
+  "type": "object"
+}
