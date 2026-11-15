@@ -277,7 +277,7 @@ func slipText(s api.Slips) string {
 }
 
 func cardKeys(a *App, d *cardDeck, k tea.KeyPressMsg) (tea.Cmd, bool) {
-	switch k.String() {
+	switch cardActions.command(k) {
 	case "k", "t", "b", "p", "d", "B", "x", "D", "s", "A":
 	default:
 		return nil, false
@@ -296,7 +296,7 @@ func cardKeys(a *App, d *cardDeck, k tea.KeyPressMsg) (tea.Cmd, bool) {
 		return nil, true
 	}
 	after := d.placedOK(false)
-	switch k.String() {
+	switch cardActions.command(k) {
 	case "k", "t", "b":
 		how := map[string]string{"k": "keep", "t": "top", "b": "bottom"}[k.String()]
 		return a.mutate("placed", func(ctx context.Context, c API) (*api.OpResponse, error) {

@@ -65,7 +65,7 @@ func (s *detailScreen) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
 		a.setBanner(bannerInfo, "busy…")
 		return nil, true
 	}
-	switch k.String() {
+	switch detailKeys.command(k) {
 	case "j":
 		s.viewport.ScrollDown(1)
 	case "k":

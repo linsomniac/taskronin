@@ -61,6 +61,7 @@ type App struct {
 	overlayDirty bool // A refresh or poll change requires reloading hidden screens on reveal.
 	form         screen
 	banner       banner
+	draftPaths   []string
 	inflight     bool
 	quitting     bool
 	reqSeq       map[string]int
@@ -147,7 +148,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, a.editorDone(msg)
 	case draftDiscardedMsg:
 		if msg.err != nil {
-			a.appendBanner("cannot discard draft at " + msg.path + ": " + msg.err.Error())
+			a.keepDraft(msg.path)
+			a.appendBanner("cannot discard draft: " + msg.err.Error())
 		}
 		return a, nil
 	case todayMsg:
@@ -245,6 +247,10 @@ func (a *App) handleKey(k tea.KeyPressMsg) tea.Cmd {
 		cmd, _ := a.form.handle(a, k)
 		return cmd
 	}
+	if binding.Matches(k, a.keys.Escape) && len(a.draftPaths) > 0 {
+		a.draftPaths, a.banner = nil, banner{}
+		return nil
+	}
 	if len(a.overlays) > 0 {
 		if binding.Matches(k, a.keys.Escape) {
 			return a.closeOverlay()
@@ -322,7 +328,7 @@ func (a *App) quit() tea.Cmd { a.quitting = true; return tea.Quit }
 // View renders a bounded alternate-screen frame, with prompts above the footer.
 func (a *App) View() tea.View {
 	w, h := a.width, a.height
-	footer := a.help.View(a.keys)
+	footer := a.helpView(w)
 	if a.banner.text != "" && !a.help.ShowAll {
 		style := a.styles.Info
 		if a.banner.kind == bannerError {
@@ -330,13 +336,13 @@ func (a *App) View() tea.View {
 		}
 		footer = style.Render(a.line(a.banner.text, w))
 	}
-	bottom := strings.Split(footer, "\n")
+	bottom := append(a.draftLines(w), strings.Split(footer, "\n")...)
 	formHeight := 0
 	if a.form != nil {
 		formHeight = 3
 	}
-	bodyHeight := max(0, h-1-len(bottom)-formHeight)
-	lines := []string{a.header(w)}
+	lines := strings.Split(a.header(w), "\n")
+	bodyHeight := max(0, h-len(lines)-len(bottom)-formHeight)
 	lines = append(lines, fitLines(a.current().view(a, w, bodyHeight), bodyHeight)...)
 	if a.form != nil {
 		lines = append(lines, fitLines(a.form.view(a, w, formHeight), formHeight)...)

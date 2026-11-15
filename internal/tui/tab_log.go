@@ -84,7 +84,7 @@ func (s *logScreen) update(a *App, msg tea.Msg) tea.Cmd {
 func (*logScreen) selection() (int64, string, bool) { return 0, "", false }
 
 func (s *logScreen) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
-	switch k.String() {
+	switch logKeys.command(k) {
 	case "j", "k":
 		delta := 1
 		if k.String() == "k" {
@@ -113,7 +113,7 @@ func (s *logScreen) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
 	if !ok {
 		return nil, true
 	}
-	switch k.String() {
+	switch logKeys.command(k) {
 	case "e":
 		return a.editEntry(e), true
 	case "L":

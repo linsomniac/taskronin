@@ -23,7 +23,7 @@ func (s *triageScreen) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
 	if s.move(k) {
 		return nil, true
 	}
-	switch k.String() {
+	switch triageKeys.command(k) {
 	case "enter":
 		if t, ok := s.list.selected(); ok {
 			return a.enterMode(ModeTriage, newCardMode(t.ID)), true

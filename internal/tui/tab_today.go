@@ -67,7 +67,7 @@ func (s *todayScreen) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
 		a.setBanner(bannerInfo, "busy…")
 		return nil, true
 	}
-	switch k.String() {
+	switch todayKeys.command(k) {
 	case "j":
 		s.cursor = min(s.cursor+1, len(s.rows)-1)
 		return nil, true
@@ -213,6 +213,21 @@ func (s *todayScreen) view(a *App, w, h int) string {
 	}
 	if td.AIChanges > 0 {
 		lines = append(lines, a.styles.Info.Render(a.line(fmt.Sprintf("AI changes: %d unreviewed — A to review", td.AIChanges), w)))
+	}
+
+	health := "Backup: healthy"
+	if !td.Backup.Healthy {
+		health = "Backup: needs attention"
+	}
+	if td.Backup.LastSuccessAt != nil {
+		health += " · last success " + td.Backup.LastSuccessAt.Format("2006-01-02 15:04")
+	}
+	if td.Backup.LastError != "" {
+		health += " · " + td.Backup.LastError
+	}
+	lines = append(lines, a.line(health, w))
+	for _, b := range td.Banners {
+		lines = append(lines, a.line(b.Message, w))
 	}
 	// Keep the selected row visible even when the dashboard exceeds the frame.
 	start := 0

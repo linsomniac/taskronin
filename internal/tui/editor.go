@@ -102,9 +102,9 @@ func (a *App) editorDone(msg editorDoneMsg) tea.Cmd {
 	// AIDEV-NOTE: a draft is discarded only after the server confirms or when
 	// nothing changed; every other outcome displays its path (A§9.6). Creation,
 	// callback reads and Discard all run outside Update (CF13).
-	kept := "draft kept at " + msg.draft.Path
 	if msg.err != nil {
-		a.setBanner(bannerError, "editor failed — "+kept)
+		a.keepDraft(msg.draft.Path)
+		a.setBanner(bannerError, "editor failed")
 		return nil
 	}
 	target := msg.target
@@ -113,7 +113,8 @@ func (a *App) editorDone(msg editorDoneMsg) tea.Cmd {
 		var err error
 		title, notes, err = editor.ParseTaskBuffer(msg.buffer)
 		if err != nil {
-			a.setBanner(bannerError, "title required — "+kept)
+			a.keepDraft(msg.draft.Path)
+			a.setBanner(bannerError, "title required")
 			return nil
 		}
 	}
@@ -137,7 +138,7 @@ func (a *App) editorDone(msg editorDoneMsg) tea.Cmd {
 	}, func(_ *App, _ *api.OpResponse) tea.Cmd {
 		return discardDraft(msg.draft)
 	}, func(a *App, _ error) {
-		a.appendBanner(kept)
+		a.keepDraft(msg.draft.Path)
 	})
 }
 

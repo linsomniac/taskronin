@@ -97,7 +97,7 @@ func (s *searchScreen) selection() (int64, string, bool) {
 }
 
 func (s *searchScreen) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
-	switch k.String() {
+	switch searchKeys.command(k) {
 	case "r":
 		if s.state == loadLoading {
 			a.setBanner(bannerInfo, "busy…")

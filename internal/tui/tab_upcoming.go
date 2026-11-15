@@ -56,7 +56,7 @@ func (s *upcomingScreen) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
 	if !ok {
 		return nil, false
 	}
-	switch k.String() {
+	switch upcomingKeys.command(k) {
 	case "K": // CF10: lowercase k is navigation in every list.
 		return a.mutate("kept in backlog", func(ctx context.Context, c API) (*api.OpResponse, error) {
 			return c.PlaceTask(ctx, client.Mut{IfMatch: t.ETag}, t.ID, api.PlaceRequest{How: "keep"})

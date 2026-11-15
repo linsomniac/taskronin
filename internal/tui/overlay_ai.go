@@ -91,7 +91,7 @@ func (s *aiScreen) update(a *App, msg tea.Msg) tea.Cmd {
 func (*aiScreen) selection() (int64, string, bool) { return 0, "", false }
 
 func (s *aiScreen) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
-	switch k.String() {
+	switch aiKeys.command(k) {
 	case "j", "k":
 		delta := 1
 		if k.String() == "k" {

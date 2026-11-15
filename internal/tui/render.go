@@ -49,24 +49,65 @@ func (a *App) header(w int) string {
 		parts = append(parts, style.Render(label))
 	}
 	if a.today != nil {
-		backup, purge := false, false
+		backup, purge, timezone := !a.today.Backup.Healthy, false, false
+		var status []string
 		for _, b := range a.today.Banners {
 			switch b.Kind {
 			case "backup_failed", "backup_stale":
 				backup = true
+			case "tz_changed":
+				timezone = true
 			case "purge_incomplete", "purge_ledger_damaged":
 				purge = true
 			}
 		}
 		if backup {
-			parts = append(parts, a.styles.Warn.Render("⚠ backup"))
+			status = append(status, a.styles.Warn.Render("⚠ backup"))
 		}
 		if purge {
-			parts = append(parts, a.styles.Warn.Render("⚠ purge"))
+			status = append(status, a.styles.Warn.Render("⚠ purge"))
+		}
+		if timezone {
+			status = append(status, a.styles.Warn.Render("⚠ timezone"))
 		}
 		if a.today.AIChanges > 0 {
-			parts = append(parts, a.styles.Info.Render(fmt.Sprintf("ai %d", a.today.AIChanges)))
+			status = append(status, a.styles.Info.Render(fmt.Sprintf("ai %d", a.today.AIChanges)))
+		}
+		if len(status) > 0 {
+			return strings.Join(parts, " ") + "\n" + strings.Join(status, " · ")
 		}
 	}
 	return strings.Join(parts, " ")
+}
+
+// AIDEV-NOTE: kept drafts have a separate lifetime from transient banners.
+// Sanitize before wrapping, and never truncate the path the user needs to recover.
+func (a *App) keepDraft(path string) {
+	for _, kept := range a.draftPaths {
+		if kept == path {
+			return
+		}
+	}
+	a.draftPaths = append(a.draftPaths, path)
+}
+
+func (a *App) draftLines(w int) []string {
+	if w <= 0 {
+		return nil
+	}
+	var lines []string
+	for _, path := range a.draftPaths {
+		text := textsafe.SanitizeLine("draft kept at " + path + " · esc dismisses")
+		for textsafe.Width(text) > w {
+			part := textsafe.Truncate(text, w, "")
+			if part == "" {
+				// A grapheme wider than the terminal is clipped by the frame.
+				break
+			}
+			lines = append(lines, part)
+			text = strings.TrimPrefix(text, part)
+		}
+		lines = append(lines, text)
+	}
+	return lines
 }

@@ -217,7 +217,7 @@ func (s *listTab) accept(a *App, tasks []api.Task, truncated bool, err error) te
 func (s *listTab) selection() (int64, string, bool) { return s.list.selection() }
 
 func (s *listTab) move(k tea.KeyPressMsg) bool {
-	switch k.String() {
+	switch listKeys.command(k) {
 	case "j":
 		s.list.move(1)
 	case "k":

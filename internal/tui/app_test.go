@@ -552,8 +552,8 @@ func TestRenderFormAndHeader(t *testing.T) {
 	eq(t, len(lines), 10)
 	eq(t, lines[6:], []string{"prompt", "input", "hint", "message"})
 	for _, part := range []string{"Taskronin  Wed 2026-10-28 10:00", "[1 Today] 2 Triage 3 Backlog 4 Upcoming 5 Log", "⚠ backup", "⚠ purge"} {
-		if !strings.Contains(lines[0], part) {
-			t.Fatal(lines[0])
+		if !strings.Contains(strings.Join(lines[:2], "\n"), part) {
+			t.Fatal(lines[:2])
 		}
 	}
 	if strings.ContainsRune(viewText(a), '\x1b') {

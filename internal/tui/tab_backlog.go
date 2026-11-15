@@ -36,7 +36,7 @@ func (s *backlogScreen) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
 	if !ok {
 		return nil, false
 	}
-	switch k.String() {
+	switch backlogKeys.command(k) {
 	case "J", "K":
 		delta, how := 1, "after"
 		if k.String() == "K" {

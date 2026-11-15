@@ -94,7 +94,7 @@ func (s *recapMode) selection() (int64, string, bool) {
 }
 
 func (s *recapMode) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
-	switch k.String() {
+	switch recapKeys.command(k) {
 	case "j", "down": // App aliases arrows only in tabs and overlays.
 		s.cursor = max(0, min(s.cursor+1, len(s.rows)-1))
 		return nil, true

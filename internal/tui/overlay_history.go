@@ -54,7 +54,7 @@ func (s *historyScreen) update(a *App, msg tea.Msg) tea.Cmd {
 func (s *historyScreen) selection() (int64, string, bool) { return s.id, "", true }
 
 func (s *historyScreen) handle(_ *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
-	switch k.String() {
+	switch listKeys.command(k) {
 	case "j":
 		s.viewport.ScrollDown(1)
 	case "k":

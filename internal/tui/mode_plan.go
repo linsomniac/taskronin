@@ -157,7 +157,7 @@ func (s *planMode) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
 		return cardKeys(a, s.deck, k)
 	}
 	if s.step == 2 {
-		switch k.String() {
+		switch planBacklogKeys.command(k) {
 		case "j", "down": // App only aliases arrows in tabs and overlays.
 			s.list.move(1)
 			return nil, true

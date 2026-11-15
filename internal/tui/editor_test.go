@@ -77,9 +77,9 @@ func TestEditorFailuresKeepDraft(t *testing.T) { // Review Focus 5.
 	}{
 		{"bad setting", `vi "unclosed`, "", nil, nil, false, false, false, "bad editor setting"},
 		{"draft not creatable", "vi", "", nil, nil, false, false, false, "cannot create draft"},
-		{"exit 1", "vi", "X\n\nY", errors.New("exit status 1"), nil, true, false, true, "editor failed — draft kept at "},
+		{"exit 1", "vi", "X\n\nY", errors.New("exit status 1"), nil, true, false, true, "editor failed"},
 		{"unchanged", "vi", "Old\n\nn1", nil, nil, true, false, false, "no changes"},
-		{"empty title", "vi", "\n\nnotes", nil, nil, true, false, true, "title required — draft kept at "},
+		{"empty title", "vi", "\n\nnotes", nil, nil, true, false, true, "title required"},
 		{"server refuses", "vi", "T2\n\nn", nil, problem("validation", 422, "too long"), true, true, true, "too long"},
 		{"stale", "vi", "T2\n\nn", nil, problem("precondition_failed", 412, "stale"), true, true, true, "changed elsewhere — refreshed"},
 		{"restore", "vi", "T2\n\nn", nil, problem("generation_mismatch", 412, "restored"), true, true, true, "database was restored — refreshed"},
@@ -110,12 +110,10 @@ func TestEditorFailuresKeepDraft(t *testing.T) { // Review Focus 5.
 			files := draftFiles(t, dir)
 			eq(t, len(files) == 1, tc.wantDraft)
 			if tc.wantDraft {
-				if !strings.Contains(a.banner.text, "draft kept at "+files[0]) {
-					t.Fatal(a.banner.text)
+				if len(a.draftPaths) != 1 || a.draftPaths[0] != files[0] {
+					t.Fatal(a.draftPaths)
 				}
-				if tc.wantPatch && !strings.HasSuffix(a.banner.text, " · draft kept at "+files[0]) {
-					t.Fatal("draft suffix must have one separator:", a.banner.text)
-				}
+
 				b, err := os.ReadFile(files[0])
 				if err != nil {
 					t.Fatal(err)
@@ -289,7 +287,8 @@ func TestEditorReadFailureKeepsDraftPath(t *testing.T) {
 		t.Fatal(setupErr)
 	}
 	eq(t, f.count("UpdateTask"), 0)
-	eq(t, a.banner.text, "editor failed — draft kept at "+path)
+	eq(t, a.banner.text, "editor failed")
+	eq(t, a.draftPaths[0], path)
 	if _, err := os.Stat(path); err != nil {
 		t.Fatal(err)
 	}
