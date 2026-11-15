@@ -329,7 +329,10 @@ func TestTodayMsgStoresAggregate(t *testing.T) {
 
 func TestAppDefaultsAndStartModes(t *testing.T) {
 	for _, mode := range []Mode{ModeTabs, ModeTriage, ModePlan, ModeRecap} {
-		a := newTestApp(t, newFake(), func(c *Config) { c.StartMode = mode; c.StartTab = TabBacklog; c.PollInterval = 0 })
+		f := newFake()
+		a := NewApp(Config{API: f, Ctx: t.Context(), Clock: f.clock, StartMode: mode, StartTab: TabBacklog})
+		// Exercise defaults without draining the deliberately endless poll loop.
+		drain(t, a, a.refresh())
 		eq(t, a.cfg.PollInterval, DefaultPollInterval)
 		eq(t, DefaultPollInterval, 5*time.Second)
 		eq(t, a.cfg.Editor.Getenv("EDITOR"), "")

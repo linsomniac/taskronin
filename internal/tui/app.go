@@ -49,6 +49,7 @@ type App struct {
 	clock        api.Clock
 	today        *api.Today
 	todayETag    string
+	pollReq      int
 	tab          Tab
 	tabs         [5]screen
 	mode         Mode
@@ -67,7 +68,7 @@ type App struct {
 
 var _ tea.Model = (*App)(nil)
 
-// NewApp constructs the app with placeholder screens for subsequent TUI tasks.
+// NewApp constructs the app, leaving placeholders for subsequent TUI tasks.
 func NewApp(cfg Config) *App {
 	if cfg.Ctx == nil {
 		cfg.Ctx = context.Background()
@@ -92,6 +93,7 @@ func NewApp(cfg Config) *App {
 	for i, name := range tabNames {
 		a.tabs[i] = stubScreen{name: name}
 	}
+	a.tabs[TabToday] = &todayScreen{cursor: -1}
 	switch cfg.StartMode {
 	case ModeTriage:
 		a.modeScreen = stubScreen{name: "Triage"}
@@ -104,8 +106,8 @@ func NewApp(cfg Config) *App {
 	return a
 }
 
-// Init starts the aggregate and visible-screen reads.
-func (a *App) Init() tea.Cmd { return a.refresh() }
+// Init starts the aggregate and visible-screen reads and the polling timer.
+func (a *App) Init() tea.Cmd { return tea.Batch(a.refresh(), a.pollTick()) }
 
 // Update handles app messages, then forwards screen-owned data messages.
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -115,7 +117,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.help.SetWidth(a.width)
 	case tea.KeyPressMsg:
 		return a, a.handleKey(msg)
+	case pollMsg:
+		return a, a.poll()
 	case todayMsg:
+		if msg.poll && a.pollReq == msg.req {
+			a.pollReq = 0
+		}
 		// AIDEV-NOTE: request-sequence staleness guard. Even an old error or
 		// 304 must not overwrite state from a newer refresh.
 		if !a.latest("today", msg.req) {
@@ -127,14 +134,25 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.banner.readError {
 			a.banner = banner{}
 		}
+		var cmds []tea.Cmd
 		if !msg.notModified && msg.today != nil {
+			changed := todayPayloadChanged(a.today, msg.today)
 			a.today, a.todayETag, a.clock = msg.today, msg.etag, msg.today.Clock
+			cmds = append(cmds, a.tabs[TabToday].update(a, msg))
+			if msg.poll && changed && len(a.overlays) == 0 && a.current() != a.tabs[TabToday] {
+				cmds = append(cmds, a.current().load(a))
+			}
 		}
 		// Only accepted, successful reads may refresh a form's implicit link.
 		if a.form != nil {
-			return a, a.form.update(a, msg)
+			cmds = append(cmds, a.form.update(a, msg))
+			// AIDEV-NOTE: a read-error banner may hide a held retry snapshot. Restore
+			// its warning on recovery, including a successful conditional 304.
+			if f, ok := a.form.(*form); ok && f.retry != nil {
+				f.retryBanner(a)
+			}
 		}
-		return a, nil
+		return a, tea.Batch(cmds...)
 	case opMsg:
 		a.inflight = false
 		if msg.err != nil {
@@ -304,6 +322,7 @@ func (a *App) fetchToday(poll bool) tea.Cmd {
 	etag := ""
 	if poll {
 		etag = a.todayETag
+		a.pollReq = req
 	}
 	return func() tea.Msg {
 		td, tag, notModified, err := c.Today(ctx, etag)

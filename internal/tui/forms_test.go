@@ -208,9 +208,8 @@ func TestFormRetryPreflightFailureSendsNothing(t *testing.T) {
 			eq(t, f.count("Today"), reads)
 			eq(t, a.banner.text, "not sent — outcome of the first attempt still unknown; enter resends the same request")
 			eq(t, a.banner.readError, false)
-			banner := a.banner.text
 			drain(t, a, a.fetchToday(false))
-			eq(t, a.banner.text, banner)
+			eq(t, a.banner.text, "outcome unknown — enter resends the same request")
 			press(t, a, "enter")
 			eq(t, f.mustLast(t, "DeferTask").Mut.Key, "K2")
 		}
