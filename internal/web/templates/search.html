@@ -1,0 +1,24 @@
+{{define "content"}}
+<h1>Search</h1>
+<form method="get" action="/ui/search">
+<label>Query <input name="q" value="{{.Data.Query}}"></label>
+<label>Kind <select name="kind">
+<option value="all"{{if eq .Data.Kind "all"}} selected{{end}}>All</option>
+<option value="task"{{if eq .Data.Kind "task"}} selected{{end}}>Tasks</option>
+<option value="entry"{{if eq .Data.Kind "entry"}} selected{{end}}>Entries</option>
+</select></label>
+<button type="submit">Search</button>
+</form>
+{{if .Data.Searched}}
+<section aria-label="Search results">
+{{range .Data.Items}}
+<article data-search-kind="{{.Kind}}" data-search-id="{{.ID}}">
+<h2>{{if eq .Kind "task"}}<a href="/ui/tasks/{{.ID}}">{{.Title}}</a>{{else if .TaskID.Valid}}<a href="/ui/tasks/{{.TaskID.V}}">{{.Title}}</a>{{else}}<a href="/ui/log?from={{.WorkDate.V}}&amp;to={{.WorkDate.V}}">{{.Title}}</a>{{end}}</h2>
+<p>{{.Kind}} #{{.ID}}{{if .Status}} · {{.Status}}{{end}}{{if .WorkDate.Valid}} · {{day .WorkDate.V}}{{end}}</p>
+<p data-snippet>{{.Snippet}}</p>
+</article>
+{{else}}<p>No results.</p>{{end}}
+{{if .Data.More}}<a href="{{.Data.More}}">More</a>{{end}}
+</section>
+{{end}}
+{{end}}

@@ -1,0 +1,35 @@
+{{define "content"}}
+<h1>AI changes</h1>
+<p>Unreviewed: {{.Data.Unreviewed}} · Reviewed through: {{.Data.ReviewedThrough}}</p>
+<p>{{if .Data.IncludeReviewed}}<a href="/ui/ai-changes">Unreviewed only</a>{{else}}<a href="/ui/ai-changes?all=1">Include reviewed</a>{{end}}</p>
+{{range .Data.Ops}}
+<article data-op="{{.OpID}}" data-seq="{{.Seq}}">
+<h2>#{{.Seq}} · {{.Kind}} · {{short .OpID}}</h2>
+<p><time>{{wall .At}}</time> · {{.Actor}} · {{.Channel}} · {{.State}}{{if .Via}} · {{.Via}}{{end}}</p>
+{{if .TaskIDs}}<p>Tasks: {{range .TaskIDs}}<a href="/ui/tasks/{{.}}">#{{.}}</a> {{end}}</p>{{end}}
+{{if .Effects}}
+<ul aria-label="Effects">
+{{range .Effects}}<li>{{.Kind}}{{if .TaskID}} · Task #{{.TaskID}}{{end}}{{if .BlockID}} · Block #{{.BlockID}}{{end}}{{if .EntryID}} · Entry #{{.EntryID}}{{end}}{{if .Reason}} · {{.Reason}}{{end}}{{if .From}} · From: {{.From}}{{end}}{{if .To}} · To: {{.To}}{{end}}</li>{{end}}
+</ul>
+{{end}}
+{{if and .Revertible (eq .State "active")}}
+<form method="post" action="/ui/ops/{{.OpID}}/revert" hx-confirm="Revert {{.Kind}} ({{short .OpID}})?">
+{{template "hidden" $}}
+<button type="submit">Revert operation</button>
+</form>
+{{end}}
+</article>
+{{else}}<p>No AI changes.</p>{{end}}
+{{if .Data.More}}<a href="{{.Data.More}}">More</a>{{end}}
+{{if .Data.Review}}
+{{template "aireview" .Data.Review}}
+{{else}}<p>older unreviewed changes continue on the next page</p>{{end}}
+{{end}}
+
+{{define "aireview"}}
+<form method="post" action="/ui/ai-changes/review">
+{{template "hidden" $}}
+<input type="hidden" name="through" value="{{.Data}}">
+<button type="submit">Mark reviewed</button>
+</form>
+{{end}}

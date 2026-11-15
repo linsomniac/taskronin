@@ -18,6 +18,8 @@ func (a *app) routes() *http.ServeMux {
 	mux.HandleFunc("GET /ui/log", a.log)
 	mux.HandleFunc("GET /ui/recap", a.recap)
 	mux.HandleFunc("GET /ui/report", a.report)
+	mux.HandleFunc("GET /ui/search", a.search)
+	mux.HandleFunc("GET /ui/ai-changes", a.aiChanges)
 	mux.HandleFunc("GET /ui/tasks/{id}", a.taskDetail)
 	mux.HandleFunc("GET /ui/tasks/{id}/history", a.taskHistory)
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
