@@ -107,7 +107,7 @@ func NewApp(cfg Config) *App {
 	case ModePlan:
 		a.modeScreen = newPlanMode()
 	case ModeRecap:
-		a.modeScreen = stubScreen{name: "Recap"}
+		a.modeScreen = newRecapMode(cfg.RecapDate)
 	default:
 	}
 	return a
