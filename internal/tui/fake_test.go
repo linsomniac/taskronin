@@ -226,7 +226,7 @@ func (f *fakeAPI) ListBlocks(_ context.Context, q client.BlockQuery) ([]api.Bloc
 func (f *fakeAPI) AIChanges(_ context.Context, all bool, p client.PageQuery) (*api.AIChanges, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if err := f.record(call{Method: "AIChanges", Q: all}); err != nil {
+	if err := f.record(call{Method: "AIChanges", Q: all, Req: p}); err != nil {
 		return nil, err
 	}
 	// AIDEV-NOTE: repeated cursors keep their page, including a reload of "";

@@ -13,6 +13,7 @@ import (
 
 	"taskronin/internal/api"
 	"taskronin/internal/civil"
+	"taskronin/internal/client"
 )
 
 // DefaultPollInterval is the dashboard refresh interval (A§14 D25).
@@ -280,7 +281,22 @@ func (a *App) handleKey(k tea.KeyPressMsg) tea.Cmd {
 	if binding.Matches(k, a.keys.Log) {
 		return a.openLog(a.clock.Today, a.logLink())
 	}
-	// Search/undo/redo and AI are installed by later tasks.
+	if binding.Matches(k, a.keys.Search) {
+		return a.openSearch()
+	}
+	if binding.Matches(k, a.keys.Undo) {
+		return a.mutate("undone", func(ctx context.Context, c API) (*api.OpResponse, error) {
+			return c.Undo(ctx, client.Mut{})
+		}, nil, nil)
+	}
+	if binding.Matches(k, a.keys.Redo) {
+		return a.mutate("redone", func(ctx context.Context, c API) (*api.OpResponse, error) {
+			return c.Redo(ctx, client.Mut{})
+		}, nil, nil)
+	}
+	if a.mode == ModeTabs && binding.Matches(k, a.keys.AI) {
+		return a.openOverlay(newAIOverlay())
+	}
 	if a.mode != ModeTabs || len(a.overlays) > 0 {
 		return nil
 	}
