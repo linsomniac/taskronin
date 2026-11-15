@@ -105,7 +105,7 @@ func NewApp(cfg Config) *App {
 	case ModeTriage:
 		a.modeScreen = newCardMode(0)
 	case ModePlan:
-		a.modeScreen = stubScreen{name: "Plan"}
+		a.modeScreen = newPlanMode()
 	case ModeRecap:
 		a.modeScreen = stubScreen{name: "Recap"}
 	default:
