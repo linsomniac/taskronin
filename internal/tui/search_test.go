@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -165,5 +166,110 @@ func TestSearchGlobalInModesAndFocusedQuery(t *testing.T) {
 		eq(t, a.mode, mode)
 		press(t, a, "esc")
 		eq(t, a.current() == a.modeScreen, true)
+	}
+}
+
+func TestSearchStackedLoadsRemainIndependent(t *testing.T) { // M1.
+	for _, lowerFirst := range []bool{false, true} {
+		t.Run(fmt.Sprint(lowerFirst), func(t *testing.T) {
+			f := newFake()
+			f.hits = []api.SearchHit{{Kind: "task", ID: 42, Title: "first result"}}
+			a := newTestApp(t, f)
+			press(t, a, "/")
+			typeText(t, a, "first query")
+			_, firstLoad := a.Update(key("enter"))
+			first := a.current()
+			firstReply := firstLoad()
+			press(t, a, "/")
+			typeText(t, a, "second query")
+			_, secondLoad := a.Update(key("enter"))
+			f.hits = []api.SearchHit{{Kind: "task", ID: 60, Title: "second result"}}
+			secondReply := secondLoad()
+			replies := []tea.Msg{secondReply, firstReply}
+			if lowerFirst {
+				replies = []tea.Msg{firstReply, secondReply}
+			}
+			for _, reply := range replies {
+				drain(t, a, func() tea.Msg { return reply })
+			}
+			if !strings.Contains(viewText(a), "second result") {
+				t.Fatal("upper search lost its reply")
+			}
+			press(t, a, "esc")
+			eq(t, a.current() == first, true)
+			if !strings.Contains(viewText(a), "first result") || strings.Contains(viewText(a), "second result") {
+				t.Fatal("lower search lost its reply", viewText(a))
+			}
+			press(t, a, "enter")
+			eq(t, f.mustLast(t, "GetTask").ID, int64(42))
+		})
+	}
+}
+
+func TestSearchRevealedAfterOwnOpReloadsQuery(t *testing.T) { // M2.
+	for _, k := range []string{"u", "ctrl+r", "R"} {
+		t.Run(k, func(t *testing.T) {
+			f := newFake()
+			f.hits = []api.SearchHit{{Kind: "task", ID: 42, Title: "old result"}}
+			f.aiPages = []api.AIChanges{{Ops: []api.OpSummary{aiOp(12)}}}
+			a := newTestApp(t, f)
+			searchFor(t, a, "original query")
+			press(t, a, "A")
+			f.hits = []api.SearchHit{{Kind: "task", ID: 60, Title: "fresh result"}}
+			press(t, a, k)
+			eq(t, f.count("Search"), 1)
+			press(t, a, "esc")
+			eq(t, f.count("Search"), 2)
+			eq(t, f.mustLast(t, "Search").Q, client.SearchQuery{Q: "original query", Kind: "all", PageQuery: client.PageQuery{Limit: 50}})
+			if !strings.Contains(viewText(a), "fresh result") || strings.Contains(viewText(a), "old result") {
+				t.Fatal("revealed stale search rows", viewText(a))
+			}
+		})
+	}
+}
+
+func TestSearchOmitsEmptySnippetSeparator(t *testing.T) { // M6.
+	f := newFake()
+	f.hits = []api.SearchHit{{Kind: "task", ID: 42, Title: "no snippet"}}
+	a := newTestApp(t, f)
+	searchFor(t, a, "query")
+	v := viewText(a)
+	if !strings.Contains(v, "task #42 no snippet") || strings.Contains(v, " — ") {
+		t.Fatal("empty snippet has a dangling separator", v)
+	}
+}
+
+func TestSearchFailedLoadCanRetry(t *testing.T) { // M6.
+	for _, loaded := range []bool{false, true} {
+		t.Run(fmt.Sprint(loaded), func(t *testing.T) {
+			f := newFake()
+			f.hits = []api.SearchHit{{Kind: "task", ID: 42, Title: "result"}}
+			a := newTestApp(t, f)
+			if !loaded {
+				f.errs["Search"] = notSent()
+			}
+			searchFor(t, a, "retry this query")
+			if loaded {
+				f.errs["Search"] = notSent()
+				drain(t, a, a.current().load(a))
+			}
+			if !strings.Contains(viewText(a), "r retries") {
+				t.Fatal("missing search retry hint", viewText(a))
+			}
+			if loaded && (!strings.Contains(viewText(a), "previous results") || !strings.Contains(viewText(a), "task #42 result")) {
+				t.Fatal("failed reload must label retained search results", viewText(a))
+			}
+			before := f.count("Search")
+			_, retry := a.Update(key("r"))
+			press(t, a, "r")
+			eq(t, f.count("Search"), before)
+			drain(t, a, retry)
+			eq(t, f.count("Search"), before+1)
+			eq(t, f.mustLast(t, "Search").Q.(client.SearchQuery).Q, "retry this query")
+			if !strings.Contains(viewText(a), "task #42 result") {
+				t.Fatal("retry did not load results")
+			}
+			eq(t, f.count("Today"), 1)
+		})
 	}
 }

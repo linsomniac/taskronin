@@ -57,7 +57,7 @@ type App struct {
 	modeScreen   screen
 	exitWithMode bool
 	overlays     []screen
-	overlayDirty bool // A refresh or poll change requires reloading the tab/mode on reveal.
+	overlayDirty bool // A refresh or poll change requires reloading hidden screens on reveal.
 	form         screen
 	banner       banner
 	inflight     bool
@@ -440,8 +440,12 @@ func (a *App) closeOverlay() tea.Cmd {
 		// the hidden tab/mode's reload until the last overlay is closed; polls
 		// deliberately do not reload overlays (CF02). Error/explicit refreshes
 		// and changed poll payloads also mark that underlying screen dirty.
-		if len(a.overlays) == 0 && a.overlayDirty {
-			a.overlayDirty = false
+		// Closing an overlay explicitly reveals the next screen: reload it too,
+		// retaining the dirty flag until the underlying tab/mode is refreshed.
+		if a.overlayDirty {
+			if len(a.overlays) == 0 {
+				a.overlayDirty = false
+			}
 			return a.current().load(a)
 		}
 	}

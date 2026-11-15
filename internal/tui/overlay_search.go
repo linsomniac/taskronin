@@ -17,10 +17,12 @@ type searchMsg struct {
 }
 
 type searchScreen struct {
-	q    string
-	req  int
-	page *api.Page[api.SearchHit]
-	list recordList[api.SearchHit]
+	q          string
+	req        int
+	page       *api.Page[api.SearchHit]
+	list       recordList[api.SearchHit]
+	loading    bool
+	loadFailed bool
 }
 
 func newSearchOverlay(q string) screen { return &searchScreen{q: q} }
@@ -51,7 +53,7 @@ func (f *searchForm) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
 func (s *searchScreen) load(a *App) tea.Cmd {
 	req, ctx, c := a.nextReq("search"), a.ctx, a.api
 	q := client.SearchQuery{Q: s.q, Kind: "all", PageQuery: client.PageQuery{Limit: 50}}
-	s.req = req
+	s.req, s.loading = req, true
 	return func() tea.Msg {
 		page, err := c.Search(ctx, q)
 		return searchMsg{req: req, page: page, err: err}
@@ -60,9 +62,12 @@ func (s *searchScreen) load(a *App) tea.Cmd {
 
 func (s *searchScreen) update(a *App, msg tea.Msg) tea.Cmd {
 	m, ok := msg.(searchMsg)
-	if !ok || m.req != s.req || !a.latest("search", m.req) {
+	// AIDEV-NOTE: a stacked search has its own latest request. The shared
+	// counter only allocates unique IDs; it must not invalidate another instance.
+	if !ok || m.req != s.req {
 		return nil
 	}
+	s.loading, s.loadFailed = false, m.err != nil
 	if m.err != nil {
 		return a.handleReadErr(m.err)
 	}
@@ -94,6 +99,12 @@ func (s *searchScreen) selection() (int64, string, bool) {
 
 func (s *searchScreen) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
 	switch k.String() {
+	case "r":
+		if s.loading {
+			a.setBanner(bannerInfo, "busy…")
+			return nil, true
+		}
+		return s.load(a), true
 	case "j":
 		s.list.move(1)
 	case "k":
@@ -114,14 +125,25 @@ func (s *searchScreen) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
 func (s *searchScreen) view(a *App, w, h int) string {
 	lines := []string{a.line("Search: "+s.q, w)}
 	if s.page == nil {
-		return clip(append(lines, a.line("search not loaded", w)), w, h)
+		text := "search not loaded · r retries"
+		if s.loading {
+			text = "loading search…"
+		}
+		return clip(append(lines, a.line(text, w)), w, h)
 	}
 	if len(s.list.items) == 0 {
-		return clip(append(lines, a.line("no results", w)), w, h)
+		text := "no results · r reload"
+		if s.loadFailed {
+			text = "search not loaded · r retries"
+		}
+		return clip(append(lines, a.line(text, w)), w, h)
 	}
-	hint := "j/k move · enter detail · esc back"
+	hint := "j/k move · enter detail · r reload · esc back"
 	if s.page.NextCursor != nil {
 		hint += " · more results available; refine query"
+	}
+	if s.loadFailed {
+		hint = "search not loaded · r retries · previous results"
 	}
 	lines = append(lines, a.line(hint, w))
 	body := s.list.render(a, w, max(0, h-len(lines)), func(hit api.SearchHit, width int) string {
@@ -132,7 +154,11 @@ func (s *searchScreen) view(a *App, w, h int) string {
 			}
 			return a.line(text+" "+hit.Title, width)
 		}
-		return a.line(fmt.Sprintf("task #%d %s — %s", hit.ID, hit.Title, hit.Snippet), width)
+		text := fmt.Sprintf("task #%d %s", hit.ID, hit.Title)
+		if hit.Snippet != "" {
+			text += " — " + hit.Snippet
+		}
+		return a.line(text, width)
 	})
 	return clip(append(lines, strings.Split(body, "\n")...), w, h)
 }

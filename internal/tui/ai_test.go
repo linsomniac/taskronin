@@ -175,8 +175,8 @@ func TestAIPagingGuardAndStaleness(t *testing.T) {
 			stale := page()
 			f.aiPages[0] = api.AIChanges{Ops: []api.OpSummary{aiOp(14)}, NextCursor: ptr("c3")}
 			f.aiPages = append(f.aiPages, api.AIChanges{Ops: []api.OpSummary{aiOp(6)}})
-			press(t, a, "R")
-			eq(t, f.mustLast(t, "Revert").Q, "op-10")
+			press(t, a, "u") // Undo can supersede a pending append; R now waits for it.
+			eq(t, f.count("Undo"), 1)
 			before, banner := f.count("AIChanges"), a.banner.text
 			press(t, a, "j")
 			eq(t, f.count("AIChanges"), before)
@@ -305,5 +305,141 @@ func TestAIClipsAndSanitizes(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestAIStackedLoadsRemainIndependent(t *testing.T) { // M1.
+	for _, appendPage := range []bool{false, true} {
+		for _, lowerFirst := range []bool{false, true} {
+			t.Run(fmt.Sprintf("append=%v/lowerFirst=%v", appendPage, lowerFirst), func(t *testing.T) {
+				f := newFake()
+				f.aiPages = []api.AIChanges{
+					{Ops: []api.OpSummary{aiOp(12), aiOp(10)}, NextCursor: ptr("c2")},
+					{Ops: []api.OpSummary{aiOp(8)}},
+				}
+				a := newTestApp(t, f)
+				_, lowerLoad := a.Update(key("A"))
+				lower := a.current()
+				if appendPage {
+					drain(t, a, lowerLoad)
+					_, lowerLoad = a.Update(key("j"))
+				}
+				searchFor(t, a, "between overlays")
+				_, upperLoad := a.Update(key("A"))
+				if lowerFirst {
+					drain(t, a, lowerLoad)
+					drain(t, a, upperLoad)
+				} else {
+					drain(t, a, upperLoad)
+					drain(t, a, lowerLoad)
+				}
+				press(t, a, "esc", "esc")
+				eq(t, a.current() == lower, true)
+				want := "12 10:00"
+				if appendPage {
+					want = "8 10:00"
+				}
+				if !strings.Contains(lower.view(a, 100, 25), want) {
+					t.Fatal("lower overlay lost its reply", viewText(a))
+				}
+				press(t, a, "A")
+				if a.banner.text == "busy…" {
+					t.Fatal("lower overlay remained busy")
+				}
+				if !appendPage {
+					eq(t, f.count("ReviewAIChanges"), 0)
+					press(t, a, "A")
+				}
+				eq(t, f.count("ReviewAIChanges"), 1)
+				eq(t, f.mustLast(t, "ReviewAIChanges").Req, api.ReviewRequest{ThroughSeq: 12})
+			})
+		}
+	}
+}
+
+func TestAIStackedFailedLoadReleasesGuard(t *testing.T) { // M1.
+	f := newFake()
+	f.aiPages = []api.AIChanges{{Ops: []api.OpSummary{aiOp(12)}}}
+	a := newTestApp(t, f)
+	_, lower := a.Update(key("A"))
+	searchFor(t, a, "between overlays")
+	press(t, a, "A")
+	f.errs["AIChanges"] = notSent()
+	drain(t, a, lower)
+	press(t, a, "esc", "esc")
+	eq(t, a.banner.text, "cannot reach the Taskronin server")
+	press(t, a, "A")
+	eq(t, f.count("AIChanges"), 3)
+	eq(t, f.count("ReviewAIChanges"), 0)
+	press(t, a, "A")
+	eq(t, f.count("ReviewAIChanges"), 1)
+}
+
+func TestAIRevealedAfterOwnOpReloadsFirstPage(t *testing.T) { // M2.
+	for _, k := range []string{"u", "ctrl+r"} {
+		t.Run(k, func(t *testing.T) {
+			a, f := aiApp(t, api.AIChanges{Ops: []api.OpSummary{aiOp(12), aiOp(10)}, NextCursor: ptr("c2")}, api.AIChanges{Ops: []api.OpSummary{aiOp(8)}})
+			base := &recScreen{}
+			a.setTabScreen(TabToday, base)
+			press(t, a, "A") // Fully loaded before another screen's own operation.
+			searchFor(t, a, "upper")
+			f.aiPages[0].Ops = []api.OpSummary{aiOp(14), aiOp(12)}
+			press(t, a, k)
+			eq(t, f.count("AIChanges"), 2)
+			press(t, a, "esc")
+			eq(t, f.count("AIChanges"), 3)
+			eq(t, f.mustLast(t, "AIChanges").Req, client.PageQuery{Limit: 50})
+			if !strings.Contains(viewText(a), "14 10:00") {
+				t.Fatal("revealed stale AI rows")
+			}
+			eq(t, a.overlayDirty, true)
+			eq(t, base.loads, 0)
+			press(t, a, "A") // Reload discarded the previously loaded tail.
+			eq(t, f.count("ReviewAIChanges"), 0)
+			eq(t, f.mustLast(t, "AIChanges").Req, client.PageQuery{Limit: 50, Cursor: "c2"})
+			press(t, a, "esc")
+			eq(t, base.loads, 1)
+			eq(t, a.overlayDirty, false)
+		})
+	}
+}
+
+func TestAIFailedReloadHidesStaleRows(t *testing.T) { // M3.
+	a, f := aiApp(t, api.AIChanges{Ops: []api.OpSummary{aiOp(12)}})
+	f.errs["AIChanges"] = notSent()
+	press(t, a, "R")
+	v := viewText(a)
+	if !strings.Contains(v, "not loaded · A retries") {
+		t.Fatal("missing retry hint", v)
+	}
+	if strings.Contains(v, "12 10:00") || strings.Contains(v, "R revert") || strings.Contains(v, "A review") {
+		t.Fatal("failed reload displays current-looking rows/actions", v)
+	}
+	_, retry := a.Update(key("A"))
+	if !strings.Contains(viewText(a), "not loaded · A retries") {
+		t.Fatal("pending retry hid unloaded state")
+	}
+	press(t, a, "A", "R")
+	eq(t, a.banner.text, "busy…")
+	drain(t, a, retry)
+	if !strings.Contains(viewText(a), "12 10:00") || !strings.Contains(viewText(a), "R revert · A review") {
+		t.Fatal("retry did not restore rows/actions", viewText(a))
+	}
+}
+
+func TestAIRevertWaitsForPage(t *testing.T) { // M4.
+	for _, k := range []string{"A", "j"} {
+		t.Run(k, func(t *testing.T) {
+			a, f := aiApp(t, api.AIChanges{Ops: []api.OpSummary{aiOp(12)}, NextCursor: ptr("c2")}, api.AIChanges{Ops: []api.OpSummary{aiOp(10)}})
+			_, page := a.Update(key(k))
+			f.errs["Revert"] = notSent()
+			press(t, a, "R")
+			eq(t, f.count("Revert"), 0)
+			eq(t, a.banner.text, "busy…")
+			drain(t, a, page)
+			press(t, a, "R")
+			eq(t, f.count("Revert"), 1)
+			eq(t, a.banner.text, "cannot reach the Taskronin server — nothing was saved")
+		})
 	}
 }

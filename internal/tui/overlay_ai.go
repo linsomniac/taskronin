@@ -61,7 +61,10 @@ func (s *aiScreen) update(a *App, msg tea.Msg) tea.Cmd {
 	if m.appendPage && m.req == s.pageReq {
 		s.pageReq = 0
 	}
-	if m.req != s.req || !a.latest("ai", m.req) {
+	// AIDEV-NOTE: requests are unique across AI overlays, but freshness belongs
+	// to this instance. A load in an upper overlay cannot supersede ours. Release
+	// our append guard above even when our own newer reload superseded its reply.
+	if m.req != s.req {
 		return nil
 	}
 	s.loading = false
@@ -103,7 +106,7 @@ func (s *aiScreen) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
 	default:
 		return nil, false
 	}
-	if a.inflight || s.loading || (k.String() == "A" && s.pageReq != 0) {
+	if a.inflight || s.loading || s.pageReq != 0 {
 		a.setBanner(bannerInfo, "busy…")
 		return nil, true
 	}
@@ -141,14 +144,15 @@ func (s *aiScreen) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
 
 func (s *aiScreen) view(a *App, w, h int) string {
 	lines := []string{a.line("AI changes · unreviewed", w)}
-	if len(s.ops) == 0 {
-		text := "no unreviewed AI changes"
+	if !s.loaded {
+		lines = append(lines, a.line("not loaded · A retries", w))
 		if s.loading {
-			text = "loading…"
-		} else if !s.loaded {
-			text = "AI changes not loaded · A retries"
+			lines = append(lines, a.line("loading…", w))
 		}
-		return clip(append(lines, a.line(text, w)), w, h)
+		return clip(lines, w, h) // Old rows cannot be reviewed after a failed reload.
+	}
+	if len(s.ops) == 0 {
+		return clip(append(lines, a.line("no unreviewed AI changes", w)), w, h)
 	}
 	hint := "j/k move · R revert · A review · esc back"
 	if s.next != nil {
