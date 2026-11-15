@@ -57,7 +57,8 @@ row data and .P for page state, including {{template "hidden" .P}} and
 <p>{{if .V.OccurredMin.Valid}}<time>{{hhmm .V.OccurredMin.V}}</time> {{end}}{{if eq .V.Kind "complete"}}✓ {{end}}{{.V.Title}}{{if .V.Reopened}} (reopened){{end}}{{if .V.DeletedAt.Valid}} (deleted){{end}}</p>
 <p>{{if .V.TaskID.Valid}}<a href="/ui/tasks/{{.V.TaskID.V}}">#{{.V.TaskID.V}} {{.V.TaskTitle}}</a>{{else}}standalone{{end}}</p>
 {{if .V.Notes}}<div class="notes">{{md .V.Notes}}</div>{{end}}
-{{if ne .P.Tab "today"}}
+{{/* AIDEV-NOTE: Deleted task pages retain entries but offer only task undelete. */}}
+{{if and (ne .P.Tab "today") (not (and (eq .P.Tab "task") (eq .P.Data.View "deleted")))}}
 {{if .V.DeletedAt.Valid}}
 <form method="post" action="/ui/entries/{{.V.ID}}/undelete">
 {{template "hidden" .P}}

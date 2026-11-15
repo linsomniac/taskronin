@@ -16,6 +16,8 @@ func (a *app) routes() *http.ServeMux {
 	mux.HandleFunc("GET /ui/backlog", a.backlog)
 	mux.HandleFunc("GET /ui/upcoming", a.upcoming)
 	mux.HandleFunc("GET /ui/log", a.log)
+	mux.HandleFunc("GET /ui/tasks/{id}", a.taskDetail)
+	mux.HandleFunc("GET /ui/tasks/{id}/history", a.taskHistory)
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/ui/", http.StatusSeeOther)
 	})

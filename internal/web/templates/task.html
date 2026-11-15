@@ -1,0 +1,163 @@
+{{define "content"}}
+{{with .Data}}
+<h1>#{{.ID}} {{.Title}}</h1>
+<p>Status: {{.Status}} · View: <strong>{{.View}}</strong></p>
+{{template "taskrow" (row $ .TaskView)}}
+<p>Created {{wall .CreatedAt}} · Updated {{wall .UpdatedAt}}{{if .CompletedDate.Valid}} · Completed {{day .CompletedDate.V}}{{end}}{{if .DeletedAt.Valid}} · Deleted {{wall .DeletedAt.V}}{{end}}</p>
+{{if .Notes}}<div class="notes">{{md .Notes}}</div>{{end}}
+<p><a href="/ui/tasks/{{.ID}}/history">History</a></p>
+
+{{if eq .View "deleted"}}
+<form method="post" action="/ui/tasks/{{.ID}}/undelete">
+{{template "hidden" $}}
+<input type="hidden" name="etag" value="{{etag $.Gen .Version}}">
+<button type="submit">Undelete</button>
+</form>
+{{else}}
+<details><summary>Edit task</summary>
+<form method="post" action="/ui/tasks/{{.ID}}/edit">
+{{template "hidden" $}}
+<input type="hidden" name="etag" value="{{etag $.Gen .Version}}">
+<label>Title <input name="title" value="{{.Title}}" required></label>
+<label>Notes <textarea name="notes">
+{{.Notes}}</textarea></label>
+<label>Project <input name="project" value="{{.Project}}"></label>
+<label>Priority <select name="priority">
+<option value=""{{if eq .Priority ""}} selected{{end}}>None</option>
+<option value="H"{{if eq .Priority "H"}} selected{{end}}>High</option>
+<option value="M"{{if eq .Priority "M"}} selected{{end}}>Medium</option>
+<option value="L"{{if eq .Priority "L"}} selected{{end}}>Low</option>
+</select></label>
+<button type="submit">Save task</button>
+</form>
+</details>
+
+<section aria-label="Tags">
+<h2>Tags</h2>
+<form method="post" action="/ui/tasks/{{.ID}}/tags">
+{{template "hidden" $}}
+<input type="hidden" name="etag" value="{{etag $.Gen .Version}}">
+<label>Add tags <input name="add" required></label>
+<button type="submit">Add tags</button>
+</form>
+{{range .Tags}}
+<form method="post" action="/ui/tasks/{{$.Data.ID}}/tags">
+{{template "hidden" $}}
+<input type="hidden" name="etag" value="{{etag $.Gen $.Data.Version}}">
+<input type="hidden" name="remove" value="{{.}}">
+<button type="submit">Remove {{.}}</button>
+</form>
+{{end}}
+</section>
+
+<form method="post" action="/ui/tasks/{{.ID}}/due">
+{{template "hidden" $}}
+<input type="hidden" name="etag" value="{{etag $.Gen .Version}}">
+<label>Due (or none) <input name="due" value="{{if .DueDate.Valid}}{{.DueDate.V}}{{if .DueMin.Valid}} {{hhmm .DueMin.V}}{{end}}{{end}}" required></label>
+<button type="submit">Set due</button>
+</form>
+
+{{if eq .Status "open"}}
+<form method="post" action="/ui/tasks/{{.ID}}/defer">
+{{template "hidden" $}}
+<input type="hidden" name="etag" value="{{etag $.Gen .Version}}">
+<label>Defer until (or none) <input name="until" value="{{if .DeferDate.Valid}}{{.DeferDate.V}}{{if .DeferMin.Valid}} {{hhmm .DeferMin.V}}{{end}}{{end}}" required></label>
+<button type="submit">Defer</button>
+</form>
+<form method="post" action="/ui/tasks/{{.ID}}/place">
+{{template "hidden" $}}
+<input type="hidden" name="etag" value="{{etag $.Gen .Version}}">
+<input type="hidden" name="how" value="keep">
+<button type="submit">Keep</button>
+</form>
+<form method="post" action="/ui/tasks/{{.ID}}/place">
+{{template "hidden" $}}
+<input type="hidden" name="etag" value="{{etag $.Gen .Version}}">
+<input type="hidden" name="how" value="top">
+<button type="submit">Top</button>
+</form>
+<form method="post" action="/ui/tasks/{{.ID}}/place">
+{{template "hidden" $}}
+<input type="hidden" name="etag" value="{{etag $.Gen .Version}}">
+<input type="hidden" name="how" value="bottom">
+<button type="submit">Bottom</button>
+</form>
+<form method="post" action="/ui/tasks/{{.ID}}/place">
+{{template "hidden" $}}
+<input type="hidden" name="etag" value="{{etag $.Gen .Version}}">
+<input type="hidden" name="how" value="before">
+<label>Before task ID <input name="ref" required></label>
+<button type="submit">Place before</button>
+</form>
+<form method="post" action="/ui/tasks/{{.ID}}/place">
+{{template "hidden" $}}
+<input type="hidden" name="etag" value="{{etag $.Gen .Version}}">
+<input type="hidden" name="how" value="after">
+<label>After task ID <input name="ref" required></label>
+<button type="submit">Place after</button>
+</form>
+<form method="post" action="/ui/tasks/{{.ID}}/block">
+{{template "hidden" $}}
+<input type="hidden" name="etag" value="{{etag $.Gen .Version}}">
+<label>Block <input name="span" placeholder="13:00-15:00" required></label>
+<button type="submit">Schedule block</button>
+</form>
+<form method="post" action="/ui/tasks/{{.ID}}/triage">
+{{template "hidden" $}}
+<input type="hidden" name="etag" value="{{etag $.Gen .Version}}">
+<button type="submit">Send to triage</button>
+</form>
+<form method="post" action="/ui/tasks/{{.ID}}/complete">
+{{template "hidden" $}}
+<input type="hidden" name="etag" value="{{etag $.Gen .Version}}">
+<label>Complete as (optional title) <input name="as"></label>
+<label>Completion date <input name="date" placeholder="today"></label>
+<label>Log title (optional) <input name="log"></label>
+<label>Log notes <textarea name="notes"></textarea></label>
+<button type="submit">Complete</button>
+</form>
+<form method="post" action="/ui/focus">
+{{template "hidden" $}}
+<input type="hidden" name="task_id" value="{{.ID}}">
+<button type="submit">Focus</button>
+</form>
+{{else if or (eq .Status "done") (eq .Status "dropped")}}
+<form method="post" action="/ui/tasks/{{.ID}}/reopen" hx-confirm="Reopen #{{.ID}} {{.Title}}? If selected, its completion entry will be removed.">
+{{template "hidden" $}}
+<input type="hidden" name="etag" value="{{etag $.Gen .Version}}">
+<label><input type="checkbox" name="remove_entry" value="1"> Remove completion entry</label>
+<button type="submit">Reopen</button>
+</form>
+{{end}}
+
+<form method="post" action="/ui/tasks/{{.ID}}/drop" hx-confirm="Drop #{{.ID}} {{.Title}}?">
+{{template "hidden" $}}
+<input type="hidden" name="etag" value="{{etag $.Gen .Version}}">
+<button type="submit">Drop</button>
+</form>
+<form method="post" action="/ui/tasks/{{.ID}}/delete" hx-confirm="Delete #{{.ID}} {{.Title}}?">
+{{template "hidden" $}}
+<input type="hidden" name="etag" value="{{etag $.Gen .Version}}">
+<button type="submit">Delete</button>
+</form>
+{{end}}
+
+<section aria-label="Blocks">
+<h2>Blocks</h2>
+{{range .Blocks}}{{template "blockrow" (row $ .)}}{{else}}<p>No blocks.</p>{{end}}
+</section>
+<section aria-label="Entries">
+<h2>Entries</h2>
+{{range .Entries}}
+<p>{{day .WorkDate}}</p>
+{{template "entryrow" (row $ .)}}
+{{else}}<p>No entries.</p>{{end}}
+</section>
+<section aria-label="Interruptions">
+<h2>Interruptions</h2>
+{{range .Interruptions}}
+<p>{{wall .At}} — {{if .FromTaskID.Valid}}<a href="/ui/tasks/{{.FromTaskID.V}}">#{{.FromTaskID.V}}</a>{{end}}{{if .FromBlockID.Valid}} (block #{{.FromBlockID.V}}){{end}} → <a href="/ui/tasks/{{.ToTaskID}}">#{{.ToTaskID}}</a></p>
+{{else}}<p>No interruptions.</p>{{end}}
+</section>
+{{end}}
+{{end}}

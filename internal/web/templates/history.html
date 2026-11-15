@@ -1,0 +1,22 @@
+{{define "content"}}
+<h1>History of #{{.Data.TaskID}}</h1>
+<p><a href="/ui/tasks/{{.Data.TaskID}}">Task #{{.Data.TaskID}}</a></p>
+{{range .Data.Items}}
+<article data-event="{{.ID}}" data-kind="{{.Op.Kind}}">
+<h2>{{.Op.Kind}} · {{short .Op.OpID}}</h2>
+<p><time>{{wall .Op.At}}</time> · {{.Op.Actor}} · {{.Op.Channel}} · {{.Op.State}}</p>
+<p>{{.Entity}} #{{.EntityID}} · {{.Action}}</p>
+<h3>Before</h3>
+<pre>{{jsontext .Before}}</pre>
+<h3>After</h3>
+<pre>{{jsontext .After}}</pre>
+{{if .CanRevert}}
+<form method="post" action="/ui/ops/{{.Op.OpID}}/revert" hx-confirm="Revert {{.Op.Kind}} ({{short .Op.OpID}})?">
+{{template "hidden" $}}
+<button type="submit">Revert operation</button>
+</form>
+{{end}}
+</article>
+{{else}}<p>No history.</p>{{end}}
+{{if .Data.More}}<a href="{{.Data.More}}">More</a>{{end}}
+{{end}}
