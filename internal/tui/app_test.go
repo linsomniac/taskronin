@@ -1,0 +1,414 @@
+package tui
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"testing"
+	"time"
+
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+
+	"taskronin/internal/api"
+	"taskronin/internal/client"
+)
+
+func TestTabKeys(t *testing.T) {
+	a := newTestApp(t, newFake())
+	for _, c := range []struct {
+		k    string
+		want Tab
+	}{{"2", TabTriage}, {"3", TabBacklog}, {"4", TabUpcoming}, {"5", TabLog}, {"1", TabToday}, {"tab", TabTriage}, {"shift+tab", TabToday}, {"shift+tab", TabLog}, {"tab", TabToday}} {
+		press(t, a, c.k)
+		eq(t, a.tab, c.want)
+	}
+}
+
+func TestQuitKeys(t *testing.T) {
+	for _, k := range []string{"q", "ctrl+c"} {
+		a := newTestApp(t, newFake())
+		press(t, a, k)
+		eq(t, a.quitting, true)
+	}
+}
+
+func TestHelpToggle(t *testing.T) {
+	a := newTestApp(t, newFake())
+	press(t, a, "?")
+	if !contains("ctrl+r redo")([]byte(viewText(a))) {
+		t.Fatal(viewText(a))
+	}
+	press(t, a, "?")
+	if strings.Contains(viewText(a), "ctrl+r redo") {
+		t.Fatal(viewText(a))
+	}
+}
+
+func TestGlobalsInModes(t *testing.T) {
+	a := newTestApp(t, newFake())
+	m := &recScreen{}
+	drain(t, a, a.enterMode(ModeTriage, m))
+	press(t, a, "?")
+	if !strings.Contains(viewText(a), "ctrl+r redo") {
+		t.Fatal("help")
+	}
+	press(t, a, "2")
+	eq(t, a.mode, ModeTriage)
+	eq(t, a.tab, TabToday)
+	press(t, a, "q")
+	eq(t, a.mode, ModeTabs)
+	eq(t, a.quitting, false)
+}
+
+func TestOverlayStack(t *testing.T) {
+	a := newTestApp(t, newFake())
+	s1, s2 := &recScreen{}, &recScreen{}
+	drain(t, a, a.openOverlay(s1))
+	drain(t, a, a.openOverlay(s2))
+	if a.current() != screen(s2) {
+		t.Fatal("top")
+	}
+	press(t, a, "2", "tab", "q", "?")
+	eq(t, a.tab, TabToday)
+	eq(t, a.quitting, false)
+	eq(t, a.help.ShowAll, true)
+	eq(t, s1.keys, 0)
+	press(t, a, "esc")
+	if a.current() != screen(s1) {
+		t.Fatal("pop")
+	}
+	press(t, a, "esc")
+	if a.current() != a.tabs[TabToday] {
+		t.Fatal("tab")
+	}
+	eq(t, s1.loads, 1)
+	eq(t, s2.loads, 1)
+}
+
+func TestMutateIgnoresWhileInflight(t *testing.T) {
+	f := newFake()
+	a := newTestApp(t, f)
+	undo := func(ctx context.Context, c API) (*api.OpResponse, error) { return c.Undo(ctx, client.Mut{}) }
+	cmd := a.mutate("undo", undo, nil, nil)
+	if a.mutate("undo", undo, nil, nil) != nil {
+		t.Fatal("second mutate must return nil")
+	}
+	if !strings.Contains(viewText(a), "busy") {
+		t.Fatal("no busy banner")
+	}
+	eq(t, f.count("Undo"), 0)
+	drain(t, a, cmd)
+	eq(t, f.count("Undo"), 1)
+	eq(t, a.inflight, false)
+}
+
+func TestHandleErrPolicy(t *testing.T) {
+	cases := []struct {
+		name      string
+		err       error
+		banner    string
+		refreshes bool
+	}{
+		{"precondition", problem("precondition_failed", 412, "x"), "changed elsewhere — refreshed", true},
+		{"other 412", problem("other", 412, "x"), "changed elsewhere — refreshed", true},
+		{"generation", problem("generation_mismatch", 412, "x"), "database was restored — refreshed", true},
+		{"undo", problem("nothing_to_undo", 409, "x"), "nothing to undo", false},
+		{"redo", problem("nothing_to_redo", 409, "x"), "nothing to redo", false},
+		{"rate", problem("rate_limited", 429, "x"), "server busy — try again", false},
+		{"busy", problem("busy", 503, "x"), "server busy — try again", false},
+		{"not sent", notSent(), "cannot reach the Taskronin server — nothing was saved", false},
+		{"unknown", outcomeUnknown("K1"), "outcome unknown — refreshed; check before repeating", true},
+		{"unknown wrapping problem", &client.OutcomeUnknownError{Key: "K1", Err: errors.Join(notSent(), problem("precondition_failed", 412, "x"))}, "outcome unknown — refreshed; check before repeating", true},
+		{"unknown wrapping validation", fmt.Errorf("wrapped: %w", &client.OutcomeUnknownError{Key: "K1", Err: problem("validation", 422, "bad")}), "outcome unknown — refreshed; check before repeating", true},
+		{"validation", &client.ProblemError{Status: 422, Problem: api.Problem{Code: "validation", Detail: "bad", Errors: []api.FieldError{{Field: "span", Message: "past"}}}}, "bad (span: past)", false},
+		{"unsafe", errors.New("bad\x1b\u202e\ntext"), "bad���text", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f := newFake()
+			a := newTestApp(t, f)
+			n := f.count("Today")
+			drain(t, a, a.handleErr(c.err))
+			eq(t, a.banner.text, c.banner)
+			eq(t, f.count("Today") > n, c.refreshes)
+		})
+	}
+	for _, c := range []struct {
+		err  error
+		want string
+	}{
+		{notSent(), "cannot reach the Taskronin server"},
+		{outcomeUnknown(""), "server did not answer"},
+		{&client.OutcomeUnknownError{Err: problem("precondition_failed", 412, "x")}, "server did not answer"},
+	} {
+		t.Run("read "+c.want, func(t *testing.T) {
+			f := newFake()
+			a := newTestApp(t, f)
+			n := f.count("Today")
+			_, cmd := a.Update(todayMsg{req: a.nextReq("today"), err: c.err})
+			drain(t, a, cmd)
+			eq(t, a.banner.text, c.want)
+			eq(t, f.count("Today"), n)
+		})
+	}
+}
+
+func TestEffectsLine(t *testing.T) {
+	eq(t, effectsLine([]api.Effect{{Kind: "block_cancelled", BlockID: 7}, {Kind: "slipped", BlockID: 7},
+		{Kind: "reason_added", TaskID: 42, Reason: "slipped"}, {Kind: "updated", TaskID: 42}}), "b7 cancelled · b7 slipped · #42 +slipped")
+	eq(t, effectsLine([]api.Effect{{Kind: "interrupted", TaskID: 42, From: "17"}, {Kind: "unslipped", BlockID: 7},
+		{Kind: "focus_set", TaskID: 42}, {Kind: "focus_cleared"}, {Kind: "block_resolved", BlockID: 7},
+		{Kind: "block_resolved", BlockID: 8, To: "worked"}, {Kind: "completed", TaskID: 42},
+		{Kind: "entry_logged", EntryID: 9}, {Kind: "reverted"}}),
+		"interrupted #17 · b7 unslipped · focus #42 · focus cleared · b7 resolved · b8 worked · #42 completed · e9 logged · reverted")
+}
+
+func TestRenderSanitizesAndClips(t *testing.T) {
+	a := newTestApp(t, newFake())
+	out := a.line("evil\x1b[31mred\u202e"+strings.Repeat("宽", 200), 40)
+	if strings.ContainsAny(out, "\x1b\u202e") || lipgloss.Width(out) > 40 {
+		t.Fatalf("%q", out)
+	}
+	for _, size := range []tea.WindowSizeMsg{{Width: 20, Height: 5}, {Width: 1, Height: 1}, {Width: 0, Height: 0}} {
+		a.Update(size)
+		out := viewText(a)
+		for _, l := range strings.Split(out, "\n") {
+			if lipgloss.Width(l) > size.Width {
+				t.Fatal(l)
+			}
+		}
+		if size.Height > 0 && strings.Count(out, "\n") >= size.Height {
+			t.Fatal(out)
+		}
+		if strings.ContainsRune(out, '\x1b') {
+			t.Fatal("plain output has escapes")
+		}
+	}
+}
+
+func TestTodayMsgStoresAggregate(t *testing.T) {
+	f := newFake()
+	f.today = api.Today{Clock: f.clock, AIChanges: 2, Banners: []api.Banner{{Kind: "backup_failed"}}}
+	f.todayETag = `"a-1"`
+	a := newTestApp(t, f)
+	eq(t, a.todayETag, `"a-1"`)
+	if !strings.Contains(viewText(a), "⚠ backup") || !strings.Contains(viewText(a), "ai 2") {
+		t.Fatal(viewText(a))
+	}
+	r1, r2 := a.nextReq("today"), a.nextReq("today")
+	newClock := f.clock
+	newClock.Now.Time = newClock.Now.Add(time.Hour)
+	a.Update(todayMsg{req: r2, today: &api.Today{Clock: newClock}, etag: `"a-3"`})
+	a.Update(todayMsg{req: r1, today: &api.Today{Clock: f.clock}, etag: `"a-2"`})
+	eq(t, a.todayETag, `"a-3"`)
+	eq(t, a.clock, newClock)
+	_, cmd := a.Update(todayMsg{req: r1, err: notSent()})
+	eq(t, cmd == nil, true)
+	eq(t, a.banner.text, "")
+}
+
+func TestAppDefaultsAndStartModes(t *testing.T) {
+	for _, mode := range []Mode{ModeTabs, ModeTriage, ModePlan, ModeRecap} {
+		a := newTestApp(t, newFake(), func(c *Config) { c.StartMode = mode; c.StartTab = TabBacklog; c.PollInterval = 0 })
+		eq(t, a.cfg.PollInterval, DefaultPollInterval)
+		eq(t, DefaultPollInterval, 5*time.Second)
+		eq(t, a.cfg.Editor.Getenv("EDITOR"), "")
+		eq(t, a.cfg.RecapDate, a.clock.Today)
+		eq(t, a.tab, TabBacklog)
+		eq(t, a.mode, mode)
+		if a.current() == nil {
+			t.Fatal("missing startup screen")
+		}
+		eq(t, a.View().AltScreen, true)
+		if mode != ModeTabs {
+			press(t, a, "esc")
+			eq(t, a.quitting, true)
+		}
+	}
+}
+
+func TestParseTab(t *testing.T) {
+	for i, name := range []string{"today", "triage", "backlog", "upcoming", "log"} {
+		got, err := ParseTab(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		eq(t, got, Tab(i))
+	}
+	for _, name := range []string{"", "Today", "other"} {
+		if _, err := ParseTab(name); err == nil {
+			t.Fatalf("accepted %q", name)
+		}
+	}
+}
+
+type shellScreen struct {
+	recScreen
+	consume bool
+	seen    []string
+	msgs    []tea.Msg
+	body    string
+}
+
+func (s *shellScreen) handle(_ *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
+	s.seen = append(s.seen, k.String())
+	return nil, s.consume
+}
+
+func (s *shellScreen) update(_ *App, msg tea.Msg) tea.Cmd {
+	s.msgs = append(s.msgs, msg)
+	return nil
+}
+
+func (s *shellScreen) view(_ *App, _, _ int) string { return s.body }
+
+func TestFormAndScreenKeyRouting(t *testing.T) {
+	a := newTestApp(t, newFake())
+	tab, overlay, form := &shellScreen{}, &shellScreen{}, &shellScreen{}
+	a.setTabScreen(TabToday, tab)
+	drain(t, a, a.openOverlay(overlay))
+	a.form = form
+	typeText(t, a, "?2q")
+	press(t, a, "esc", "up")
+	eq(t, form.seen, []string{"?", "2", "q", "esc", "up"})
+	eq(t, len(tab.seen), 0)
+	eq(t, len(overlay.seen), 0)
+	eq(t, a.help.ShowAll, false)
+	if a.current() != screen(overlay) {
+		t.Fatal("form became current screen")
+	}
+	press(t, a, "ctrl+c")
+	eq(t, a.quitting, true)
+	eq(t, len(form.seen), 5)
+
+	a = newTestApp(t, newFake())
+	tab = &shellScreen{consume: true}
+	a.setTabScreen(TabToday, tab)
+	press(t, a, "?", "up", "down", "J", "K")
+	eq(t, tab.seen, []string{"?", "k", "j", "J", "K"})
+	eq(t, a.help.ShowAll, false)
+	mode := &shellScreen{consume: true}
+	drain(t, a, a.enterMode(ModePlan, mode))
+	press(t, a, "?", "q")
+	eq(t, mode.seen, []string{"?"})
+	eq(t, a.mode, ModeTabs)
+}
+
+func TestScreenMessagesAndRefresh(t *testing.T) {
+	f := newFake()
+	a := newTestApp(t, f)
+	tab, mode, overlay, form := &shellScreen{}, &shellScreen{}, &shellScreen{}, &shellScreen{}
+	a.setTabScreen(TabToday, tab)
+	drain(t, a, a.enterMode(ModePlan, mode))
+	drain(t, a, a.openOverlay(overlay))
+	a.form = form
+	type dataMsg struct{}
+	_, cmd := a.Update(dataMsg{})
+	drain(t, a, cmd)
+	for _, s := range []*shellScreen{tab, mode, overlay, form} {
+		eq(t, s.msgs, []tea.Msg{dataMsg{}})
+	}
+	drain(t, a, a.refresh())
+	eq(t, tab.loads, 0)
+	eq(t, mode.loads, 1)
+	eq(t, overlay.loads, 2)
+	eq(t, form.loads, 0)
+	eq(t, f.mustLast(t, "Today").INM, "")
+}
+
+func TestFetchTodayCapturesRequest(t *testing.T) {
+	f := newFake()
+	f.todayETag = "v1"
+	a := newTestApp(t, f)
+	cmd := a.fetchToday(true)
+	a.todayETag = "v2"
+	drain(t, a, cmd)
+	eq(t, f.mustLast(t, "Today").INM, "v1")
+	eq(t, a.todayETag, "v2") // 304 leaves all stored state alone.
+	drain(t, a, a.fetchToday(false))
+	eq(t, f.mustLast(t, "Today").INM, "")
+	eq(t, a.todayETag, "v1")
+	r := a.nextReq("tasks")
+	a.nextReq("today")
+	eq(t, a.latest("tasks", r), true)
+}
+
+func TestMutateCallbacksAndBanners(t *testing.T) {
+	f := newFake()
+	f.resp.OpID = ptr("test-op")
+	f.resp.Effects = []api.Effect{{Kind: "completed", TaskID: 42}}
+	f.resp.Warnings = []string{"bad\x1b\n"}
+	a := newTestApp(t, f)
+	call := func(ctx context.Context, c API) (*api.OpResponse, error) { return c.Undo(ctx, client.Mut{}) }
+	after, onErr, afterCmd := 0, 0, 0
+	success := func(a *App, r *api.OpResponse) tea.Cmd {
+		after++
+		eq(t, a.inflight, false)
+		eq(t, r.OpID, f.resp.OpID)
+		return func() tea.Msg { afterCmd++; return nil }
+	}
+	failure := func(a *App, err error) {
+		onErr++
+		eq(t, a.inflight, false)
+		if !errors.Is(err, client.ErrNotSent) {
+			t.Fatal(err)
+		}
+		a.appendBanner("kept\ntext")
+	}
+	drain(t, a, a.mutate("done", call, success, failure))
+	eq(t, after, 1)
+	eq(t, afterCmd, 1)
+	eq(t, onErr, 0)
+	eq(t, a.banner.text, "done · #42 completed · ⚠ bad��")
+	eq(t, f.count("Today"), 2)
+	f.errs["Undo"] = notSent()
+	drain(t, a, a.mutate("done", call, success, failure))
+	eq(t, after, 1)
+	eq(t, onErr, 1)
+	eq(t, a.banner.text, "cannot reach the Taskronin server — nothing was saved · kept�text")
+	eq(t, f.count("Today"), 2)
+	press(t, a, "esc")
+	eq(t, a.banner.text, "")
+}
+
+func TestRenderFormAndHeader(t *testing.T) {
+	f := newFake()
+	f.today.Banners = []api.Banner{{Kind: "backup_stale"}, {Kind: "purge_incomplete"}, {Kind: "purge_ledger_damaged"}}
+	a := newTestApp(t, f)
+	a.Update(tea.WindowSizeMsg{Width: 150, Height: 10})
+	a.form = &shellScreen{body: "prompt\ninput\nhint"}
+	a.setTabScreen(TabToday, &shellScreen{body: strings.Repeat("body\n", 20)})
+	a.setBanner(bannerError, "message")
+	lines := strings.Split(viewText(a), "\n")
+	eq(t, len(lines), 10)
+	eq(t, lines[6:], []string{"prompt", "input", "hint", "message"})
+	for _, part := range []string{"Taskronin  Wed 2026-10-28 10:00", "[1 Today] 2 Triage 3 Backlog 4 Upcoming 5 Log", "⚠ backup", "⚠ purge"} {
+		if !strings.Contains(lines[0], part) {
+			t.Fatal(lines[0])
+		}
+	}
+	if strings.ContainsRune(viewText(a), '\x1b') {
+		t.Fatal("plain output has escapes")
+	}
+}
+
+func TestRenderSelectedRow(t *testing.T) {
+	for _, color := range []bool{false, true} {
+		a := newTestApp(t, newFake(), func(c *Config) { c.Color = color })
+		for _, selected := range []bool{false, true} {
+			out := a.row("safe\u202e"+strings.Repeat("宽", 20), 20, selected)
+			prefix := "  "
+			if selected {
+				prefix = "› "
+			}
+			if !strings.Contains(out, prefix+"safe�") || strings.ContainsRune(out, '\u202e') || lipgloss.Width(out) > 20 {
+				t.Fatalf("color=%v selected=%v: %q", color, selected, out)
+			}
+			if !color && strings.ContainsRune(out, '\x1b') {
+				t.Fatal("plain row has escapes")
+			}
+		}
+	}
+}

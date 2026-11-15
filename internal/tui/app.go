@@ -1,0 +1,340 @@
+package tui
+
+import (
+	"context"
+	"os/exec"
+	"strings"
+	"time"
+
+	"charm.land/bubbles/v2/help"
+	binding "charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
+
+	"taskronin/internal/api"
+	"taskronin/internal/civil"
+)
+
+// DefaultPollInterval is the dashboard refresh interval (A§14 D25).
+const DefaultPollInterval = 5 * time.Second
+
+// EditorEnv supplies editor configuration and the process runner.
+type EditorEnv struct {
+	Setting   string
+	Getenv    func(string) string
+	DraftsDir string
+	Exec      func(*exec.Cmd, tea.ExecCallback) tea.Cmd
+}
+
+// Config supplies the app's client, server clock and launch options.
+type Config struct {
+	API          API
+	Ctx          context.Context
+	Clock        api.Clock
+	StartTab     Tab
+	StartMode    Mode
+	RecapDate    civil.Date
+	PollInterval time.Duration
+	Color        bool
+	Editor       EditorEnv
+}
+
+// App owns the terminal UI. Only Update and its helpers change model state.
+type App struct {
+	cfg          Config
+	api          API
+	ctx          context.Context
+	width        int
+	height       int
+	clock        api.Clock
+	today        *api.Today
+	todayETag    string
+	tab          Tab
+	tabs         [5]screen
+	mode         Mode
+	modeScreen   screen
+	exitWithMode bool
+	overlays     []screen
+	form         screen
+	banner       banner
+	inflight     bool
+	quitting     bool
+	reqSeq       map[string]int
+	styles       Styles
+	keys         keyMap
+	help         help.Model
+}
+
+var _ tea.Model = (*App)(nil)
+
+// NewApp constructs the app with placeholder screens for subsequent TUI tasks.
+func NewApp(cfg Config) *App {
+	if cfg.Ctx == nil {
+		cfg.Ctx = context.Background()
+	}
+	if cfg.PollInterval == 0 {
+		cfg.PollInterval = DefaultPollInterval
+	}
+	if cfg.Editor.Getenv == nil {
+		cfg.Editor.Getenv = func(string) string { return "" }
+	}
+	if cfg.RecapDate == (civil.Date{}) {
+		cfg.RecapDate = cfg.Clock.Today
+	}
+	a := &App{
+		cfg: cfg, api: cfg.API, ctx: cfg.Ctx, clock: cfg.Clock,
+		tab: cfg.StartTab, mode: cfg.StartMode, exitWithMode: cfg.StartMode != ModeTabs,
+		reqSeq: make(map[string]int), styles: newStyles(cfg.Color), keys: newKeys(), help: help.New(),
+	}
+	if !cfg.Color {
+		a.help.Styles = help.Styles{}
+	}
+	for i, name := range tabNames {
+		a.tabs[i] = stubScreen{name: name}
+	}
+	switch cfg.StartMode {
+	case ModeTriage:
+		a.modeScreen = stubScreen{name: "Triage"}
+	case ModePlan:
+		a.modeScreen = stubScreen{name: "Plan"}
+	case ModeRecap:
+		a.modeScreen = stubScreen{name: "Recap"}
+	default:
+	}
+	return a
+}
+
+// Init starts the aggregate and visible-screen reads.
+func (a *App) Init() tea.Cmd { return a.refresh() }
+
+// Update handles app messages, then forwards screen-owned data messages.
+func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		a.width, a.height = max(0, msg.Width), max(0, msg.Height)
+		a.help.SetWidth(a.width)
+	case tea.KeyPressMsg:
+		return a, a.handleKey(msg)
+	case todayMsg:
+		// AIDEV-NOTE: request-sequence staleness guard. Even an old error or
+		// 304 must not overwrite state from a newer refresh.
+		if !a.latest("today", msg.req) {
+			return a, nil
+		}
+		if msg.err != nil {
+			return a, a.handleReadErr(msg.err)
+		}
+		if !msg.notModified && msg.today != nil {
+			a.today, a.todayETag, a.clock = msg.today, msg.etag, msg.today.Clock
+		}
+		return a, nil
+	case opMsg:
+		a.inflight = false
+		if msg.err != nil {
+			cmd := a.handleErr(msg.err)
+			if msg.onErr != nil {
+				msg.onErr(a, msg.err)
+			}
+			return a, cmd
+		}
+		a.setBanner(bannerInfo, msg.label)
+		if msg.resp != nil {
+			a.appendBanner(effectsLine(msg.resp.Effects))
+			for _, warning := range msg.resp.Warnings {
+				a.appendBanner("⚠ " + warning)
+			}
+		}
+		refresh := a.refresh()
+		if msg.after != nil {
+			return a, tea.Batch(refresh, msg.after(a, msg.resp))
+		}
+		return a, refresh
+	}
+
+	var cmds []tea.Cmd
+	for _, s := range a.tabs {
+		cmds = append(cmds, s.update(a, msg))
+	}
+	if a.modeScreen != nil {
+		cmds = append(cmds, a.modeScreen.update(a, msg))
+	}
+	for _, s := range a.overlays {
+		cmds = append(cmds, s.update(a, msg))
+	}
+	if a.form != nil {
+		cmds = append(cmds, a.form.update(a, msg))
+	}
+	return a, tea.Batch(cmds...)
+}
+
+func (a *App) handleKey(k tea.KeyPressMsg) tea.Cmd {
+	if binding.Matches(k, a.keys.ForceQuit) {
+		return a.quit()
+	}
+	if a.form != nil {
+		cmd, _ := a.form.handle(a, k)
+		return cmd
+	}
+	if len(a.overlays) > 0 {
+		if binding.Matches(k, a.keys.Escape) {
+			a.closeOverlay()
+			return nil
+		}
+	} else if a.mode != ModeTabs && binding.Matches(k, a.keys.Quit, a.keys.Escape) {
+		return a.exitMode()
+	}
+	// List navigation aliases do not rewrite prompt input or card-mode keys.
+	if a.mode == ModeTabs || len(a.overlays) > 0 {
+		switch k.String() {
+		case "up":
+			k = tea.KeyPressMsg{Code: 'k', Text: "k"}
+		case "down":
+			k = tea.KeyPressMsg{Code: 'j', Text: "j"}
+		}
+	}
+	if cmd, consumed := a.current().handle(a, k); consumed {
+		return cmd
+	}
+	if binding.Matches(k, a.keys.Help) {
+		a.help.ShowAll = !a.help.ShowAll
+		return nil
+	}
+	if binding.Matches(k, a.keys.Escape) {
+		a.banner = banner{}
+		return nil
+	}
+	// Capture/log/search/undo/redo and AI are installed by later tasks.
+	if a.mode != ModeTabs || len(a.overlays) > 0 {
+		return nil
+	}
+	switch k.String() {
+	case "1", "2", "3", "4", "5":
+		a.tab = Tab(k.Code - '1')
+	case "tab":
+		a.tab = (a.tab + 1) % Tab(len(a.tabs))
+	case "shift+tab":
+		a.tab = (a.tab + Tab(len(a.tabs)) - 1) % Tab(len(a.tabs))
+	case "q":
+		return a.quit()
+	default:
+		return nil
+	}
+	return a.current().load(a)
+}
+
+func (a *App) quit() tea.Cmd { a.quitting = true; return tea.Quit }
+
+// View renders a bounded alternate-screen frame, with prompts above the footer.
+func (a *App) View() tea.View {
+	w, h := a.width, a.height
+	footer := a.help.View(a.keys)
+	if a.banner.text != "" {
+		style := a.styles.Info
+		if a.banner.kind == bannerError {
+			style = a.styles.Err
+		}
+		footer = style.Render(a.line(a.banner.text, w))
+	}
+	bottom := strings.Split(footer, "\n")
+	formHeight := 0
+	if a.form != nil {
+		formHeight = 3
+	}
+	bodyHeight := max(0, h-1-len(bottom)-formHeight)
+	lines := []string{a.header(w)}
+	lines = append(lines, fitLines(a.current().view(a, w, bodyHeight), bodyHeight)...)
+	if a.form != nil {
+		lines = append(lines, fitLines(a.form.view(a, w, formHeight), formHeight)...)
+	}
+	lines = append(lines, bottom...)
+	v := tea.NewView(clip(lines, w, h))
+	v.AltScreen = true
+	return v
+}
+
+func (a *App) current() screen {
+	if n := len(a.overlays); n > 0 {
+		return a.overlays[n-1]
+	}
+	if a.modeScreen != nil {
+		return a.modeScreen
+	}
+	return a.tabs[a.tab]
+}
+
+func (a *App) nextReq(target string) int          { a.reqSeq[target]++; return a.reqSeq[target] }
+func (a *App) latest(target string, req int) bool { return a.reqSeq[target] == req }
+
+type todayMsg struct {
+	req         int
+	poll        bool
+	today       *api.Today
+	etag        string
+	notModified bool
+	err         error
+}
+
+func (a *App) fetchToday(poll bool) tea.Cmd {
+	req, ctx, c := a.nextReq("today"), a.ctx, a.api
+	etag := ""
+	if poll {
+		etag = a.todayETag
+	}
+	return func() tea.Msg {
+		td, tag, notModified, err := c.Today(ctx, etag)
+		return todayMsg{req: req, poll: poll, today: td, etag: tag, notModified: notModified, err: err}
+	}
+}
+
+func (a *App) refresh() tea.Cmd { return tea.Batch(a.fetchToday(false), a.current().load(a)) }
+
+type opMsg struct {
+	label string
+	resp  *api.OpResponse
+	err   error
+	after func(*App, *api.OpResponse) tea.Cmd
+	onErr func(*App, error)
+}
+
+func (a *App) mutate(label string, call func(context.Context, API) (*api.OpResponse, error),
+	after func(*App, *api.OpResponse) tea.Cmd, onErr func(*App, error),
+) tea.Cmd {
+	// AIDEV-NOTE: in-flight guard is set before scheduling the command, so
+	// repeated keys cannot send another mutation while this one is pending.
+	if a.inflight {
+		a.setBanner(bannerInfo, "busy…")
+		return nil
+	}
+	a.inflight = true
+	ctx, c := a.ctx, a.api
+	return func() tea.Msg {
+		resp, err := call(ctx, c)
+		return opMsg{label: label, resp: resp, err: err, after: after, onErr: onErr}
+	}
+}
+
+func (a *App) setTabScreen(t Tab, s screen) { a.tabs[t] = s }
+
+func (a *App) enterMode(m Mode, s screen) tea.Cmd {
+	a.mode, a.modeScreen = m, s
+	return s.load(a)
+}
+
+func (a *App) exitMode() tea.Cmd {
+	if a.exitWithMode {
+		return a.quit()
+	}
+	a.mode, a.modeScreen = ModeTabs, nil
+	return a.current().load(a)
+}
+
+func (a *App) openOverlay(s screen) tea.Cmd {
+	a.overlays = append(a.overlays, s)
+	return s.load(a)
+}
+
+func (a *App) closeOverlay() {
+	if n := len(a.overlays); n > 0 {
+		a.overlays[n-1] = nil
+		a.overlays = a.overlays[:n-1]
+	}
+}
