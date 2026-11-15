@@ -12,6 +12,10 @@ func (a *app) routes() *http.ServeMux {
 	mux.HandleFunc("POST /ui/login", a.login)
 	mux.HandleFunc("POST /ui/logout", a.logout)
 	mux.HandleFunc("GET /ui/{$}", a.today)
+	mux.HandleFunc("GET /ui/triage", a.triage)
+	mux.HandleFunc("GET /ui/backlog", a.backlog)
+	mux.HandleFunc("GET /ui/upcoming", a.upcoming)
+	mux.HandleFunc("GET /ui/log", a.log)
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/ui/", http.StatusSeeOther)
 	})

@@ -1,0 +1,53 @@
+{{define "content"}}
+<h1>Triage</h1>
+{{template "addtask" (row $ nil)}}
+{{if .Data.AcceptNew}}
+<form method="post" action="/ui/triage/accept-new">
+{{template "hidden" $}}
+{{range .Data.AcceptNew}}
+<input type="hidden" name="id" value="{{.ID}}">
+<input type="hidden" name="etag" value="{{etag $.Gen .Version}}">
+{{end}}
+<button type="submit">Accept new tasks at bottom</button>
+</form>
+{{end}}
+{{range .Data.Items}}
+<section aria-label="Task #{{.ID}}">
+{{template "taskrow" (row $ .TaskView)}}
+<form method="post" action="/ui/tasks/{{.ID}}/place">
+{{template "hidden" $}}
+<input type="hidden" name="etag" value="{{etag $.Gen .Version}}">
+<input type="hidden" name="how" value="keep">
+<button type="submit">Keep</button>
+</form>
+<form method="post" action="/ui/tasks/{{.ID}}/place">
+{{template "hidden" $}}
+<input type="hidden" name="etag" value="{{etag $.Gen .Version}}">
+<input type="hidden" name="how" value="top">
+<button type="submit">Top</button>
+</form>
+<form method="post" action="/ui/tasks/{{.ID}}/place">
+{{template "hidden" $}}
+<input type="hidden" name="etag" value="{{etag $.Gen .Version}}">
+<input type="hidden" name="how" value="bottom">
+<button type="submit">Bottom</button>
+</form>
+<form method="post" action="/ui/tasks/{{.ID}}/place">
+{{template "hidden" $}}
+<input type="hidden" name="etag" value="{{etag $.Gen .Version}}">
+<input type="hidden" name="how" value="before">
+<label>Before task ID <input name="ref" required></label>
+<button type="submit">Place before</button>
+</form>
+<form method="post" action="/ui/tasks/{{.ID}}/place">
+{{template "hidden" $}}
+<input type="hidden" name="etag" value="{{etag $.Gen .Version}}">
+<input type="hidden" name="how" value="after">
+<label>After task ID <input name="ref" required></label>
+<button type="submit">Place after</button>
+</form>
+{{template "taskactions" (row $ .TaskView)}}
+</section>
+{{else}}<p>Nothing to triage.</p>{{end}}
+{{if .Data.More}}<a href="{{.Data.More}}">More</a>{{end}}
+{{end}}

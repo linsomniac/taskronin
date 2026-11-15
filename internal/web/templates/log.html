@@ -1,0 +1,17 @@
+{{define "content"}}
+<h1>Log</h1>
+<form method="get" action="/ui/log">
+<label>From <input name="from" value="{{.Data.From}}"></label>
+<label>To <input name="to" value="{{.Data.To}}"></label>
+<label><input type="checkbox" name="include_deleted" value="1"{{if .Data.IncludeDeleted}} checked{{end}}> Include deleted entries</label>
+<button type="submit">Filter</button>
+</form>
+{{range .Data.Days}}
+<section aria-label="{{day .Date}}">
+<h2>{{day .Date}}</h2>
+{{range .Entries}}{{template "entryrow" (row $ .)}}{{end}}
+</section>
+{{else}}<p>No entries in this date range.</p>{{end}}
+{{if .Data.More}}<a href="{{.Data.More}}">More</a>{{end}}
+{{template "logentry" (row $ .Data.LogEntry)}}
+{{end}}

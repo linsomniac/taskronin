@@ -1,1 +1,56 @@
-{{define "content"}}<h1>Today</h1>{{end}}
+{{define "content"}}
+<h1>Today</h1>
+<p>{{day .Today}}</p>
+{{/* AIDEV-NOTE: DF21: TodayView.Banners already includes AI and backup health. */}}
+{{range .Data.Banners}}
+<div class="banner" data-banner="{{.Kind}}">{{.Message}}{{if eq .Kind "ai_changes"}} <a href="/ui/ai-changes">Review AI changes</a>{{end}}</div>
+{{end}}
+<section aria-label="Focus">
+<h2>Focus</h2>
+{{with .Data.Focus}}
+{{template "taskrow" (row $ .)}}
+<form method="post" action="/ui/tasks/{{.ID}}/complete">
+{{template "hidden" $}}
+<input type="hidden" name="etag" value="{{etag $.Gen .Version}}">
+<button type="submit">Complete</button>
+</form>
+<form method="post" action="/ui/focus">
+{{template "hidden" $}}
+<input type="hidden" name="task_id" value="">
+<button type="submit">Clear focus</button>
+</form>
+{{else}}<p>No focus task.</p>{{end}}
+<form method="post" action="/ui/focus">
+{{template "hidden" $}}
+<label>Task ID <input name="task_id" required></label>
+<label><input type="checkbox" name="interrupt" value="1"> Record interruption</label>
+<button type="submit">Set focus</button>
+</form>
+</section>
+<section aria-label="Today's blocks">
+<h2>Today's blocks</h2>
+{{range .Data.Blocks}}{{template "blockrow" (row $ .)}}{{else}}<p>No blocks today.</p>{{end}}
+</section>
+<section aria-label="Triage">
+<h2><a href="/ui/triage">Triage ({{.Data.TriageCount}})</a></h2>
+{{range .Data.TriageTop}}{{template "taskrow" (row $ .)}}{{else}}<p>Nothing to triage.</p>{{end}}
+</section>
+{{with .Data.Overdue}}<section aria-label="Overdue"><h2>Overdue</h2>
+{{range .}}{{template "taskrow" (row $ .)}}{{end}}
+</section>{{end}}
+{{with .Data.DueSoon}}<section aria-label="Due soon"><h2>Due soon</h2>
+{{range .}}{{template "taskrow" (row $ .)}}{{end}}
+</section>{{end}}
+<section aria-label="Today's entries">
+<h2>Today's entries</h2>
+{{range .Data.Entries}}{{template "entryrow" (row $ .)}}{{else}}<p>No entries today.</p>{{end}}
+</section>
+<section aria-label="Interruptions">
+<h2>Interruptions</h2>
+{{range .Data.Interruptions}}
+<p>{{wall .At}} — {{if .FromTaskID.Valid}}<a href="/ui/tasks/{{.FromTaskID.V}}">#{{.FromTaskID.V}}</a>{{end}}{{if .FromBlockID.Valid}} (block #{{.FromBlockID.V}}){{end}} → <a href="/ui/tasks/{{.ToTaskID}}">#{{.ToTaskID}}</a></p>
+{{else}}<p>No interruptions today.</p>{{end}}
+</section>
+{{template "addtask" (row $ nil)}}
+{{template "logentry" (row $ .Data.LogEntry)}}
+{{end}}

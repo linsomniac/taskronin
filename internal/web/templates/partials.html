@@ -12,3 +12,172 @@
 {{/* AIDEV-NOTE: Invoke row partials with (row $ .). In them, use .V for
 row data and .P for page state, including {{template "hidden" .P}} and
 {{etag .P.Gen .V.Version}}. Page-level forms use {{template "hidden" $}}. */}}
+
+{{define "taskrow"}}
+<article data-task="{{.V.ID}}">
+<p><a href="/ui/tasks/{{.V.ID}}">#{{.V.ID}} {{.V.Title}}</a></p>
+<p>{{range .V.Reasons}}<span class="reason">{{.Reason}}</span> {{end}}
+<span title="Slips: lifetime / since triage">Slips L/S: {{.V.SlipsLifetime}}/{{.V.SlipsSinceTriage}}</span>
+{{if .V.DueDate.Valid}} · Due {{day .V.DueDate.V}}{{if .V.DueMin.Valid}} {{hhmm .V.DueMin.V}}{{end}}{{end}}
+{{if ne .V.DuePhase "none"}} · {{.V.DuePhase}}{{end}}{{if .V.DueSoon}} · due soon{{end}}
+{{if .V.DeferDate.Valid}} · Deferred until {{day .V.DeferDate.V}}{{if .V.DeferMin.Valid}} {{hhmm .V.DeferMin.V}}{{end}}{{end}}
+{{range .V.Tags}} · <span class="tag">{{.}}</span>{{end}}
+{{if .V.Project}} · Project: {{.V.Project}}{{end}}
+{{if .V.Priority}} · Priority: {{.V.Priority}}{{end}}</p>
+</article>
+{{end}}
+
+{{define "taskactions"}}
+<form method="post" action="/ui/tasks/{{.V.ID}}/defer">
+{{template "hidden" .P}}
+<input type="hidden" name="etag" value="{{etag .P.Gen .V.Version}}">
+<label>Defer until <input name="until" placeholder="fri 9:00" required></label>
+<button type="submit">Defer</button>
+</form>
+<form method="post" action="/ui/tasks/{{.V.ID}}/block">
+{{template "hidden" .P}}
+<input type="hidden" name="etag" value="{{etag .P.Gen .V.Version}}">
+<label>Block <input name="span" placeholder="13:00-15:00" required></label>
+<button type="submit">Schedule block</button>
+</form>
+<form method="post" action="/ui/tasks/{{.V.ID}}/complete">
+{{template "hidden" .P}}
+<input type="hidden" name="etag" value="{{etag .P.Gen .V.Version}}">
+<button type="submit">Complete</button>
+</form>
+<form method="post" action="/ui/tasks/{{.V.ID}}/drop" hx-confirm="Drop #{{.V.ID}} {{.V.Title}}?">
+{{template "hidden" .P}}
+<input type="hidden" name="etag" value="{{etag .P.Gen .V.Version}}">
+<button type="submit">Drop</button>
+</form>
+{{end}}
+
+{{define "entryrow"}}
+<article data-entry="{{.V.ID}}">
+<p>{{if .V.OccurredMin.Valid}}<time>{{hhmm .V.OccurredMin.V}}</time> {{end}}{{if eq .V.Kind "complete"}}✓ {{end}}{{.V.Title}}{{if .V.Reopened}} (reopened){{end}}{{if .V.DeletedAt.Valid}} (deleted){{end}}</p>
+<p>{{if .V.TaskID.Valid}}<a href="/ui/tasks/{{.V.TaskID.V}}">#{{.V.TaskID.V}} {{.V.TaskTitle}}</a>{{else}}standalone{{end}}</p>
+{{if .V.Notes}}<div class="notes">{{md .V.Notes}}</div>{{end}}
+{{if ne .P.Tab "today"}}
+{{if .V.DeletedAt.Valid}}
+<form method="post" action="/ui/entries/{{.V.ID}}/undelete">
+{{template "hidden" .P}}
+<input type="hidden" name="etag" value="{{etag .P.Gen .V.Version}}">
+<button type="submit">Undelete</button>
+</form>
+{{else}}
+<details><summary>Edit entry</summary>
+<form method="post" action="/ui/entries/{{.V.ID}}/edit">
+{{template "hidden" .P}}
+<input type="hidden" name="etag" value="{{etag .P.Gen .V.Version}}">
+{{if eq .V.Kind "work"}}
+<label>Title <input name="title" value="{{.V.Title}}" required></label>
+<label>Date <input name="date" value="{{.V.WorkDate}}" required></label>
+<label>Time <input name="at" value="{{if .V.OccurredMin.Valid}}{{hhmm .V.OccurredMin.V}}{{end}}"></label>
+{{end}}
+<label>Notes <textarea name="notes">
+{{.V.Notes}}</textarea></label>
+<button type="submit">Save entry</button>
+</form>
+</details>
+{{if and (eq .V.Kind "work") (or (eq .P.Tab "log") (and (eq .P.Tab "recap") (not .V.TaskID.Valid)))}}
+<form method="post" action="/ui/entries/{{.V.ID}}/relink">
+{{template "hidden" .P}}
+<input type="hidden" name="etag" value="{{etag .P.Gen .V.Version}}">
+<label>Task ID (empty for standalone) <input name="task_id" value="{{if .V.TaskID.Valid}}{{.V.TaskID.V}}{{end}}"></label>
+<button type="submit">Relink</button>
+</form>
+{{end}}
+<form method="post" action="/ui/entries/{{.V.ID}}/delete" hx-confirm="Delete entry {{.V.Title}}?">
+{{template "hidden" .P}}
+<input type="hidden" name="etag" value="{{etag .P.Gen .V.Version}}">
+<button type="submit">Delete</button>
+</form>
+{{end}}
+{{end}}
+</article>
+{{end}}
+
+{{define "blockrow"}}
+<article data-block="{{.V.ID}}"{{if .V.Current}} class="current" aria-current="time"{{end}}>
+<p>{{if .V.Current}}<mark>Current block</mark> {{end}}{{day .V.Span.Date}} <time>{{hhmm .V.Span.Start}}</time>–<time>{{hhmm .V.Span.End}}</time>
+<a href="/ui/tasks/{{.V.TaskID}}">#{{.V.TaskID}} {{.V.TaskTitle}}</a> · {{.V.Status}}{{if .V.NeedsReblock}} · <strong>reblock?</strong>{{end}}</p>
+{{if eq .V.Status "planned"}}
+{{/* AIDEV-NOTE: Reblock needs both snapshot versions (R4-7). Task/recap
+pages set Tab to task/recap to offer it for every planned block (DF20). */}}
+{{if or .V.NeedsReblock (eq .P.Tab "task") (eq .P.Tab "recap")}}
+<form method="post" action="/ui/blocks/{{.V.ID}}/reblock">
+{{template "hidden" .P}}
+<input type="hidden" name="etag" value="{{etag .P.Gen .V.Version}}">
+<input type="hidden" name="task_etag" value="{{etag .P.Gen .V.TaskVersion}}">
+<label>New block <input name="span" placeholder="15:00-16:00" required></label>
+<button type="submit">Reblock</button>
+</form>
+{{end}}
+<form method="post" action="/ui/blocks/{{.V.ID}}/unblock">
+{{template "hidden" .P}}
+<input type="hidden" name="etag" value="{{etag .P.Gen .V.Version}}">
+<button type="submit">Unblock</button>
+</form>
+{{end}}
+{{if eq .P.Tab "recap"}}
+<form method="post" action="/ui/blocks/{{.V.ID}}/outcome">
+{{template "hidden" .P}}
+<input type="hidden" name="etag" value="{{etag .P.Gen .V.Version}}">
+<input type="hidden" name="outcome" value="worked">
+<button type="submit">Worked</button>
+</form>
+<form method="post" action="/ui/blocks/{{.V.ID}}/outcome">
+{{template "hidden" .P}}
+<input type="hidden" name="etag" value="{{etag .P.Gen .V.Version}}">
+<input type="hidden" name="outcome" value="missed">
+<button type="submit">Missed</button>
+</form>
+<form method="post" action="/ui/blocks/{{.V.ID}}/outcome">
+{{template "hidden" .P}}
+<input type="hidden" name="etag" value="{{etag .P.Gen .V.Version}}">
+<input type="hidden" name="outcome" value="auto">
+<button type="submit">Auto outcome</button>
+</form>
+{{end}}
+</article>
+{{end}}
+
+{{define "addtask"}}
+<details><summary>Add task</summary>
+<form method="post" action="/ui/tasks">
+{{template "hidden" .P}}
+<label>Title <input name="title" required></label>
+<label>Notes <textarea name="notes"></textarea></label>
+<label>Due <input name="due" placeholder="tomorrow"></label>
+<label>Tags <input name="tags"></label>
+<label>Project <input name="project"></label>
+<label>Priority <select name="priority">
+<option value="" selected>None</option><option value="H">High</option><option value="M">Medium</option><option value="L">Low</option>
+</select></label>
+<label>Placement <select name="place">
+<option value="" selected>Triage</option><option value="top">Top</option><option value="bottom">Bottom</option><option value="now">Now</option><option value="before">Before</option><option value="after">After</option><option value="defer">Defer</option><option value="block">Block</option>
+</select></label>
+<label>Reference task ID (before/after) <input name="ref"></label>
+<label>Defer until <input name="defer" placeholder="fri 9:00"></label>
+<label>Block span <input name="span" placeholder="13:00-15:00"></label>
+<button type="submit">Add task</button>
+</form>
+</details>
+{{end}}
+
+{{/* logentry takes service.AddEntryIn: optional TaskID and WorkDate prefill.
+Recap supplies WorkDate; Today supplies focus, else the current block's task. */}}
+{{define "logentry"}}
+<details><summary>Log entry</summary>
+<form method="post" action="/ui/entries">
+{{template "hidden" .P}}
+<label>Task ID (empty for standalone) <input name="task_id" value="{{if .V.TaskID.Valid}}{{.V.TaskID.V}}{{end}}"></label>
+<label>Title <input name="title" value="{{.V.Title}}"></label>
+<label>Notes <textarea name="notes">
+{{.V.Notes}}</textarea></label>
+<label>Date <input name="date" value="{{if not .V.WorkDate.IsZero}}{{.V.WorkDate}}{{end}}" placeholder="today"></label>
+<label>Time <input name="at" value="{{if .V.At.Valid}}{{hhmm .V.At.V}}{{end}}"></label>
+<button type="submit">Log entry</button>
+</form>
+</details>
+{{end}}

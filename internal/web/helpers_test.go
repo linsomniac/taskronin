@@ -47,6 +47,48 @@ func newTestApp(t *testing.T, opts ...testutil.SvcOpt) *testApp {
 	return &testApp{t: t, App: a, H: a.Handler(), Svc: svc, Clock: clk, Logs: logs, cookies: make(map[string]string)}
 }
 
+func (ta *testApp) meta() service.Meta {
+	return testutil.Meta(testutil.Owner(), ta.Svc.Generation())
+}
+
+func (ta *testApp) addTask(in service.AddTaskIn) domain.TaskID {
+	ta.t.Helper()
+	out, err := ta.Svc.AddTask(ta.t.Context(), ta.meta(), in)
+	if err != nil {
+		ta.t.Fatal(err)
+	}
+	return out.Task.ID
+}
+
+func (ta *testApp) task(id domain.TaskID) domain.TaskDetail {
+	ta.t.Helper()
+	task, err := ta.Svc.GetTask(ta.t.Context(), testutil.Owner(), id)
+	if err != nil {
+		ta.t.Fatal(err)
+	}
+	return task
+}
+
+func (ta *testApp) opKinds() []string {
+	ta.t.Helper()
+	var kinds []string
+	for cursor := ""; ; {
+		p, err := ta.Svc.ListOps(ta.t.Context(), testutil.Owner(), service.ListOpsIn{Limit: 100, Cursor: cursor})
+		if err != nil {
+			ta.t.Fatal(err)
+		}
+		for _, op := range p.Items {
+			kinds = append(kinds, string(op.Kind))
+		}
+		if p.NextCursor == "" {
+			break
+		}
+		cursor = p.NextCursor
+	}
+	slices.Reverse(kinds)
+	return kinds
+}
+
 func webOwner() domain.Actor {
 	a := testutil.Owner()
 	a.Channel = domain.ChanWeb
