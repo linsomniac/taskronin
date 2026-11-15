@@ -1,0 +1,44 @@
+package web
+
+import (
+	"bytes"
+	"net/http"
+	"time"
+)
+
+func (a *app) routes() *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/ui/", http.StatusSeeOther)
+	})
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = w.Write([]byte("ok"))
+	})
+	mux.HandleFunc("GET /static/{name}", func(w http.ResponseWriter, r *http.Request) {
+		var (
+			b           []byte
+			contentType string
+			err         error
+		)
+		switch r.PathValue("name") {
+		case HTMXAsset:
+			b, err = staticFS.ReadFile("static/" + HTMXAsset)
+			contentType = "text/javascript; charset=utf-8"
+		case "app.css":
+			b, err = staticFS.ReadFile("static/app.css")
+			contentType = "text/css; charset=utf-8"
+		default:
+			http.NotFound(w, r)
+			return
+		}
+		if err != nil {
+			http.Error(w, "asset unavailable", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", contentType)
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		http.ServeContent(w, r, r.PathValue("name"), time.Time{}, bytes.NewReader(b))
+	})
+	return mux
+}

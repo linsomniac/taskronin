@@ -1703,8 +1703,8 @@ API (socket), outermost first:
 
 Web (TCP, plan D):
 1. `recoverer`, `requestID`, `accessLog`.
-2. `hostAllowlist` → derived from `web.listen`: the literal `host:port`, plus `localhost:<port>` when the host is `127.0.0.1` or `::1`; anything else → 400 (DNS rebinding).
-3. `securityHeaders` → CSP and friends exactly as D§10.4 on every response.
+2. `securityHeaders` → CSP and friends exactly as D§10.4 on every response.
+3. `hostAllowlist` → derived from `web.listen`: the literal `host:port`, plus `localhost:<port>` when the host is `127.0.0.1` or `::1`; anything else → 400 (DNS rebinding).
 4. `routeClass(web)` → `/ui/`, `/static/`, `/healthz`, `/`; strip `Authorization`; `/api/v1/*` → 401 problem.
 5. `bodyLimit` (1 MiB, forms only).
 6. `session` (all `/ui/*` except `/ui/login`) → `svc.Authenticate(cookie)`; missing/expired → GET 303 `/ui/login`, POST 401 with `HX-Redirect: /ui/login`.
