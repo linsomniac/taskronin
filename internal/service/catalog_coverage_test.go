@@ -66,6 +66,12 @@ func testFuncNames(t *testing.T, root string) map[string]bool {
 			if err != nil {
 				return err
 			}
+			// AIDEV-NOTE: skip the directories the go tool ignores. testutil.StartServer
+			// creates and removes .tkr-* directories inside package directories while
+			// other packages' tests run, so walking into one could race its removal.
+			if entry.IsDir() && name != path && ignoredByGo(entry.Name()) {
+				return filepath.SkipDir
+			}
 			if entry.IsDir() || !strings.HasSuffix(name, "_test.go") {
 				return nil
 			}
@@ -85,6 +91,12 @@ func testFuncNames(t *testing.T, root string) map[string]bool {
 	return names
 }
 
+// ignoredByGo reports whether the go tool skips a directory of this name
+// when matching packages.
+func ignoredByGo(dir string) bool {
+	return strings.HasPrefix(dir, ".") || strings.HasPrefix(dir, "_") || dir == "testdata"
+}
+
 func TestCatalogCoverageScanner(t *testing.T) {
 	for _, withCmd := range []bool{false, true} {
 		name := "internal-only"
@@ -99,8 +111,11 @@ func TestCatalogCoverageScanner(t *testing.T) {
 					"func TestTRI02_variant(t *testing.T) {}\n" +
 					"func TestTRI03WithoutUnderscore(t *testing.T) {}\n" +
 					"func TestTRI040(t *testing.T) {}\n",
-				"internal/example/scenarios.go": "func TestTRI05(t *testing.T) {}\n",
-				"elsewhere/scenarios_test.go":   "func TestTRI06(t *testing.T) {}\n",
+				"internal/example/scenarios.go":               "func TestTRI05(t *testing.T) {}\n",
+				"elsewhere/scenarios_test.go":                 "func TestTRI06(t *testing.T) {}\n",
+				"internal/example/.tkr-1/scenarios_test.go":   "func TestTRI07(t *testing.T) {}\n",
+				"internal/example/testdata/scenarios_test.go": "func TestTRI08(t *testing.T) {}\n",
+				"internal/example/_scratch/scenarios_test.go": "func TestTRI09(t *testing.T) {}\n",
 			}
 			want := map[string]bool{"TRI01": true, "TRI02": true}
 			if withCmd {
