@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
@@ -67,7 +68,7 @@ func (s *historyScreen) handle(_ *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
 }
 
 func (s *historyScreen) view(a *App, w, h int) string {
-	if s.state != loadLoaded {
+	if s.page == nil {
 		return a.line(s.state.notice("history"), w)
 	}
 	lines := []string{fmt.Sprintf("History for #%d", s.id), "j/k scroll · esc back"}
@@ -80,6 +81,10 @@ func (s *historyScreen) view(a *App, w, h int) string {
 	}
 	if s.page.NextCursor != nil {
 		lines = append(lines, "more… (older events not shown)")
+	}
+	if notice := s.state.retainedNotice("history", true); notice != "" {
+		body := overlayViewport(&s.viewport, lines, w, max(0, h-1))
+		return clip(append([]string{a.line(notice, w)}, strings.Split(body, "\n")...), w, h)
 	}
 	return overlayViewport(&s.viewport, lines, w, h)
 }

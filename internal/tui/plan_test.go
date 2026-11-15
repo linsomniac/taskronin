@@ -57,7 +57,7 @@ func TestPlanFlow(t *testing.T) { // D§4.1 walkthrough.
 	typeText(t, a, "13:00-15:00")
 	f.tasks["triage"] = nil
 	press(t, a, "enter")
-	eq(t, f.mustLast(t, "BlockTask"), call{Method: "BlockTask", ID: 42, Mut: client.Mut{IfMatch: "g-42"}, Req: api.BlockRequest{Date: civil.MustDate("2026-10-28"), Start: 780, End: 900}})
+	eq(t, f.mustLast(t, "BlockTask"), call{Method: "BlockTask", ID: 42, Mut: client.Mut{Key: freshFormKey(t, f, "BlockTask"), IfMatch: "g-42"}, Req: api.BlockRequest{Date: civil.MustDate("2026-10-28"), Start: 780, End: 900}})
 	if !strings.Contains(viewText(a), "free 10:00–13:00, 15:00–24:00") {
 		t.Fatal(viewText(a))
 	}
@@ -69,7 +69,7 @@ func TestPlanFlow(t *testing.T) { // D§4.1 walkthrough.
 	f.blocks = append(f.blocks, api.Block{ID: 3, TaskID: 8, TaskTitle: "second", Date: f.clock.Today, Start: 960, End: 1020, Status: "planned"})
 	reads := f.count("ListBlocks")
 	press(t, a, "enter")
-	eq(t, f.mustLast(t, "BlockTask"), call{Method: "BlockTask", ID: 8, Mut: client.Mut{IfMatch: "g-8"}, Req: api.BlockRequest{Date: f.clock.Today, Start: 960, End: 1020}})
+	eq(t, f.mustLast(t, "BlockTask"), call{Method: "BlockTask", ID: 8, Mut: client.Mut{Key: freshFormKey(t, f, "BlockTask"), IfMatch: "g-8"}, Req: api.BlockRequest{Date: f.clock.Today, Start: 960, End: 1020}})
 	if f.count("ListBlocks") <= reads {
 		t.Fatal("successful block did not reload today's blocks")
 	}

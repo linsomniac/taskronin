@@ -132,7 +132,7 @@ func TestFormRetryRefusedWhenStale(t *testing.T) {
 		eq(t, visible.loads, 1)
 		eq(t, a.todayETag, "restored")
 		press(t, a, "enter")
-		eq(t, f.mustLast(t, "DeferTask").Mut.Key, "")
+		freshFormKey(t, f, "DeferTask") // A fresh submission now owns its generated key.
 		eq(t, first.Until.V.Date, civil.MustDate("2026-10-29"))
 		eq(t, f.mustLast(t, "DeferTask").Req.(api.DeferRequest).Until.V.Date, civil.MustDate("2026-10-30")) // M6
 	})
@@ -184,7 +184,7 @@ func TestFormRetryGenerationMismatchDropsSnapshot(t *testing.T) { // CF06: resto
 		eq(t, fm.retry, (*formRetry)(nil))
 		eq(t, fm.waiting, false)
 		press(t, a, "enter")
-		eq(t, f.mustLast(t, "DeferTask").Mut.Key, "")
+		freshFormKey(t, f, "DeferTask") // A fresh submission now owns its generated key.
 	}
 }
 
@@ -259,7 +259,7 @@ func TestFormRetryChangedInputSendsNewRequest(t *testing.T) { // I1: brief's "to
 	}
 	eq(t, a.banner.text, "text changed — enter sends a NEW request; the first attempt may have saved")
 	press(t, a, "enter")
-	eq(t, f.mustLast(t, "DeferTask").Mut.Key, "")
+	freshFormKey(t, f, "DeferTask") // A fresh submission now owns its generated key.
 	eq(t, f.mustLast(t, "DeferTask").Req.(api.DeferRequest).Until.V.Date, civil.MustDate("2026-10-30"))
 	eq(t, f.count("RefreshGeneration"), 0)
 }
@@ -317,7 +317,11 @@ func TestFormRetryDefinitiveProblemDropsSnapshot(t *testing.T) { // M1; CF03 sti
 					openDeferForm(t, a)
 				}
 				press(t, a, "enter")
-				eq(t, f.mustLast(t, "DeferTask").Mut.Key, wantKey)
+				if unknown {
+					eq(t, f.mustLast(t, "DeferTask").Mut.Key, wantKey)
+				} else {
+					freshFormKey(t, f, "DeferTask")
+				}
 			})
 		}
 	}
@@ -537,7 +541,7 @@ func TestLogStaleRetryRecomputesLink(t *testing.T) {
 		t.Fatal("dropping the snapshot must refresh the echoed link")
 	}
 	press(t, a, "enter")
-	eq(t, f.mustLast(t, "AddEntry").Mut.Key, "")
+	freshFormKey(t, f, "AddEntry") // The stale log snapshot must not supply its key.
 	eq(t, f.mustLast(t, "AddEntry").Req.(api.AddEntryRequest).TaskID.V, int64(99))
 }
 
@@ -743,4 +747,14 @@ func TestFormRenderSanitizesAndClips(t *testing.T) {
 			}
 		}
 	}
+}
+
+// freshFormKey validates the generated key before request/ETag assertions use it.
+func freshFormKey(t *testing.T, f *fakeAPI, method string) string {
+	t.Helper()
+	key := f.mustLast(t, method).Mut.Key
+	if !api.ValidIdempotencyKey(key) {
+		t.Fatalf("%s did not carry a fresh form key: %q", method, key)
+	}
+	return key
 }

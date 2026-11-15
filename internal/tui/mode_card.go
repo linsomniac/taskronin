@@ -211,14 +211,18 @@ const cardLegend = "k keep · t top · b bottom · p place · d defer · B block
 func (s *cardMode) view(a *App, w, h int) string { return s.deck.screenView(a, w, h) }
 
 func (d *cardDeck) screenView(a *App, w, h int) string {
-	if d.state == loadFailed {
-		return a.line(d.state.notice("triage"), w)
-	}
 	if _, ok := d.current(); !ok {
+		if d.state == loadFailed {
+			return a.line(d.state.notice("triage"), w)
+		}
 		if d.state != loadLoaded {
 			return a.line("loading…", w)
 		}
 		return a.line(fmt.Sprintf("Triage clear (%d skipped)", d.skipped), w)
+	}
+	if notice := d.state.retainedNotice("triage", true); notice != "" {
+		body := d.view(a, w, max(0, h-1))
+		return clip(append([]string{a.line(notice, w)}, strings.Split(body, "\n")...), w, h)
 	}
 	return d.view(a, w, h)
 }

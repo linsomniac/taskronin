@@ -208,9 +208,14 @@ func (p *recapLogPicker) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
 }
 
 func (s *recapMode) view(a *App, w, h int) string {
+	var notice []string
+	if text := s.state.retainedNotice("day", s.day != nil); text != "" {
+		notice = append(notice, a.line(text, w))
+	}
+	height := max(0, h-len(notice))
 	lines := []string{a.styles.Header.Render(a.line(fmt.Sprintf("Recap %.3s %s", s.date.Weekday(), s.date), w))}
-	if s.state != loadLoaded {
-		return clip(append(lines, a.line(s.state.notice("day"), w)), w, h)
+	if s.day == nil {
+		return clip(append(lines, notice...), w, h)
 	}
 	lines = append(lines, a.line("j/k/↑/↓ move · w worked · m missed · a auto · x done · l log · L link", w))
 	selectedLine := -1
@@ -253,8 +258,8 @@ func (s *recapMode) view(a *App, w, h int) string {
 		}
 	}
 	start := 0
-	if h > 0 && selectedLine >= h {
-		start = selectedLine - h + 1
+	if height > 0 && selectedLine >= height {
+		start = selectedLine - height + 1
 	}
-	return clip(lines[start:], w, h)
+	return clip(append(notice, lines[start:]...), w, h)
 }

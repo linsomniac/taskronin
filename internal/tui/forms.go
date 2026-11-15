@@ -12,6 +12,7 @@ import (
 
 	"taskronin/internal/api"
 	"taskronin/internal/client"
+	"taskronin/internal/domain"
 	"taskronin/internal/textsafe"
 )
 
@@ -30,6 +31,7 @@ type form struct {
 	errText     string
 	waiting     bool
 	retry       *formRetry
+	retryBusy   bool
 	submit      func(a *App, value string) (label string, send sendFunc, err error)
 	after       func(a *App, r *api.OpResponse) tea.Cmd
 	label       string // Success label for the resolved request, including a retry.
@@ -72,6 +74,9 @@ func (*form) selection() (int64, string, bool) { return 0, "", false }
 func (f *form) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
 	if f.waiting {
 		a.setBanner(bannerInfo, "busy…")
+		if k.String() == "q" {
+			a.setBanner(bannerInfo, "busy… (ctrl+c forces)")
+		}
 		return nil, true
 	}
 	switch k.String() {
@@ -138,7 +143,11 @@ func (f *form) view(a *App, w, h int) string {
 
 func (f *form) retryBanner(a *App) {
 	if f.input.Value() == f.retry.value {
-		a.setBanner(bannerError, "outcome unknown — enter resends the same request")
+		text := "outcome unknown — enter resends the same request"
+		if f.retryBusy {
+			text = "server busy — enter resends the same request"
+		}
+		a.setBanner(bannerError, text)
 	} else {
 		a.setBanner(bannerError, "text changed — enter sends a NEW request; the first attempt may have saved")
 	}
@@ -146,6 +155,7 @@ func (f *form) retryBanner(a *App) {
 
 func (f *form) dropRetry(a *App) {
 	f.retry = nil
+	f.retryBusy = false
 	if f.onToday != nil {
 		f.onToday(a)
 	}
@@ -159,7 +169,7 @@ func (f *form) send(a *App) tea.Cmd {
 	value := f.input.Value()
 	snapshot := f.retry
 	var send sendFunc
-	var gen string
+	var gen, key string
 	var err error
 	at := a.clock.Now.Time
 	if snapshot != nil && value == snapshot.value {
@@ -180,10 +190,9 @@ func (f *form) send(a *App) tea.Cmd {
 	// submission's server time here, never when its reply arrives. Resends keep
 	// the same body/key/gen/at, and check fresh time and identity before sending.
 	// If no clock has loaded, read it once before the first send instead.
-	// gen/at are written only by this cmd and read by onErr after opMsg delivery;
+	// gen/at/key are written only by this cmd and read by onErr after opMsg delivery;
 	// Bubble Tea's message channel orders those accesses. No cmd reads App/form.
 	return a.mutate(f.label, func(ctx context.Context, c API) (*api.OpResponse, error) {
-		key := ""
 		if snapshot != nil {
 			clock, err := c.Clock(ctx)
 			if err != nil {
@@ -213,6 +222,9 @@ func (f *form) send(a *App) tea.Cmd {
 			if err != nil {
 				return nil, &formReadError{err: err}
 			}
+			// AIDEV-NOTE: keyed busy can follow commit (S1'). Mint the key here
+			// so even a plain busy problem can retain the original P4 snapshot.
+			key = api.NewIdempotencyKey()
 		}
 		return send(ctx, c, key)
 	}, func(a *App, r *api.OpResponse) tea.Cmd {
@@ -242,6 +254,7 @@ func (f *form) send(a *App) tea.Cmd {
 				a.setBanner(bannerError, "not sent — outcome of the first attempt still unknown; enter resends the same request")
 			}
 		case errors.As(err, &unknown):
+			f.retryBusy = false
 			if snapshot == nil && unknown.Key != "" {
 				f.retry = &formRetry{value: value, key: unknown.Key, gen: gen, at: at, send: send}
 			}
@@ -253,6 +266,14 @@ func (f *form) send(a *App) tea.Cmd {
 				a.setBanner(bannerError, "not sent — outcome of the first attempt still unknown; enter resends the same request")
 			}
 		case errors.As(err, &problem):
+			if problem.Code() == domain.CodeBusy {
+				if snapshot == nil {
+					f.retry = &formRetry{value: value, key: key, gen: gen, at: at, send: send}
+				}
+				f.retryBusy = true
+				f.retryBanner(a)
+				break
+			}
 			// A definitive refusal ends this replay; keep handleErr's problem banner.
 			f.dropRetry(a)
 			// AIDEV-NOTE: a definitive 412 invalidates the captured If-Match.

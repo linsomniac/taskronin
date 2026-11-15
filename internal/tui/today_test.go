@@ -98,7 +98,7 @@ func TestTodayActions(t *testing.T) {
 	}
 	typeText(t, a, "15:00-16:00")
 	press(t, a, "enter")
-	eq(t, f.mustLast(t, "Reblock"), call{Method: "Reblock", ID: 8, Mut: client.Mut{IfMatch: "b-8"}, Req: api.ReblockRequest{
+	eq(t, f.mustLast(t, "Reblock"), call{Method: "Reblock", ID: 8, Mut: client.Mut{Key: freshFormKey(t, f, "Reblock"), IfMatch: "b-8"}, Req: api.ReblockRequest{
 		BlockRequest: api.BlockRequest{Date: testClock().Today, Start: 900, End: 960}, TaskETag: "g-57",
 	}})
 	eq(t, f.count("GetTask"), 0)
@@ -281,7 +281,7 @@ func TestTodayReblockFormKeepsCapturedBlock(t *testing.T) {
 	f.setToday(td, `"a-2"`)
 	drain(t, a, func() tea.Msg { return pollMsg{} })
 	press(t, a, "enter")
-	eq(t, f.mustLast(t, "Reblock"), call{Method: "Reblock", ID: 8, Mut: client.Mut{IfMatch: "b-8"}, Req: api.ReblockRequest{
+	eq(t, f.mustLast(t, "Reblock"), call{Method: "Reblock", ID: 8, Mut: client.Mut{Key: freshFormKey(t, f, "Reblock"), IfMatch: "b-8"}, Req: api.ReblockRequest{
 		BlockRequest: api.BlockRequest{Date: testClock().Today, Start: 900, End: 960}, TaskETag: "g-57",
 	}})
 }

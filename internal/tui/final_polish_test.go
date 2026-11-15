@@ -35,9 +35,9 @@ func TestFinalQuitAndEscapeGuards(t *testing.T) {
 			a.quitting = false
 			drain(t, a, a.openAdd())
 			a.inflight = true
-			press(t, a, "q")
+			typeText(t, a, "quiz")
 			eq(t, a.quitting, false)
-			eq(t, a.banner.text, "busy… (ctrl+c forces)")
+			eq(t, a.form.(*form).input.Value(), "quiz")
 			press(t, a, "ctrl+c")
 			eq(t, a.quitting, true)
 		})

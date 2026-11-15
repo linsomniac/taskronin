@@ -105,7 +105,7 @@ func TestLogTabActions(t *testing.T) {
 			if value == "-" {
 				want = api.Opt[int64]{Set: true, Null: true}
 			}
-			eq(t, f.mustLast(t, "RelinkEntry"), call{Method: "RelinkEntry", ID: 9, Mut: client.Mut{IfMatch: "e-9"}, Req: api.RelinkRequest{TaskID: want}})
+			eq(t, f.mustLast(t, "RelinkEntry"), call{Method: "RelinkEntry", ID: 9, Mut: client.Mut{Key: freshFormKey(t, f.fakeAPI, "RelinkEntry"), IfMatch: "e-9"}, Req: api.RelinkRequest{TaskID: want}})
 			eq(t, f.count("ListEntries"), 2)
 			eq(t, a.form, nil)
 		})

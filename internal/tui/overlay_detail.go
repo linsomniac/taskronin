@@ -71,9 +71,13 @@ func (s *detailScreen) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
 	case "k":
 		s.viewport.ScrollUp(1)
 	case "e":
-		return a.editTask(s.id), true
+		if s.detail != nil {
+			return a.editTask(s.id), true
+		}
 	case "h":
-		return a.openHistory(s.id), true
+		if s.detail != nil {
+			return a.openHistory(s.id), true
+		}
 	case "t":
 		if s.detail != nil {
 			return s.tagsForm(a), true
@@ -110,7 +114,7 @@ func (s *detailScreen) tagsForm(a *App) tea.Cmd {
 }
 
 func (s *detailScreen) view(a *App, w, h int) string {
-	if s.state != loadLoaded {
+	if s.detail == nil {
 		return a.line(s.state.notice("detail"), w)
 	}
 	d := s.detail
@@ -172,6 +176,10 @@ func (s *detailScreen) view(a *App, w, h int) string {
 		for _, i := range d.Interruptions {
 			add(interruptionLine(i, nil, nil))
 		}
+	}
+	if notice := s.state.retainedNotice("detail", true); notice != "" {
+		body := overlayViewport(&s.viewport, lines, w, max(0, h-1))
+		return clip(append([]string{a.line(notice, w)}, strings.Split(body, "\n")...), w, h)
 	}
 	return overlayViewport(&s.viewport, lines, w, h)
 }

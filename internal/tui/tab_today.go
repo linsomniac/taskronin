@@ -23,8 +23,8 @@ type todayRow struct {
 
 type todayScreen struct {
 	rows   []todayRow
-	scroll int // Extra lines below the selected task, including nonselectable tail sections.
-	cursor int // -1 leaves logging to the implicit focus/current-block rule.
+	scroll int // Extra lines beyond the last task when reading the nonselectable tail.
+	cursor int // -1 or len(rows) leaves actions to the implicit focus/current-block rule.
 }
 
 // App owns the aggregate read, shared by Today, headers and implicit log links.
@@ -35,6 +35,7 @@ func (s *todayScreen) update(a *App, msg tea.Msg) tea.Cmd {
 		return nil
 	}
 	var selected todayRow
+	inTail := s.cursor == len(s.rows) && s.scroll > 0
 	if s.cursor >= 0 && s.cursor < len(s.rows) {
 		selected = s.rows[s.cursor]
 	}
@@ -63,6 +64,9 @@ func (s *todayScreen) update(a *App, msg tea.Msg) tea.Cmd {
 			break
 		}
 	}
+	if inTail {
+		s.cursor = len(s.rows)
+	}
 	return nil
 }
 
@@ -85,12 +89,19 @@ func (s *todayScreen) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
 			s.cursor++
 			s.scroll = 0
 		} else {
+			// AIDEV-NOTE: passing the last selectable row clears selection.
+			// len(rows) anchors tail scrolling without an actionable hidden row;
+			// x/l use focus/implicit linking, and k reselects at the tail boundary.
+			s.cursor = len(s.rows)
 			s.scroll++
 		}
 		return nil, true
 	case "k":
 		if s.scroll > 0 {
 			s.scroll--
+			if s.scroll == 0 {
+				s.cursor = len(s.rows) - 1
+			}
 		} else if s.cursor >= 0 {
 			s.cursor = max(0, s.cursor-1)
 		}
@@ -164,9 +175,14 @@ func (s *todayScreen) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
 
 func (s *todayScreen) view(a *App, w, h int) string {
 	td := a.today
-	if a.todayLoad != loadLoaded {
+	if td == nil {
 		return a.line(a.todayLoad.notice("Today"), w)
 	}
+	var notice []string
+	if text := a.todayLoad.retainedNotice("Today", true); text != "" {
+		notice = append(notice, a.line(text, w))
+	}
+	height := max(0, h-len(notice))
 	focus := "no focus"
 	b := td.CurrentBlock
 	if f := td.Focus; f != nil {
@@ -179,6 +195,10 @@ func (s *todayScreen) view(a *App, w, h int) string {
 	}
 	lines := []string{a.styles.Current.Render(a.line(focus, w)), a.line("Blocks", w)}
 	selectedLine := -1
+	anchor := s.cursor
+	if anchor == len(s.rows) {
+		anchor-- // The last task anchors scrolling but has no selection marker.
+	}
 	for i, b := range td.Blocks {
 		text := fmt.Sprintf("b%d %s #%d %s", b.ID, spanText(b.Start, b.End), b.TaskID, b.TaskTitle)
 		switch {
@@ -193,7 +213,7 @@ func (s *todayScreen) view(a *App, w, h int) string {
 		if b.Current && i != s.cursor {
 			line = a.styles.Current.Render(line)
 		}
-		if i == s.cursor {
+		if i == anchor {
 			selectedLine = len(lines)
 		}
 		lines = append(lines, line)
@@ -201,7 +221,7 @@ func (s *todayScreen) view(a *App, w, h int) string {
 	lines = append(lines, a.line(fmt.Sprintf("Triage %d", td.TriageCount), w))
 	for i, task := range td.TriageTop[:min(5, len(td.TriageTop))] {
 		selected := len(td.Blocks)+i == s.cursor
-		if selected {
+		if len(td.Blocks)+i == anchor {
 			selectedLine = len(lines)
 		}
 		lines = append(lines, a.row(todayTaskText(task), w, selected))
@@ -215,7 +235,7 @@ func (s *todayScreen) view(a *App, w, h int) string {
 			lines = append(lines, a.line(section.title, w))
 			for _, t := range section.tasks {
 				selected := rowIndex == s.cursor
-				if selected {
+				if rowIndex == anchor {
 					selectedLine = len(lines)
 				}
 				lines = append(lines, a.row(todayTaskText(t), w, selected))
@@ -268,12 +288,12 @@ func (s *todayScreen) view(a *App, w, h int) string {
 	}
 	// Keep the selected row visible even when the dashboard exceeds the frame.
 	start := 0
-	if h > 0 && selectedLine >= h {
-		start = selectedLine - h + 1
+	if height > 0 && selectedLine >= height {
+		start = selectedLine - height + 1
 	}
 	// j/k continue beyond task rows into log, interruptions, AI and notices.
-	s.scroll = min(s.scroll, max(0, len(lines)-h-start))
-	return clip(lines[min(len(lines), start+s.scroll):], w, h)
+	s.scroll = min(s.scroll, max(0, len(lines)-height-start))
+	return clip(append(notice, lines[min(len(lines), start+s.scroll):]...), w, h)
 }
 
 func todayTaskText(t api.Task) string {

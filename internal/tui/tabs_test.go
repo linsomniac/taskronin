@@ -98,11 +98,11 @@ func TestBacklogKeys(t *testing.T) {
 			case "d":
 				typeText(t, a, "thu")
 				press(t, a, "enter")
-				eq(t, f.mustLast(t, "DeferTask"), call{Method: "DeferTask", ID: 2, Mut: client.Mut{IfMatch: "g-2"}, Req: api.DeferRequest{Until: api.Opt[api.Moment]{Set: true, V: api.Moment{Date: civil.MustDate("2026-10-29")}}}})
+				eq(t, f.mustLast(t, "DeferTask"), call{Method: "DeferTask", ID: 2, Mut: client.Mut{Key: freshFormKey(t, f, "DeferTask"), IfMatch: "g-2"}, Req: api.DeferRequest{Until: api.Opt[api.Moment]{Set: true, V: api.Moment{Date: civil.MustDate("2026-10-29")}}}})
 			case "B":
 				typeText(t, a, "13:00-15:00")
 				press(t, a, "enter")
-				eq(t, f.mustLast(t, "BlockTask"), call{Method: "BlockTask", ID: 2, Mut: client.Mut{IfMatch: "g-2"}, Req: api.BlockRequest{Date: civil.MustDate("2026-10-28"), Start: 780, End: 900}})
+				eq(t, f.mustLast(t, "BlockTask"), call{Method: "BlockTask", ID: 2, Mut: client.Mut{Key: freshFormKey(t, f, "BlockTask"), IfMatch: "g-2"}, Req: api.BlockRequest{Date: civil.MustDate("2026-10-28"), Start: 780, End: 900}})
 			case "e":
 				eq(t, f.mustLast(t, "GetTask").ID, int64(2))
 				eq(t, a.inflight, false)
@@ -183,7 +183,7 @@ func TestUpcoming(t *testing.T) { // TRI-26, DUE-18, DUE-19 (TUI side); CF10.
 	press(t, a, "d")
 	typeText(t, a, "none")
 	press(t, a, "enter")
-	eq(t, f.mustLast(t, "DeferTask"), call{Method: "DeferTask", ID: 3, Mut: client.Mut{IfMatch: "g-3"}, Req: api.DeferRequest{Until: api.Opt[api.Moment]{Set: true, Null: true}}})
+	eq(t, f.mustLast(t, "DeferTask"), call{Method: "DeferTask", ID: 3, Mut: client.Mut{Key: freshFormKey(t, f, "DeferTask"), IfMatch: "g-3"}, Req: api.DeferRequest{Until: api.Opt[api.Moment]{Set: true, Null: true}}})
 	five := task(5, "due task")
 	five.Due = &api.Moment{Date: civil.MustDate("2026-10-31")}
 	f.upcoming.DueSoon = []api.Task{five}

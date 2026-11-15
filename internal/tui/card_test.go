@@ -43,7 +43,11 @@ func TestCardPlacementKeys(t *testing.T) { // TRI-10, TRI-11, TRI-12 (TUI side).
 				typeText(t, a, tc.value)
 				press(t, a, "enter")
 			}
-			eq(t, f.mustLast(t, "PlaceTask"), call{Method: "PlaceTask", ID: 1, Mut: client.Mut{IfMatch: "g-1"}, Req: tc.want})
+			wantMut := client.Mut{IfMatch: "g-1"}
+			if tc.value != "" {
+				wantMut.Key = freshFormKey(t, f, "PlaceTask")
+			}
+			eq(t, f.mustLast(t, "PlaceTask"), call{Method: "PlaceTask", ID: 1, Mut: wantMut, Req: tc.want})
 			selectedID(t, a, 2)
 			eq(t, a.modeScreen.(*cardMode).deck.placed, 1)
 		})
@@ -94,7 +98,11 @@ func TestCardOtherKeys(t *testing.T) { // TRI-13, TRI-14, TRI-15, TRI-16 (TUI si
 				selectedID(t, a, 1)
 				eq(t, f.count(tc.method), 0)
 				drain(t, a, cmd)
-				eq(t, f.mustLast(t, tc.method), call{Method: tc.method, ID: 1, Mut: client.Mut{IfMatch: "g-1"}, Req: tc.req})
+				wantMut := client.Mut{IfMatch: "g-1"}
+				if tc.value != "" {
+					wantMut.Key = freshFormKey(t, f, tc.method)
+				}
+				eq(t, f.mustLast(t, tc.method), call{Method: tc.method, ID: 1, Mut: wantMut, Req: tc.req})
 				deck := a.modeScreen.(*cardMode).deck
 				if fail {
 					selectedID(t, a, 1)

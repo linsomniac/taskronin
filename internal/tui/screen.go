@@ -102,3 +102,17 @@ func (s loadState) notice(name string) string {
 		return ""
 	}
 }
+
+// AIDEV-NOTE: a reload does not revoke retained content. Keep its actions and
+// visible targets together, with the load notice above the previous results.
+func (s loadState) retainedNotice(name string, retained bool) string {
+	if retained {
+		if s == loadLoading {
+			return "refreshing…"
+		}
+		if s == loadFailed {
+			return s.notice(name) + " · previous results"
+		}
+	}
+	return s.notice(name)
+}

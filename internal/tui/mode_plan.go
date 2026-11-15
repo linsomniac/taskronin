@@ -44,13 +44,15 @@ func freeSlots(blocks []api.Block, from int) []slot {
 }
 
 type planMode struct {
-	step         int
-	deck         *cardDeck
-	list         taskList
-	blocks       []api.Block
-	step2Blocked int
-	backlogState loadState
-	blocksState  loadState
+	step          int
+	deck          *cardDeck
+	list          taskList
+	blocks        []api.Block
+	step2Blocked  int
+	backlogState  loadState
+	blocksState   loadState
+	backlogLoaded bool
+	blocksLoaded  bool
 }
 
 func newPlanMode() *planMode { return &planMode{step: 1, deck: &cardDeck{}} }
@@ -112,6 +114,7 @@ func (s *planMode) update(a *App, msg tea.Msg) tea.Cmd {
 			return s.backlogState.finish(a, m.err)
 		}
 		s.list.set(m.tasks)
+		s.backlogLoaded = true
 		s.backlogState.finish(a, nil)
 	case blocksMsg:
 		if !a.latest("plan-blocks", m.req) {
@@ -121,6 +124,7 @@ func (s *planMode) update(a *App, msg tea.Msg) tea.Cmd {
 			return s.blocksState.finish(a, m.err)
 		}
 		s.blocks = m.blocks
+		s.blocksLoaded = true
 		s.blocksState.finish(a, nil)
 	}
 	return nil
@@ -202,7 +206,7 @@ func (s *planMode) openBlockToday(a *App, t api.Task) tea.Cmd {
 }
 
 func (s *planMode) freeText(a *App) string {
-	if s.blocksState != loadLoaded {
+	if !s.blocksLoaded {
 		return s.blocksState.notice("blocks")
 	}
 	from := a.clock.Now.Hour()*60 + a.clock.Now.Minute()
@@ -226,18 +230,28 @@ func (s *planMode) view(a *App, w, h int) string {
 		leftWidth := max(0, w/2)
 		rightWidth := max(0, w-leftWidth-3)
 		left := []string{a.line("Backlog top 10", leftWidth)}
-		switch {
-		case s.backlogState == loadFailed:
-			left = append(left, a.line(s.backlogState.notice("backlog"), leftWidth))
-		case s.backlogState != loadLoaded:
-			left = append(left, a.line("loading backlog…", leftWidth))
-		case len(s.list.items) == 0:
+		if notice := s.backlogState.retainedNotice("backlog", s.backlogLoaded); notice != "" {
+			left = append(left, a.line(notice, leftWidth))
+		}
+		if s.backlogLoaded && len(s.list.items) == 0 {
 			left = append(left, a.line("backlog is empty", leftWidth))
-		default:
-			body := s.list.render(a, leftWidth, max(0, h-2), func(t api.Task, width int) string { return taskRow(a, t, width) })
+		} else {
+			body := s.list.render(a, leftWidth, max(0, h-1-len(left)), func(t api.Task, width int) string { return taskRow(a, t, width) })
 			left = append(left, strings.Split(body, "\n")...)
 		}
-		left[0] += strings.Repeat(" ", max(0, leftWidth-lipgloss.Width(left[0]))+3) + a.line(s.freeText(a), rightWidth)
+		right := []string{}
+		if notice := s.blocksState.retainedNotice("blocks", s.blocksLoaded); notice != "" {
+			right = append(right, notice)
+		}
+		if s.blocksLoaded {
+			right = append(right, s.freeText(a))
+		}
+		for i, text := range right {
+			if i == len(left) {
+				left = append(left, "")
+			}
+			left[i] += strings.Repeat(" ", max(0, leftWidth-lipgloss.Width(left[i]))+3) + a.line(text, rightWidth)
+		}
 		lines := []string{a.line("Plan 2/3 · j/k/↑/↓ move · B block today · enter summary", w)}
 		lines = append(lines, left...)
 		return clip(lines, w, h)
@@ -252,7 +266,7 @@ func (s *planMode) view(a *App, w, h int) string {
 		a.line("Today's blocks · "+a.clock.Today.String(), w),
 	}
 	if s.blocksState != loadLoaded {
-		lines = append(lines, a.line(s.freeText(a), w))
+		lines = append(lines, a.line(s.blocksState.notice("blocks"), w))
 	} else if len(s.blocks) == 0 {
 		lines = append(lines, a.line("no blocks today", w))
 	}

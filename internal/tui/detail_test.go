@@ -48,7 +48,7 @@ func TestDetailOverlay(t *testing.T) {
 	press(t, a, "t")
 	typeText(t, a, "+db -old x")
 	press(t, a, "enter")
-	eq(t, f.mustLast(t, "UpdateTask"), call{Method: "UpdateTask", ID: 42, Mut: client.Mut{IfMatch: "g-42"}, Req: api.UpdateTaskRequest{TagsAdd: []string{"db", "x"}, TagsRemove: []string{"old"}}})
+	eq(t, f.mustLast(t, "UpdateTask"), call{Method: "UpdateTask", ID: 42, Mut: client.Mut{Key: freshFormKey(t, f, "UpdateTask"), IfMatch: "g-42"}, Req: api.UpdateTaskRequest{TagsAdd: []string{"db", "x"}, TagsRemove: []string{"old"}}})
 	eq(t, a.form, nil)
 	press(t, a, "h")
 	eq(t, f.mustLast(t, "TaskHistory"), call{Method: "TaskHistory", ID: 42, Q: client.PageQuery{Limit: 100}})

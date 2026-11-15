@@ -246,13 +246,13 @@ func (a *App) handleKey(k tea.KeyPressMsg) tea.Cmd {
 	if binding.Matches(k, a.keys.ForceQuit) {
 		return a.quit()
 	}
-	if binding.Matches(k, a.keys.Quit) && a.inflight {
-		a.setBanner(bannerInfo, "busy… (ctrl+c forces)")
-		return nil
-	}
 	if a.form != nil {
 		cmd, _ := a.form.handle(a, k)
 		return cmd
+	}
+	if binding.Matches(k, a.keys.Quit) && a.inflight {
+		a.setBanner(bannerInfo, "busy… (ctrl+c forces)")
+		return nil
 	}
 	if binding.Matches(k, a.keys.Escape) && len(a.draftPaths) > 0 {
 		a.draftPaths, a.banner = nil, banner{}

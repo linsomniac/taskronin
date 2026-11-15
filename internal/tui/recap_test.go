@@ -123,7 +123,7 @@ func TestRecapLinkUnlinked(t *testing.T) { // RCP-09 (TUI side).
 				}
 				return
 			}
-			eq(t, f.mustLast(t, "RelinkEntry"), call{Method: "RelinkEntry", ID: 6, Mut: client.Mut{IfMatch: "e-6"}, Req: api.RelinkRequest{TaskID: api.Opt[int64]{Set: true, V: 1}}})
+			eq(t, f.mustLast(t, "RelinkEntry"), call{Method: "RelinkEntry", ID: 6, Mut: client.Mut{Key: freshFormKey(t, f, "RelinkEntry"), IfMatch: "e-6"}, Req: api.RelinkRequest{TaskID: api.Opt[int64]{Set: true, V: 1}}})
 			eq(t, f.count("Day"), reads+1)
 		})
 	}
