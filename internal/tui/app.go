@@ -123,6 +123,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			return a, a.handleReadErr(msg.err)
 		}
+		if a.banner.readError {
+			a.banner = banner{}
+		}
 		if !msg.notModified && msg.today != nil {
 			a.today, a.todayETag, a.clock = msg.today, msg.etag, msg.today.Clock
 		}
@@ -143,11 +146,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.appendBanner("⚠ " + warning)
 			}
 		}
-		refresh := a.refresh()
+		var after tea.Cmd
 		if msg.after != nil {
-			return a, tea.Batch(refresh, msg.after(a, msg.resp))
+			after = msg.after(a, msg.resp)
 		}
-		return a, refresh
+		return a, tea.Batch(a.refresh(), after)
 	}
 
 	var cmds []tea.Cmd
@@ -182,7 +185,9 @@ func (a *App) handleKey(k tea.KeyPressMsg) tea.Cmd {
 	} else if a.mode != ModeTabs && binding.Matches(k, a.keys.Quit, a.keys.Escape) {
 		return a.exitMode()
 	}
-	// List navigation aliases do not rewrite prompt input or card-mode keys.
+	// AIDEV-NOTE: arrow aliases apply only to lists in tabs/overlays. In card
+	// modes k keeps a task, so rewriting up to k could mutate data. Forms
+	// receive their original keys above.
 	if a.mode == ModeTabs || len(a.overlays) > 0 {
 		switch k.String() {
 		case "up":
@@ -206,9 +211,9 @@ func (a *App) handleKey(k tea.KeyPressMsg) tea.Cmd {
 	if a.mode != ModeTabs || len(a.overlays) > 0 {
 		return nil
 	}
-	switch k.String() {
+	switch s := k.String(); s {
 	case "1", "2", "3", "4", "5":
-		a.tab = Tab(k.Code - '1')
+		a.tab = Tab(s[0] - '1')
 	case "tab":
 		a.tab = (a.tab + 1) % Tab(len(a.tabs))
 	case "shift+tab":
@@ -227,7 +232,7 @@ func (a *App) quit() tea.Cmd { a.quitting = true; return tea.Quit }
 func (a *App) View() tea.View {
 	w, h := a.width, a.height
 	footer := a.help.View(a.keys)
-	if a.banner.text != "" {
+	if a.banner.text != "" && !a.help.ShowAll {
 		style := a.styles.Info
 		if a.banner.kind == bannerError {
 			style = a.styles.Err
@@ -261,6 +266,8 @@ func (a *App) current() screen {
 	return a.tabs[a.tab]
 }
 
+// AIDEV-NOTE: allocate request IDs while creating commands, never inside their
+// closures. Creation order defines latest even when commands execute out of order.
 func (a *App) nextReq(target string) int          { a.reqSeq[target]++; return a.reqSeq[target] }
 func (a *App) latest(target string, req int) bool { return a.reqSeq[target] == req }
 

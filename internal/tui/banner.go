@@ -21,8 +21,9 @@ const (
 )
 
 type banner struct {
-	kind bannerKind
-	text string
+	kind      bannerKind
+	text      string
+	readError bool // Cleared by a newer successful read, unlike mutation banners.
 }
 
 func (a *App) setBanner(k bannerKind, text string) {
@@ -44,15 +45,17 @@ func (a *App) handleReadErr(err error) tea.Cmd {
 	// AIDEV-NOTE: reads cannot have saved a mutation. An unanswered read must
 	// not refresh itself forever; the next poll or explicit load can retry.
 	var unknown *client.OutcomeUnknownError
+	var cmd tea.Cmd
 	switch {
 	case errors.As(err, &unknown):
 		a.setBanner(bannerError, "server did not answer")
 	case errors.Is(err, client.ErrNotSent):
 		a.setBanner(bannerError, "cannot reach the Taskronin server")
 	default:
-		return a.handleErr(err)
+		cmd = a.handleErr(err)
 	}
-	return nil
+	a.banner.readError = true
+	return cmd
 }
 
 func (a *App) handleErr(err error) tea.Cmd {
@@ -89,6 +92,15 @@ func (a *App) handleErr(err error) tea.Cmd {
 					fields = append(fields, e.Field+": "+e.Message)
 				}
 				detail += " (" + strings.Join(fields, "; ") + ")"
+			}
+			if detail == "" {
+				detail = problem.Problem.Title
+			}
+			if detail == "" {
+				detail = problem.Problem.Code
+			}
+			if detail == "" {
+				detail = fmt.Sprintf("HTTP %d", problem.Status)
 			}
 			a.setBanner(bannerError, detail)
 		}

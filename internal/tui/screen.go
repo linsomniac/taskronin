@@ -49,6 +49,11 @@ func ParseTab(s string) (Tab, error) {
 	}
 }
 
+// AIDEV-NOTE: screen methods use App synchronously on the model goroutine.
+// Returned tea.Cmd closures run off the Update goroutine: capture their inputs
+// (client, context, request values/IDs) and never read or mutate *App from them.
+// Loads allocate nextReq when constructing the command and handle errors through
+// handleReadErr in update; mutations go through mutate/handleErr.
 type screen interface {
 	load(a *App) tea.Cmd
 	handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool)
