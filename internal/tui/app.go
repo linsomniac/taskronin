@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"os/exec"
 	"strings"
 	"time"
@@ -129,11 +130,23 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !msg.notModified && msg.today != nil {
 			a.today, a.todayETag, a.clock = msg.today, msg.etag, msg.today.Clock
 		}
+		// Only accepted, successful reads may refresh a form's implicit link.
+		if a.form != nil {
+			return a, a.form.update(a, msg)
+		}
 		return a, nil
 	case opMsg:
 		a.inflight = false
 		if msg.err != nil {
-			cmd := a.handleErr(msg.err)
+			var cmd tea.Cmd
+			var read *formReadError
+			// AIDEV-NOTE: a form's clock/identity preflight is a read even though
+			// it runs under the mutation guard. It cannot have saved this attempt.
+			if errors.As(msg.err, &read) {
+				cmd = a.handleReadErr(read.err)
+			} else {
+				cmd = a.handleErr(msg.err)
+			}
 			if msg.onErr != nil {
 				msg.onErr(a, msg.err)
 			}
@@ -207,7 +220,13 @@ func (a *App) handleKey(k tea.KeyPressMsg) tea.Cmd {
 		a.banner = banner{}
 		return nil
 	}
-	// Capture/log/search/undo/redo and AI are installed by later tasks.
+	if binding.Matches(k, a.keys.Add) {
+		return a.openAdd()
+	}
+	if binding.Matches(k, a.keys.Log) {
+		return a.openLog(a.clock.Today, a.logLink())
+	}
+	// Search/undo/redo and AI are installed by later tasks.
 	if a.mode != ModeTabs || len(a.overlays) > 0 {
 		return nil
 	}
