@@ -31,14 +31,15 @@ func TestExpect(t *testing.T) {
 }
 
 func TestSafeReturn(t *testing.T) {
-	for _, value := range []string{"/ui/", "/ui/backlog", "/ui/log?from=2026-10-20&to=2026-10-28", "/ui/tasks/42#entries"} {
+	for _, value := range []string{"/ui/", "/ui/backlog", "/ui/log?from=2026-10-20&to=2026-10-28", "/ui/tasks/42#entries", "/ui/" + strings.Repeat("a", 2044)} {
 		if got := web.SafeReturn(value); got != value {
 			t.Errorf("SafeReturn(%q) = %q", value, got)
 		}
 	}
 	for _, value := range []string{"", "https://evil.example/", "//evil.example/ui/", `/\evil.example`, "javascript:alert(1)",
 		"/api/v1/tasks", "/ui/../api/v1/tasks", "/static/app.css", "/ui/\r\nSet-Cookie: x=1", "ui/backlog",
-		"/ui/%2e%2e/api/v1/tasks", "/ui/%5cevil", "/ui/%0d%0aX:1"} {
+		"/ui/%2e%2e/api/v1/tasks", "/ui/%5cevil", "/ui/%0d%0aX:1", "/ui/\ttab", `\/evil`, "%2f%2fevil", "/ui/..",
+		"/ui/" + strings.Repeat("a", 2045)} {
 		if got := web.SafeReturn(value); got != "/ui/" {
 			t.Errorf("SafeReturn(%q) = %q, want fallback", value, got)
 		}

@@ -242,6 +242,9 @@ func TestBodyLimitHTMX(t *testing.T) {
 		ta.H.ServeHTTP(w, r)
 		assertHTMXError(t, w, tc.code)
 		assertInert(t, w.Body.String())
+		if len(scrapeForms(t, w.Body.String(), "/ui/tasks")) != 0 {
+			t.Error("body-limit error before session middleware must not offer a resubmit form")
+		}
 		if strings.Contains(w.Body.String(), "pw-SECRET-zz9") || strings.Contains(ta.Logs.String(), "pw-SECRET-zz9") {
 			t.Error("body-limit password leaked")
 		}
@@ -328,5 +331,131 @@ func TestRenderErrorSanitizesDiagnostics(t *testing.T) {
 	ta.App.RenderError(w, r, de)
 	if strings.Contains(w.Body.String(), "private") || strings.Contains(ta.Logs.String(), "pw-SECRET-zz9") || !strings.Contains(ta.Logs.String(), "private�� diagnostic [redacted]") {
 		t.Errorf("unsafe diagnostic: body=%s logs=%s", w.Body, ta.Logs)
+	}
+}
+
+func TestRenderErrorServerRetryKeepsNonce(t *testing.T) {
+	ta := newTestApp(t)
+	const nonce = "0123456789abcdef0123456789abcdef"
+	const explanation = "Try again resends the same request — if it was already saved, it will not be saved twice."
+	for _, path := range []string{"/ui/undo", "/ui/redo", "/ui/tasks"} {
+		for _, code := range []domain.Code{domain.CodeBusy, domain.CodeInternal} {
+			for _, hx := range []string{"", "true"} {
+				t.Run(path+"/"+string(code)+"/hx="+hx, func(t *testing.T) {
+					form := url.Values{"_nonce": {nonce}, "_gen": {"0123456789abcdef"}, "_return": {"/ui/triage"}, "password": {"pw-SECRET-zz9"}}
+					if path == "/ui/tasks" {
+						form.Set("title", "typed title")
+						form.Set("notes", "line1\nline2")
+					}
+					r := errorPost(t, form)
+					r.URL.Path = path
+					r.Header.Set("HX-Request", hx)
+					w := httptest.NewRecorder()
+					ta.App.RenderError(w, r, domain.Errorf(code, "failed"))
+					got := scrapeForm(t, w.Body.String(), path)
+					if !reflect.DeepEqual(got["_nonce"], []string{nonce}) {
+						t.Errorf("retry nonce = %v, want submitted key", got["_nonce"])
+					}
+					for _, key := range []string{"title", "notes", "_gen", "_return"} {
+						if !reflect.DeepEqual(got[key], form[key]) {
+							t.Errorf("retry %s = %v, want %v", key, got[key], form[key])
+						}
+					}
+					if !strings.Contains(nodeText(parseHTML(t, w.Body.String())), explanation) {
+						t.Error("missing same-request retry explanation")
+					}
+					if !resubmitHasButton(t, w.Body.String(), path) {
+						t.Error("same-key retry has no submit button")
+					}
+					walkHTML(parseHTML(t, w.Body.String()), func(n *html.Node) {
+						if (attr(n, "name") == "title" || attr(n, "name") == "notes") && hasAttr(n, "readonly") {
+							t.Error("server-error input is read-only")
+						}
+					})
+					logout := scrapeForm(t, w.Body.String(), "/ui/logout")
+					if logout.Get("_nonce") == nonce {
+						t.Error("retry key leaked into a different action's form")
+					}
+					if got.Has("password") || strings.Contains(w.Body.String(), "pw-SECRET-zz9") {
+						t.Error("retry exposed password")
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestRenderErrorRetryFreshNonce(t *testing.T) {
+	ta := newTestApp(t)
+	for _, tc := range []struct {
+		name, nonce string
+		code        domain.Code
+	}{
+		{"validation", strings.Repeat("a", 32), domain.CodeValidation},
+		{"edited retry", strings.Repeat("a", 32), domain.CodeIdemMismatch},
+		{"missing", "", domain.CodeBusy}, {"short", strings.Repeat("a", 31), domain.CodeBusy},
+		{"long", strings.Repeat("a", 33), domain.CodeBusy}, {"uppercase", strings.Repeat("A", 32), domain.CodeBusy},
+		{"nonhex", strings.Repeat("g", 32), domain.CodeInternal},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, path := range []string{"/ui/tasks", "/ui/undo", "/ui/redo"} {
+				r := errorPost(t, url.Values{"_nonce": {tc.nonce}, "title": {"edited title"}})
+				r.URL.Path = path
+				w := httptest.NewRecorder()
+				ta.App.RenderError(w, r, domain.Errorf(tc.code, "failed"))
+				got := scrapeForm(t, w.Body.String(), path)
+				if len(got["_nonce"]) != 1 || !regexp.MustCompile(`^[0-9a-f]{32}$`).MatchString(got.Get("_nonce")) || got.Get("_nonce") == tc.nonce {
+					t.Errorf("%s nonce = %v, want fresh lowercase hex", path, got["_nonce"])
+				}
+				wantButton := web.StatusFor(tc.code) < 500 || path == "/ui/tasks"
+				if resubmitHasButton(t, w.Body.String(), path) != wantButton {
+					t.Errorf("%s retry button present, want %v", path, wantButton)
+				}
+				if tc.code == domain.CodeIdemMismatch && !strings.Contains(nodeText(parseHTML(t, w.Body.String())), "earlier attempt may have been saved") {
+					t.Error("idempotency mismatch must warn about the earlier attempt")
+				}
+			}
+		})
+	}
+}
+
+func resubmitHasButton(t *testing.T, body, action string) bool {
+	t.Helper()
+	found := false
+	walkHTML(parseHTML(t, body), func(n *html.Node) {
+		if n.Type == html.ElementNode && n.Data == "form" && attr(n, "action") == action {
+			walkHTML(n, func(control *html.Node) {
+				if control.Type == html.ElementNode && control.Data == "button" && attr(control, "type") == "submit" {
+					found = true
+				}
+			})
+		}
+	})
+	return found
+}
+
+func TestRenderErrorEscapedAction(t *testing.T) {
+	ta := newTestApp(t)
+	r := errorPost(t, url.Values{"title": {"typed title"}})
+	var err error
+	r.URL, err = url.Parse("/ui/tasks/4%3Fx%23y/edit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	ta.App.RenderError(w, r, domain.Errorf(domain.CodeNotFound, "not found"))
+	got := scrapeForm(t, w.Body.String(), "/ui/tasks/4%3Fx%23y/edit")
+	if got.Get("title") != "typed title" {
+		t.Error("escaped-action input lost")
+	}
+}
+
+func TestRenderErrorWithoutSessionOmitsResubmit(t *testing.T) {
+	ta := newTestApp(t)
+	r := errorPost(t, url.Values{"title": {"typed title"}, "_nonce": {strings.Repeat("a", 32)}}).WithContext(t.Context())
+	w := httptest.NewRecorder()
+	ta.App.RenderError(w, r, domain.Errorf(domain.CodeBusy, "busy"))
+	if len(scrapeForms(t, w.Body.String(), "/ui/tasks")) != 0 {
+		t.Error("sessionless error must not offer a resubmit form")
 	}
 }

@@ -95,6 +95,8 @@ func (a *app) bodyLimit(next http.Handler) http.Handler {
 			if status := parsePostForm(w, r); status != 0 {
 				// AIDEV-NOTE: Plan D DF10 routes htmx form errors through
 				// renderError so the fixed htmx config displays the failure.
+				// This runs before session middleware; renderError omits resubmit
+				// when no session exists, rather than offering an empty CSRF token.
 				if r.Header.Get("HX-Request") == "true" {
 					code := domain.CodeMalformed
 					switch status {

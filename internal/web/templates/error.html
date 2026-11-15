@@ -7,6 +7,9 @@
 {{else}}
 <p>{{.Err.Detail}}</p>
 {{end}}
+{{if eq .Err.Code "idempotency_mismatch"}}
+<p>The earlier attempt may have been saved. Check before sending the edited input as a new request.</p>
+{{end}}
 {{if .Err.Fields}}
 <ul>{{range .Err.Fields}}<li>{{.Field}}: {{.Message}}</li>{{end}}</ul>
 {{end}}
@@ -15,8 +18,14 @@
 {{end}}
 {{with .Resubmit}}
 <h2>{{if $stale}}Your input — reload, then paste{{else}}Your input{{end}}</h2>
+{{if .Nonce}}<p>Try again resends the same request — if it was already saved, it will not be saved twice.</p>{{end}}
 <form method="post" action="{{.Action}}">
+{{if .Nonce}}
+<input type="hidden" name="_csrf" value="{{$.CSRF}}">
+<input type="hidden" name="_nonce" value="{{.Nonce}}">
+{{else}}
 {{template "csrfnonce" $}}
+{{end}}
 {{range $key, $values := .Keep}}{{range $values}}
 <input type="hidden" name="{{$key}}" value="{{.}}">
 {{end}}{{end}}
@@ -26,7 +35,7 @@
 {{.Value}}</textarea>{{else}}<input type="text" name="{{.Name}}" value="{{.Value}}"{{if $stale}} readonly{{end}}>{{end}}
 </label></p>
 {{end}}
-{{if not $stale}}<button type="submit">Try again</button>{{end}}
+{{if and (not $stale) .CanRetry}}<button type="submit">Try again</button>{{end}}
 </form>
 {{end}}
 </section>

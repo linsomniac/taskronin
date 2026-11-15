@@ -2,6 +2,7 @@ package web_test
 
 import (
 	"bytes"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -155,7 +156,12 @@ func scrapeForms(t *testing.T, body, action string) []url.Values {
 			}
 			switch n.Data {
 			case "input":
-				typ := attr(n, "type")
+				typ := strings.ToLower(attr(n, "type"))
+				switch typ {
+				case "submit", "button", "reset", "image", "file":
+					// No control was clicked, and no file was selected by this helper.
+					return
+				}
 				if (typ != "checkbox" && typ != "radio") || hasAttr(n, "checked") {
 					form.Add(name, attr(n, "value"))
 				}
@@ -189,6 +195,15 @@ func scrapeForm(t *testing.T, body, action string) url.Values {
 
 func assertInert(t *testing.T, body string) {
 	t.Helper()
+	for _, problem := range inertErrors(t, body) {
+		t.Error(problem)
+	}
+}
+
+func inertErrors(t *testing.T, body string) []string {
+	t.Helper()
+	var problems []string
+	urlSpace := strings.NewReplacer("\t", "", "\n", "", "\r", "")
 	scripts := 0
 	walkHTML(parseHTML(t, body), func(n *html.Node) {
 		if n.Type != html.ElementNode {
@@ -198,27 +213,31 @@ func assertInert(t *testing.T, body string) {
 		case "script":
 			scripts++
 			if attr(n, "src") != "/static/"+web.HTMXAsset || nodeText(n) != "" {
-				t.Error("unexpected script")
+				problems = append(problems, "unexpected script")
 			}
-		case "img", "iframe", "object":
-			t.Errorf("unsafe element %s", n.Data)
+		case "img", "iframe", "embed", "base", "object":
+			problems = append(problems, fmt.Sprintf("unsafe element %s", n.Data))
 		}
 		for _, a := range n.Attr {
 			if strings.HasPrefix(a.Key, "on") {
-				t.Errorf("event attribute %s", a.Key)
+				problems = append(problems, fmt.Sprintf("event attribute %s", a.Key))
 			}
 			switch a.Key {
+			case "srcdoc":
+				problems = append(problems, "unsafe srcdoc attribute")
 			case "href", "src", "action", "formaction":
-				value := strings.ToLower(strings.TrimSpace(a.Val))
-				if strings.HasPrefix(value, "javascript:") || strings.HasPrefix(value, "data:") {
-					t.Errorf("unsafe %s = %q", a.Key, a.Val)
+				value := strings.ToLower(strings.TrimSpace(urlSpace.Replace(a.Val)))
+				if strings.HasPrefix(value, "javascript:") || strings.HasPrefix(value, "vbscript:") || strings.HasPrefix(value, "data:") {
+					problems = append(problems, fmt.Sprintf("unsafe %s = %q", a.Key, a.Val))
 				}
 			}
 		}
 	})
 	if scripts != 1 {
-		t.Errorf("script count = %d, want only htmx", scripts)
+		problems = append(problems, fmt.Sprintf("script count = %d, want only htmx", scripts))
 	}
+
+	return problems
 }
 
 func TestHarnessRequestsAndForms(t *testing.T) {
@@ -265,5 +284,37 @@ second</textarea><select name="priority"><option value="H">High</option><option 
 	want := []url.Values{{"tag": {"a", "b"}, "yes": {"1"}, "pick": {"b"}, "notes": {"\nfirst\nsecond"}, "priority": {"L"}}, {"id": {"42"}}}
 	if !reflect.DeepEqual(forms, want) {
 		t.Errorf("scraped forms = %#v", forms)
+	}
+}
+
+func TestAssertInertBrowserURLsAndElements(t *testing.T) {
+	const script = `<script src="/static/htmx-2.0.11.min.js"></script>`
+	for _, unsafe := range []string{
+		"<a href=\"java\tscript:alert(1)\">x</a>", "<a href=\"java\nscript:alert(1)\">x</a>",
+		"<form action=\"java\rscript:alert(1)\"></form>", `<button formaction="java&#9;script:alert(1)">x</button>`,
+		`<a href=" VBSCRIPT:msgbox(1)">x</a>`, `<a href="data:text/html,x">x</a>`,
+		`<embed src="/x">`, `<base href="/x">`, `<object data="/x"></object>`,
+		`<div srcdoc="&lt;script&gt;x&lt;/script&gt;"></div>`,
+	} {
+		t.Run(unsafe, func(t *testing.T) {
+			if problems := inertErrors(t, script+unsafe); len(problems) == 0 {
+				t.Error("inert check accepted an active URL, element, or srcdoc attribute")
+			}
+		})
+	}
+	if problems := inertErrors(t, script+`<p>javascript: vbscript: data: &lt;embed&gt;</p><a href="/ui/">safe</a>`); len(problems) != 0 {
+		t.Errorf("inert text rejected: %v", problems)
+	}
+}
+
+func TestScrapeFormsSkipsInactiveControls(t *testing.T) {
+	form := scrapeForm(t, `<form action="/ui/test">
+<input name="title" value="kept"><input type="hidden" name="id" value="42">
+<input type="submit" name="submit" value="bad"><input type="BUTTON" name="button" value="bad">
+<input type="reset" name="reset" value="bad"><input type="image" name="image" value="bad">
+<input type="file" name="file" value="bad"><button name="clicked" value="bad">Click</button>
+</form>`, "/ui/test")
+	if want := (url.Values{"title": {"kept"}, "id": {"42"}}); !reflect.DeepEqual(form, want) {
+		t.Errorf("scraped inactive controls: %v", form)
 	}
 }

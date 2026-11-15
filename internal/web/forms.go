@@ -42,7 +42,7 @@ func (a *app) expect(form url.Values, key string) (domain.Expect, error) {
 func safeReturn(raw string) string {
 	// AIDEV-NOTE: Open-redirect guard: only local /ui/ targets survive.
 	// Check the decoded path too, so escaped traversal/backslashes cannot bypass it.
-	if !strings.HasPrefix(raw, "/ui/") || strings.ContainsAny(raw, "\r\n\\") {
+	if len(raw) > 2048 || !strings.HasPrefix(raw, "/ui/") || strings.ContainsAny(raw, "\r\n\\") {
 		return "/ui/"
 	}
 	u, err := url.Parse(raw)

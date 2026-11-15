@@ -2,7 +2,9 @@ package web_test
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
@@ -20,9 +22,6 @@ import (
 )
 
 func TestTemplatesLint(t *testing.T) {
-	script := `<script src="/static/htmx-2.0.11.min.js"></script>`
-	forms := regexp.MustCompile(`(?s)<form\b[^>]*method="post"[^>]*>.*?</form>`)
-	events := regexp.MustCompile(`(?i)\son[a-z]+\s*=`)
 	err := fs.WalkDir(web.TemplateFS, "templates", func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -34,51 +33,73 @@ func TestTemplatesLint(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		source := string(data)
-		lower := strings.ToLower(source)
-		for _, forbidden := range []string{"<style", "style=", "hx-on", "javascript:"} {
-			if strings.Contains(lower, forbidden) {
-				t.Errorf("%s contains %q", path, forbidden)
-			}
-		}
-		if events.MatchString(source) {
-			t.Errorf("%s contains an event attribute", path)
-		}
-		withoutScript := source
-		if path == "templates/layout.html" {
-			if strings.Count(source, script) != 1 {
-				t.Error("layout must load exactly one pinned htmx script")
-			}
-			withoutScript = strings.ReplaceAll(source, script, "")
-			for _, required := range []string{
-				`<meta name="htmx-config" content='{"allowEval":false,"allowScriptTags":false,"selfRequestsOnly":true,"includeIndicatorStyles":false,"historyCacheSize":0,"refreshOnHistoryMiss":true}'>`,
-				`hx-boost="true"`, `hx-headers='{"X-CSRF-Token":"{{.CSRF}}"}'`, `href="/static/app.css?v={{.Version}}"`,
-			} {
-				if !strings.Contains(source, required) {
-					t.Errorf("layout lacks %s", required)
-				}
-			}
-		}
-		if strings.Contains(strings.ToLower(withoutScript), "<script") {
-			t.Errorf("%s has an unauthorized script", path)
-		}
-		for _, form := range forms.FindAllString(source, -1) {
-			if path == "templates/login.html" {
-				continue
-			}
-			if strings.Contains(form, `{{template "hidden" $}}`) || (path == "templates/partials.html" && strings.Contains(form, `{{template "hidden" .P}}`)) {
-				continue
-			}
-			if path == "templates/error.html" && strings.Contains(form, `{{template "csrfnonce" $}}`) {
-				continue
-			}
-			t.Errorf("%s form lacks the required hidden partial: %s", path, form)
+		for _, problem := range lintTemplate(path, string(data)) {
+			t.Error(problem)
 		}
 		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+func lintTemplate(path, source string) []string {
+	var problems []string
+	script := `<script src="/static/htmx-2.0.11.min.js"></script>`
+	forms := regexp.MustCompile(`(?i)<form\b[^>]*\bmethod\s*=\s*["']?post`)
+	formEnd := regexp.MustCompile(`(?i)</form\s*>`)
+	events := regexp.MustCompile(`(?i)[\s/"']on[a-z]+\s*=`)
+	styles := regexp.MustCompile(`(?i)[\s/"']style\s*=`)
+	lower := strings.ToLower(source)
+	for _, forbidden := range []string{"<style", "hx-on", "javascript:"} {
+		if strings.Contains(lower, forbidden) {
+			problems = append(problems, fmt.Sprintf("%s contains %q", path, forbidden))
+		}
+	}
+	if events.MatchString(source) {
+		problems = append(problems, fmt.Sprintf("%s contains an event attribute", path))
+	}
+	if styles.MatchString(source) {
+		problems = append(problems, fmt.Sprintf("%s contains an inline style", path))
+	}
+	withoutScript := source
+	if path == "templates/layout.html" {
+		if strings.Count(source, script) != 1 {
+			problems = append(problems, "layout must load exactly one pinned htmx script")
+		}
+		withoutScript = strings.ReplaceAll(source, script, "")
+		for _, required := range []string{
+			`<meta name="htmx-config" content='{"allowEval":false,"allowScriptTags":false,"selfRequestsOnly":true,"includeIndicatorStyles":false,"historyCacheSize":0,"refreshOnHistoryMiss":true}'>`,
+			`hx-boost="true"`, `hx-headers='{"X-CSRF-Token":"{{.CSRF}}"}'`, `href="/static/app.css?v={{.Version}}"`,
+		} {
+			if !strings.Contains(source, required) {
+				problems = append(problems, fmt.Sprintf("layout lacks %s", required))
+			}
+		}
+	}
+	if strings.Contains(strings.ToLower(withoutScript), "<script") {
+		problems = append(problems, fmt.Sprintf("%s has an unauthorized script", path))
+	}
+	for _, match := range forms.FindAllStringIndex(source, -1) {
+		form := source[match[0]:]
+		end := formEnd.FindStringIndex(form)
+		if end == nil {
+			problems = append(problems, fmt.Sprintf("%s has an unclosed POST form", path))
+			continue
+		}
+		form = form[:end[1]]
+		if path == "templates/login.html" {
+			continue
+		}
+		if strings.Contains(form, `{{template "hidden" $}}`) || (path == "templates/partials.html" && strings.Contains(form, `{{template "hidden" .P}}`)) {
+			continue
+		}
+		if path == "templates/error.html" && strings.Contains(form, `{{template "csrfnonce" $}}`) {
+			continue
+		}
+		problems = append(problems, fmt.Sprintf("%s form lacks the required hidden partial: %s", path, form))
+	}
+	return problems
 }
 
 func TestTemplateHelpersAndRowContext(t *testing.T) {
@@ -135,4 +156,48 @@ func TestTemplateHelpersAndRowContext(t *testing.T) {
 		t.Error("row and logout forms did not get independent nonces")
 	}
 	assertInert(t, body.String())
+}
+
+func TestTemplatesLintBrowserSyntax(t *testing.T) {
+	for _, source := range []string{
+		`<svg/onload="alert(1)"></svg>`, `<a href="x"onclick="alert(1)">x</a>`,
+		`<p style = "color:red">x</p>`, `<p title='x'style='color:red'>x</p>`,
+		`<form method="POST"></form>`, `<FORM method=post></FORM>`, `<form method = 'post'></form>`,
+		`<form method="post">{{template "hidden" $}}</form><form method=post></form>`,
+	} {
+		t.Run(source, func(t *testing.T) {
+			if problems := lintTemplate("templates/probe.html", source); len(problems) == 0 {
+				t.Error("lint accepted unsafe template syntax or a POST without hidden fields")
+			}
+		})
+	}
+	for _, source := range []string{
+		`<form method="POST">{{template "hidden" $}}</form>`,
+		`<FORM method=post>{{template "hidden" $}}</FORM>`,
+		`<form method = 'post'>{{template "hidden" $}}</form>`,
+	} {
+		if problems := lintTemplate("templates/probe.html", source); len(problems) != 0 {
+			t.Errorf("valid form rejected: %v", problems)
+		}
+	}
+}
+
+func TestHHMMRejectsUnsupportedTypes(t *testing.T) {
+	ta := newTestApp(t)
+	tmpl, err := ta.App.Template("error")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tmpl.Parse(`{{define "probe"}}{{hhmm .}}{{end}}`); err != nil {
+		t.Fatal(err)
+	}
+	minute := civil.Minute(545)
+	for _, value := range []any{545, "09:05", &minute, sql.Null[civil.Minute]{V: minute, Valid: true}, nil} {
+		t.Run(fmt.Sprintf("%T", value), func(t *testing.T) {
+			var body bytes.Buffer
+			if err := tmpl.ExecuteTemplate(&body, "probe", value); err == nil {
+				t.Error("hhmm silently accepted an unsupported type")
+			}
+		})
+	}
 }

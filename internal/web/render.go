@@ -34,9 +34,11 @@ type page struct {
 }
 
 type resubmit struct {
-	Action string
-	Keep   url.Values
-	Fields []resubmitField
+	Action   string
+	Nonce    string // A valid submitted key reused only after a server error.
+	CanRetry bool
+	Keep     url.Values
+	Fields   []resubmitField
 }
 
 type resubmitField struct {
@@ -75,14 +77,14 @@ func (a *app) parseTemplates() error {
 		"day": func(d civil.Date) string {
 			return d.Weekday().String()[:3] + " " + d.String()
 		},
-		"hhmm": func(v any) string {
+		"hhmm": func(v any) (string, error) {
 			switch m := v.(type) {
 			case civil.Minute:
-				return m.String()
+				return m.String(), nil
 			case civil.EndMinute:
-				return m.String()
+				return m.String(), nil
 			default:
-				return ""
+				return "", fmt.Errorf("hhmm: unsupported type %T", v)
 			}
 		},
 		"wall":     func(t time.Time) string { return t.In(a.o.Zone.Location()).Format("Mon 2006-01-02 15:04") },
@@ -186,10 +188,11 @@ func (a *app) renderError(w http.ResponseWriter, r *http.Request, err error) {
 		}
 		w.Header().Set("Retry-After", strconv.FormatInt(int64(seconds), 10))
 	}
-	if r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/ui/") &&
+	_, hasSession := sessionFrom(r.Context())
+	if hasSession && r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/ui/") &&
 		r.URL.Path != "/ui/login" && r.URL.Path != "/ui/logout" &&
 		de.Code != domain.CodeUnauthenticated && de.Code != domain.CodeForbidden {
-		p.Resubmit = submittedInput(r)
+		p.Resubmit = submittedInput(r, status)
 	}
 	// AIDEV-NOTE: The fixed htmx config does not swap 4xx/5xx bodies. Return
 	// a visible error page with 200 for boosted requests, without changing history.
@@ -202,11 +205,23 @@ func (a *app) renderError(w http.ResponseWriter, r *http.Request, err error) {
 	a.renderPage(w, r, status, "error", p)
 }
 
-func submittedInput(r *http.Request) *resubmit {
+func submittedInput(r *http.Request, status int) *resubmit {
 	// AIDEV-NOTE: Never lose typed text on an error. Preserve original gen/ETags
 	// for stale detection; stale input is copyable/read-only, never offered to retry.
-	// Passwords and old CSRF/nonces are excluded; the template makes fresh tokens.
-	input := &resubmit{Action: r.URL.Path, Keep: make(url.Values)}
+	// DF25: a 5xx can follow commit (service/op.go), so reuse a valid nonce to
+	// replay rather than duplicate the op. Without it, do not offer undo/redo retry.
+	// 4xx/invalid keys get fresh nonces; passwords and old CSRF are never echoed.
+	input := &resubmit{Action: r.URL.EscapedPath(), CanRetry: true, Keep: make(url.Values)}
+	if status >= http.StatusInternalServerError {
+		nonce := r.PostForm.Get("_nonce")
+		// OpID's codec accepts exactly the nonce format: 32 lowercase hex.
+		if _, err := domain.ParseOpID(nonce); err == nil {
+			input.Nonce = nonce
+		}
+		if input.Nonce == "" && (r.URL.Path == "/ui/undo" || r.URL.Path == "/ui/redo") {
+			input.CanRetry = false
+		}
+	}
 	keys := make([]string, 0, len(r.PostForm))
 	for key := range r.PostForm {
 		keys = append(keys, key)
