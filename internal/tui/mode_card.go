@@ -23,8 +23,7 @@ type cardDeck struct {
 	placedIDs                map[int64]bool // Includes bulk-accepted tasks never presented.
 	skipped, placed, blocked int
 	startID                  int64
-	loaded, loadFailed       bool
-	form                     *form // The card form whose captured ETag may become stale.
+	state                    loadState
 }
 
 func (d *cardDeck) refill(tasks []api.Task) {
@@ -51,7 +50,7 @@ func (d *cardDeck) refill(tasks []api.Task) {
 	}
 	d.startID = 0
 	d.markCurrent()
-	d.loaded, d.loadFailed = true, false
+	d.state = loadLoaded
 }
 
 func (d *cardDeck) current() (api.Task, bool) {
@@ -87,7 +86,7 @@ func (d *cardDeck) selectNext(start int) {
 		}
 	}
 	d.idx = len(d.queue)
-	d.loaded, d.loadFailed = false, false
+	d.state = loadLoading
 }
 
 func (d *cardDeck) advance() {
@@ -123,7 +122,6 @@ func (d *cardDeck) placedOK(blocked bool) func(*App, *api.OpResponse) tea.Cmd {
 		if t, ok := d.current(); ok {
 			d.markPlaced(t.ID)
 		}
-		d.form = nil
 		d.advance()
 		// App refreshes the visible screen after every successful op, including
 		// the final card. The owning mode refills its deck from that read.
@@ -132,10 +130,7 @@ func (d *cardDeck) placedOK(blocked bool) func(*App, *api.OpResponse) tea.Cmd {
 }
 
 func (d *cardDeck) load(a *App, target, view string) tea.Cmd {
-	if _, ok := d.current(); !ok {
-		d.loaded = false
-	}
-	d.loadFailed = false
+	d.state = loadLoading
 	return a.loadTasks(target, view)
 }
 
@@ -147,9 +142,9 @@ func (d *cardDeck) update(a *App, msg tea.Msg, target string) tea.Cmd {
 			return nil
 		}
 		if m.err != nil {
-			d.loaded, d.loadFailed = false, true
-			return a.handleReadErr(m.err)
+			return d.state.finish(a, m.err)
 		}
+		d.state.finish(a, nil)
 		for _, t := range m.tasks {
 			d.replace(t)
 		}
@@ -168,12 +163,6 @@ func (d *cardDeck) update(a *App, msg tea.Msg, target string) tea.Cmd {
 			problem.Problem.Code == "generation_mismatch" {
 			return nil
 		}
-		// A definitive refusal ends this form attempt. Closing only our own
-		// form makes the next explicit action capture the refreshed ETag;
-		// unknown outcomes above keep their immutable retry snapshots.
-		if d.form != nil && a.form == d.form {
-			a.form, d.form = nil, nil
-		}
 		var fresh api.Task
 		if json.Unmarshal(problem.Problem.Current, &fresh) != nil || fresh.ID <= 0 || fresh.ETag == "" {
 			return nil // handleErr already scheduled a reload.
@@ -187,6 +176,7 @@ func (d *cardDeck) update(a *App, msg tea.Msg, target string) tea.Cmd {
 				// An empty deck still needs its reload to confirm exhaustion.
 				if _, ok := d.current(); ok {
 					a.nextReq(target)
+					d.state = loadLoaded
 				}
 				break
 			}
@@ -219,11 +209,11 @@ func (s *cardMode) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
 const cardLegend = "k keep · t top · b bottom · p place · d defer · B block · x done · D drop · s skip · A accept new"
 
 func (s *cardMode) view(a *App, w, h int) string {
+	if s.deck.state == loadFailed {
+		return a.line(s.deck.state.notice("triage"), w)
+	}
 	if _, ok := s.deck.current(); !ok {
-		if s.deck.loadFailed {
-			return a.line("triage not loaded", w)
-		}
-		if !s.deck.loaded {
+		if s.deck.state != loadLoaded {
 			return a.line("loading…", w)
 		}
 		return a.line(fmt.Sprintf("Triage clear (%d skipped)", s.deck.skipped), w)
@@ -322,12 +312,12 @@ func cardKeys(a *App, d *cardDeck, k tea.KeyPressMsg) (tea.Cmd, bool) {
 				return "placed", func(ctx context.Context, c API, key string) (*api.OpResponse, error) {
 					return c.PlaceTask(ctx, client.Mut{IfMatch: t.ETag, Key: key}, t.ID, r)
 				}, nil
-			}, after)
-		return d.bindForm(a, cmd), true
+			}, after).focus()
+		return cmd, true
 	case "d":
-		return d.bindForm(a, a.openDefer(t, false, after)), true
+		return a.openDefer(t, false, after).focus(), true
 	case "B":
-		return d.bindForm(a, a.openBlock(t, d.placedOK(true))), true
+		return a.openBlock(t, d.placedOK(true)).focus(), true
 	case "x":
 		return a.mutate("completed", func(ctx context.Context, c API) (*api.OpResponse, error) {
 			return c.CompleteTask(ctx, client.Mut{IfMatch: t.ETag}, t.ID, api.CompleteRequest{})
@@ -344,11 +334,6 @@ func cardKeys(a *App, d *cardDeck, k tea.KeyPressMsg) (tea.Cmd, bool) {
 		}
 	}
 	return nil, true
-}
-
-func (d *cardDeck) bindForm(a *App, cmd tea.Cmd) tea.Cmd {
-	d.form = a.form.(*form)
-	return cmd
 }
 
 var cardPlacePattern = regexp.MustCompile(`(?i)^(before|after|b|a)\s+#?([1-9][0-9]*)$`)

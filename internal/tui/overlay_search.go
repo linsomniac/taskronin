@@ -17,12 +17,11 @@ type searchMsg struct {
 }
 
 type searchScreen struct {
-	q          string
-	req        int
-	page       *api.Page[api.SearchHit]
-	list       recordList[api.SearchHit]
-	loading    bool
-	loadFailed bool
+	q     string
+	req   int
+	page  *api.Page[api.SearchHit]
+	list  recordList[api.SearchHit]
+	state loadState
 }
 
 func newSearchOverlay(q string) screen { return &searchScreen{q: q} }
@@ -32,9 +31,9 @@ func newSearchOverlay(q string) screen { return &searchScreen{q: q} }
 type searchForm struct{ *form }
 
 func (a *App) openSearch() tea.Cmd {
-	cmd := a.openForm("Search", "enter searches · esc cancels", "", nil, nil)
-	a.form = &searchForm{form: a.form.(*form)}
-	return cmd
+	f := a.openForm("Search", "enter searches · esc cancels", "", nil, nil)
+	a.form = &searchForm{form: f}
+	return f.focus()
 }
 
 func (f *searchForm) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
@@ -53,7 +52,7 @@ func (f *searchForm) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
 func (s *searchScreen) load(a *App) tea.Cmd {
 	req, ctx, c := a.nextReq("search"), a.ctx, a.api
 	q := client.SearchQuery{Q: s.q, Kind: "all", PageQuery: client.PageQuery{Limit: 50}}
-	s.req, s.loading = req, true
+	s.req, s.state = req, loadLoading
 	return func() tea.Msg {
 		page, err := c.Search(ctx, q)
 		return searchMsg{req: req, page: page, err: err}
@@ -67,10 +66,10 @@ func (s *searchScreen) update(a *App, msg tea.Msg) tea.Cmd {
 	if !ok || m.req != s.req {
 		return nil
 	}
-	s.loading, s.loadFailed = false, m.err != nil
 	if m.err != nil {
-		return a.handleReadErr(m.err)
+		return s.state.finish(a, m.err)
 	}
+	s.state.finish(a, nil)
 	s.page = m.page
 	s.list.setItems(m.page.Items, func(hit api.SearchHit) int64 {
 		// Task and entry IDs have separate namespaces; keep selection on the
@@ -100,7 +99,7 @@ func (s *searchScreen) selection() (int64, string, bool) {
 func (s *searchScreen) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
 	switch k.String() {
 	case "r":
-		if s.loading {
+		if s.state == loadLoading {
 			a.setBanner(bannerInfo, "busy…")
 			return nil, true
 		}
@@ -126,14 +125,14 @@ func (s *searchScreen) view(a *App, w, h int) string {
 	lines := []string{a.line("Search: "+s.q, w)}
 	if s.page == nil {
 		text := "search not loaded · r retries"
-		if s.loading {
+		if s.state == loadLoading {
 			text = "loading search…"
 		}
 		return clip(append(lines, a.line(text, w)), w, h)
 	}
 	if len(s.list.items) == 0 {
 		text := "no results · r reload"
-		if s.loadFailed {
+		if s.state == loadFailed {
 			text = "search not loaded · r retries"
 		}
 		return clip(append(lines, a.line(text, w)), w, h)
@@ -142,7 +141,7 @@ func (s *searchScreen) view(a *App, w, h int) string {
 	if s.page.NextCursor != nil {
 		hint += " · more results available; refine query"
 	}
-	if s.loadFailed {
+	if s.state == loadFailed {
 		hint = "search not loaded · r retries · previous results"
 	}
 	lines = append(lines, a.line(hint, w))

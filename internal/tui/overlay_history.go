@@ -12,6 +12,7 @@ import (
 )
 
 type historyScreen struct {
+	state    loadState
 	id       int64
 	req      int
 	page     *api.Page[api.EventView]
@@ -30,7 +31,7 @@ func (a *App) openHistory(id int64) tea.Cmd {
 
 func (s *historyScreen) load(a *App) tea.Cmd {
 	req, ctx, c, id := a.nextReq("history"), a.ctx, a.api, s.id
-	s.req = req
+	s.req, s.state = req, loadLoading
 	return func() tea.Msg {
 		p, err := c.TaskHistory(ctx, id, client.PageQuery{Limit: 100})
 		return historyMsg{req: req, page: p, err: err}
@@ -43,8 +44,9 @@ func (s *historyScreen) update(a *App, msg tea.Msg) tea.Cmd {
 		return nil
 	}
 	if m.err != nil {
-		return a.handleReadErr(m.err)
+		return s.state.finish(a, m.err)
 	}
+	s.state.finish(a, nil)
 	s.page = m.page
 	return nil
 }
@@ -64,8 +66,8 @@ func (s *historyScreen) handle(_ *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
 }
 
 func (s *historyScreen) view(a *App, w, h int) string {
-	if s.page == nil {
-		return a.line(fmt.Sprintf("Loading history for #%d…", s.id), w)
+	if s.state != loadLoaded {
+		return a.line(s.state.notice("history"), w)
 	}
 	lines := []string{fmt.Sprintf("History for #%d", s.id), "j/k scroll · esc back"}
 	for _, e := range s.page.Items {

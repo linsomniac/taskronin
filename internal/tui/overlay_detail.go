@@ -14,6 +14,7 @@ import (
 )
 
 type detailScreen struct {
+	state    loadState
 	id       int64
 	req      int
 	detail   *api.TaskDetail
@@ -32,7 +33,7 @@ func (a *App) openDetail(id int64) tea.Cmd {
 
 func (s *detailScreen) load(a *App) tea.Cmd {
 	req, ctx, c, id := a.nextReq("detail"), a.ctx, a.api, s.id
-	s.req = req
+	s.req, s.state = req, loadLoading
 	return func() tea.Msg {
 		d, err := c.GetTask(ctx, id)
 		return detailMsg{req: req, detail: d, err: err}
@@ -45,8 +46,9 @@ func (s *detailScreen) update(a *App, msg tea.Msg) tea.Cmd {
 		return nil
 	}
 	if m.err != nil {
-		return a.handleReadErr(m.err)
+		return s.state.finish(a, m.err)
 	}
+	s.state.finish(a, nil)
 	s.detail = m.detail
 	return nil
 }
@@ -59,6 +61,10 @@ func (s *detailScreen) selection() (int64, string, bool) {
 }
 
 func (s *detailScreen) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
+	if a.inflight && (k.String() == "t") {
+		a.setBanner(bannerInfo, "busy…")
+		return nil, true
+	}
 	switch k.String() {
 	case "j":
 		s.viewport.ScrollDown(1)
@@ -100,12 +106,12 @@ func (s *detailScreen) tagsForm(a *App) tea.Cmd {
 			return "tags updated", func(ctx context.Context, c API, key string) (*api.OpResponse, error) {
 				return c.UpdateTask(ctx, client.Mut{IfMatch: etag, Key: key}, id, r)
 			}, nil
-		}, nil)
+		}, nil).focus()
 }
 
 func (s *detailScreen) view(a *App, w, h int) string {
-	if s.detail == nil {
-		return a.line(fmt.Sprintf("Loading #%d…", s.id), w)
+	if s.state != loadLoaded {
+		return a.line(s.state.notice("detail"), w)
 	}
 	d := s.detail
 	var lines []string

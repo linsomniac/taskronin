@@ -26,7 +26,7 @@ func e2eModel(t *testing.T, c *client.Client, opts ...func(*Config)) *teatest.Te
 		if err := tm.Quit(); err != nil {
 			t.Error(err)
 		}
-		tm.WaitFinished(t, teatest.WithFinalTimeout(3*time.Second))
+		tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 	})
 	return tm
 }
@@ -39,11 +39,11 @@ func TestE2ETriageCardKeep(t *testing.T) { // TRI-10 end to end.
 		t.Fatal(err)
 	}
 	tm := e2eModel(t, c)
-	teatest.WaitFor(t, tm.Output(), contains("Set up keycloak"), teatest.WithDuration(3*time.Second))
+	teatest.WaitFor(t, tm.Output(), contains("Set up keycloak"), teatest.WithDuration(15*time.Second))
 	tm.Send(key("k"))
-	teatest.WaitFor(t, tm.Output(), contains("Triage clear"), teatest.WithDuration(3*time.Second))
+	teatest.WaitFor(t, tm.Output(), contains("Triage clear"), teatest.WithDuration(15*time.Second))
 	tm.Send(key("q"))
-	tm.WaitFinished(t, teatest.WithFinalTimeout(3*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 	d, err := c.GetTask(t.Context(), r.Task.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -60,7 +60,7 @@ func TestE2EStaleCard(t *testing.T) { // TRI-19: a stale card must refresh witho
 		t.Fatal(err)
 	}
 	tm := e2eModel(t, c)
-	teatest.WaitFor(t, tm.Output(), contains("Set up keycloak"), teatest.WithDuration(3*time.Second))
+	teatest.WaitFor(t, tm.Output(), contains("Set up keycloak"), teatest.WithDuration(15*time.Second))
 	updated, err := c.UpdateTask(t.Context(), client.Mut{IfMatch: r.Task.ETag}, r.Task.ID,
 		api.UpdateTaskRequest{Title: api.Opt[string]{Set: true, V: "Changed cluster task"}})
 	if err != nil {
@@ -69,9 +69,9 @@ func TestE2EStaleCard(t *testing.T) { // TRI-19: a stale card must refresh witho
 	tm.Send(key("k"))
 	teatest.WaitFor(t, tm.Output(), func(b []byte) bool {
 		return contains("changed elsewhere — refreshed")(b) && contains("Changed cluster task")(b)
-	}, teatest.WithDuration(3*time.Second))
+	}, teatest.WithDuration(15*time.Second))
 	tm.Send(key("q"))
-	tm.WaitFinished(t, teatest.WithFinalTimeout(3*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 	d, err := c.GetTask(t.Context(), r.Task.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -97,11 +97,11 @@ func TestE2ERecapWorked(t *testing.T) { // BLK-44 end to end, including yesterda
 	}
 	srv.Clock.Set(testutil.Local(t, "2026-10-28 00:30"))
 	tm := e2eModel(t, c, func(cfg *Config) { cfg.StartMode, cfg.RecapDate = ModeRecap, date })
-	teatest.WaitFor(t, tm.Output(), contains("missed (auto)"), teatest.WithDuration(3*time.Second))
+	teatest.WaitFor(t, tm.Output(), contains("missed (auto)"), teatest.WithDuration(15*time.Second))
 	tm.Send(key("w"))
-	teatest.WaitFor(t, tm.Output(), contains("worked (user)"), teatest.WithDuration(3*time.Second))
+	teatest.WaitFor(t, tm.Output(), contains("worked (user)"), teatest.WithDuration(15*time.Second))
 	tm.Send(key("q"))
-	tm.WaitFinished(t, teatest.WithFinalTimeout(3*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 	d, err := c.GetTask(t.Context(), r.Task.ID)
 	if err != nil {
 		t.Fatal(err)

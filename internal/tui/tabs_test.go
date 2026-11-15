@@ -130,9 +130,9 @@ func TestActionFormAfterHook(t *testing.T) {
 				var cmd tea.Cmd
 				value := "thu"
 				if method == "DeferTask" {
-					cmd = a.openDefer(task(2, "b"), false, after)
+					cmd = a.openDefer(task(2, "b"), false, after).focus()
 				} else {
-					cmd = a.openBlock(task(2, "b"), after)
+					cmd = a.openBlock(task(2, "b"), after).focus()
 					value = "13:00-15:00"
 				}
 				drain(t, a, cmd)

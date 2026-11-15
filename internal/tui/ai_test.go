@@ -409,15 +409,15 @@ func TestAIFailedReloadHidesStaleRows(t *testing.T) { // M3.
 	f.errs["AIChanges"] = notSent()
 	press(t, a, "R")
 	v := viewText(a)
-	if !strings.Contains(v, "not loaded · A retries") {
+	if !strings.Contains(v, "AI changes not loaded · r retries · A retries") {
 		t.Fatal("missing retry hint", v)
 	}
 	if strings.Contains(v, "12 10:00") || strings.Contains(v, "R revert") || strings.Contains(v, "A review") {
 		t.Fatal("failed reload displays current-looking rows/actions", v)
 	}
 	_, retry := a.Update(key("A"))
-	if !strings.Contains(viewText(a), "not loaded · A retries") {
-		t.Fatal("pending retry hid unloaded state")
+	if out := viewText(a); !strings.Contains(out, "loading AI changes…") || strings.Contains(out, "not loaded") {
+		t.Fatal("pending retry must show loading", out)
 	}
 	press(t, a, "A", "R")
 	eq(t, a.banner.text, "busy…")
@@ -442,4 +442,26 @@ func TestAIRevertWaitsForPage(t *testing.T) { // M4.
 			eq(t, a.banner.text, "cannot reach the Taskronin server — nothing was saved")
 		})
 	}
+}
+
+func TestFinalAILoadingIsNotFailure(t *testing.T) {
+	f := newFake()
+	a := newTestApp(t, f)
+	load := a.openOverlay(newAIOverlay())
+	if out := viewText(a); !strings.Contains(out, "loading AI changes…") || strings.Contains(out, "not loaded") || strings.Contains(out, "retries") {
+		t.Fatalf("pending initial load looks failed: %s", out)
+	}
+	f.errs["AIChanges"] = notSent()
+	drain(t, a, load)
+	out := viewText(a)
+	for _, hint := range []string{"AI changes not loaded · r retries", "A retries"} {
+		if !strings.Contains(out, hint) {
+			t.Fatalf("missing %q: %s", hint, out)
+		}
+	}
+	_, retry := a.Update(key("A"))
+	if out := viewText(a); strings.Contains(out, "not loaded") || !strings.Contains(out, "loading AI changes…") {
+		t.Fatal(out)
+	}
+	drain(t, a, retry)
 }

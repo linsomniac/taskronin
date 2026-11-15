@@ -21,9 +21,10 @@ const (
 )
 
 type banner struct {
-	kind      bannerKind
-	text      string
-	readError bool // Cleared by a newer successful read, unlike mutation banners.
+	kind       bannerKind
+	text       string
+	readError  bool // Only a successful read of readTarget clears this banner.
+	readTarget *loadState
 }
 
 func (a *App) setBanner(k bannerKind, text string) {
@@ -41,7 +42,7 @@ func (a *App) appendBanner(s string) {
 }
 
 // handleReadErr is the error policy for every screen load, including polling.
-func (a *App) handleReadErr(err error) tea.Cmd {
+func (a *App) handleReadErr(err error, target ...*loadState) tea.Cmd {
 	// AIDEV-NOTE: reads cannot have saved a mutation. An unanswered read must
 	// not refresh itself forever; the next poll or explicit load can retry.
 	var unknown *client.OutcomeUnknownError
@@ -55,6 +56,9 @@ func (a *App) handleReadErr(err error) tea.Cmd {
 		cmd = a.handleErr(err)
 	}
 	a.banner.readError = true
+	if len(target) > 0 {
+		a.banner.readTarget = target[0]
+	}
 	return cmd
 }
 

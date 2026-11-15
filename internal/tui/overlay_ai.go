@@ -25,7 +25,7 @@ type aiScreen struct {
 	list    recordList[api.OpSummary]
 	req     int
 	pageReq int
-	loading bool
+	state   loadState
 	loaded  bool
 	loadAll bool
 }
@@ -36,7 +36,7 @@ func (s *aiScreen) load(a *App) tea.Cmd {
 	// AIDEV-NOTE: own-op reloads restart at page 1 and invalidate the review
 	// watermark immediately, even if the read fails. Retain pageReq until an
 	// older append replies so it cannot overlap an append for the new list.
-	s.loading, s.loaded, s.loadAll, s.next = true, false, false, nil
+	s.state, s.loaded, s.loadAll, s.next = loadLoading, false, false, nil
 	return s.loadPage(a, "", false)
 }
 
@@ -67,11 +67,11 @@ func (s *aiScreen) update(a *App, msg tea.Msg) tea.Cmd {
 	if m.req != s.req {
 		return nil
 	}
-	s.loading = false
 	if m.err != nil {
 		s.loadAll = false
-		return a.handleReadErr(m.err)
+		return s.state.finish(a, m.err)
 	}
+	s.state.finish(a, nil)
 	ops := slices.Clone(m.ai.Ops)
 	if m.appendPage {
 		ops = append(s.ops, ops...)
@@ -98,7 +98,7 @@ func (s *aiScreen) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
 			delta = -1
 		}
 		s.list.move(delta)
-		if s.loaded && !s.loading && s.pageReq == 0 && s.next != nil && s.list.cursor == len(s.ops)-1 {
+		if s.loaded && s.state != loadLoading && s.pageReq == 0 && s.next != nil && s.list.cursor == len(s.ops)-1 {
 			return s.loadPage(a, *s.next, true), true
 		}
 		return nil, true
@@ -106,7 +106,7 @@ func (s *aiScreen) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
 	default:
 		return nil, false
 	}
-	if a.inflight || s.loading || s.pageReq != 0 {
+	if a.inflight || s.state == loadLoading || s.pageReq != 0 {
 		a.setBanner(bannerInfo, "busy…")
 		return nil, true
 	}
@@ -145,16 +145,20 @@ func (s *aiScreen) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
 func (s *aiScreen) view(a *App, w, h int) string {
 	lines := []string{a.line("AI changes · unreviewed", w)}
 	if !s.loaded {
-		lines = append(lines, a.line("not loaded · A retries", w))
-		if s.loading {
-			lines = append(lines, a.line("loading…", w))
+		notice := s.state.notice("AI changes")
+		if s.state == loadFailed {
+			notice += " · A retries"
 		}
+		lines = append(lines, a.line(notice, w))
 		return clip(lines, w, h) // Old rows cannot be reviewed after a failed reload.
 	}
 	if len(s.ops) == 0 {
 		return clip(append(lines, a.line("no unreviewed AI changes", w)), w, h)
 	}
 	hint := "j/k move · R revert · A review · esc back"
+	if s.state == loadFailed {
+		hint = s.state.notice("AI changes") + " · previous results"
+	}
 	if s.next != nil {
 		hint += " · more…"
 	}

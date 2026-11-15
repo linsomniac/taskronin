@@ -161,7 +161,7 @@ func taskRow(a *App, t api.Task, w int) string {
 	return a.line(text, w)
 }
 
-func (a *App) openDefer(t api.Task, allowNone bool, after func(*App, *api.OpResponse) tea.Cmd) tea.Cmd {
+func (a *App) openDefer(t api.Task, allowNone bool, after func(*App, *api.OpResponse) tea.Cmd) *form {
 	hint := "date, e.g. thu · enter saves · esc cancels"
 	if allowNone {
 		hint = "date or none to clear · enter saves · esc cancels"
@@ -183,7 +183,7 @@ func (a *App) openDefer(t api.Task, allowNone bool, after func(*App, *api.OpResp
 	}, after)
 }
 
-func (a *App) openBlock(t api.Task, after func(*App, *api.OpResponse) tea.Cmd) tea.Cmd {
+func (a *App) openBlock(t api.Task, after func(*App, *api.OpResponse) tea.Cmd) *form {
 	return a.openForm(fmt.Sprintf("Block #%d", t.ID), "span, e.g. 13:00-15:00 · enter saves · esc cancels", "",
 		func(a *App, value string) (string, sendFunc, error) {
 			r, err := a.parseSpan(value)
@@ -194,4 +194,50 @@ func (a *App) openBlock(t api.Task, after func(*App, *api.OpResponse) tea.Cmd) t
 				return c.BlockTask(ctx, client.Mut{IfMatch: t.ETag, Key: key}, t.ID, r)
 			}, nil
 		}, after)
+}
+
+// listTab shares load bookkeeping and navigation for the three task-list tabs.
+// Rows survive a failed reload, but are explicitly labelled as previous results.
+type listTab struct {
+	list  taskList
+	state loadState
+}
+
+func (s *listTab) accept(a *App, tasks []api.Task, truncated bool, err error) tea.Cmd {
+	cmd := s.state.finish(a, err)
+	if err == nil {
+		s.list.set(tasks)
+		if truncated {
+			a.setBanner(bannerInfo, "showing the first 2500")
+		}
+	}
+	return cmd
+}
+
+func (s *listTab) selection() (int64, string, bool) { return s.list.selection() }
+
+func (s *listTab) move(k tea.KeyPressMsg) bool {
+	switch k.String() {
+	case "j":
+		s.list.move(1)
+	case "k":
+		s.list.move(-1)
+	default:
+		return false
+	}
+	return true
+}
+
+func (s *listTab) view(a *App, name, empty string, w, h int, headings map[int]string) string {
+	var lines []string
+	if notice := s.state.notice(name); notice != "" {
+		if len(s.list.items) > 0 {
+			notice += " · previous results"
+		}
+		lines = append(lines, a.line(notice, w))
+	} else if len(s.list.items) == 0 {
+		return a.line(empty, w)
+	}
+	body := s.list.renderHeadings(a, w, max(0, h-len(lines)), func(t api.Task, width int) string { return taskRow(a, t, width) }, headings)
+	return clip(append(lines, strings.Split(body, "\n")...), w, h)
 }

@@ -44,13 +44,13 @@ func freeSlots(blocks []api.Block, from int) []slot {
 }
 
 type planMode struct {
-	step                         int
-	deck                         *cardDeck
-	list                         taskList
-	blocks                       []api.Block
-	step2Blocked                 int
-	backlogLoaded, backlogFailed bool
-	blocksLoaded, blocksFailed   bool
+	step         int
+	deck         *cardDeck
+	list         taskList
+	blocks       []api.Block
+	step2Blocked int
+	backlogState loadState
+	blocksState  loadState
 }
 
 func newPlanMode() *planMode { return &planMode{step: 1, deck: &cardDeck{}} }
@@ -67,7 +67,7 @@ func (s *planMode) load(a *App) tea.Cmd {
 }
 
 func (s *planMode) loadBacklog(a *App) tea.Cmd {
-	s.backlogFailed = false
+	s.backlogState = loadLoading
 	req, ctx, c := a.nextReq("plan-backlog"), a.ctx, a.api
 	return func() tea.Msg {
 		page, err := c.ListTasks(ctx, client.TaskQuery{View: "backlog", PageQuery: client.PageQuery{Limit: 10}})
@@ -80,7 +80,7 @@ func (s *planMode) loadBacklog(a *App) tea.Cmd {
 }
 
 func (s *planMode) loadBlocks(a *App) tea.Cmd {
-	s.blocksFailed = false
+	s.blocksState = loadLoading
 	req, ctx, c, today := a.nextReq("plan-blocks"), a.ctx, a.api, a.clock.Today
 	return func() tea.Msg {
 		blocks, err := c.ListBlocks(ctx, client.BlockQuery{From: &today, To: &today})
@@ -95,7 +95,7 @@ func (s *planMode) update(a *App, msg tea.Msg) tea.Cmd {
 		// AIDEV-NOTE: exhaustion must be confirmed by the latest successful
 		// triage read. An empty queue while loading or after a failed read is
 		// not permission to skip triage; the deck owns that bookkeeping.
-		if ok && m.target == "plan-triage" && a.latest(m.target, m.req) && m.err == nil && s.deck.loaded {
+		if ok && m.target == "plan-triage" && a.latest(m.target, m.req) && m.err == nil && s.deck.state == loadLoaded {
 			if _, current := s.deck.current(); !current {
 				s.step = 2
 				return tea.Batch(cmd, s.load(a))
@@ -109,20 +109,19 @@ func (s *planMode) update(a *App, msg tea.Msg) tea.Cmd {
 			return nil
 		}
 		if m.err != nil {
-			s.backlogFailed = true
-			return a.handleReadErr(m.err)
+			return s.backlogState.finish(a, m.err)
 		}
 		s.list.set(m.tasks)
-		s.backlogLoaded, s.backlogFailed = true, false
+		s.backlogState.finish(a, nil)
 	case blocksMsg:
 		if !a.latest("plan-blocks", m.req) {
 			return nil
 		}
 		if m.err != nil {
-			s.blocksFailed = true
-			return a.handleReadErr(m.err)
+			return s.blocksState.finish(a, m.err)
 		}
-		s.blocks, s.blocksLoaded, s.blocksFailed = m.blocks, true, false
+		s.blocks = m.blocks
+		s.blocksState.finish(a, nil)
 	}
 	return nil
 }
@@ -148,7 +147,7 @@ func (s *planMode) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
 		if s.step == 3 {
 			return a.exitMode(), true
 		}
-		if s.step == 1 && (!s.deck.loaded || s.deck.loadFailed) {
+		if s.step == 1 && s.deck.state != loadLoaded {
 			return nil, true
 		}
 		s.step++
@@ -180,12 +179,11 @@ func (s *planMode) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
 }
 
 func (s *planMode) openBlockToday(a *App, t api.Task) tea.Cmd {
-	cmd := a.openBlock(t, func(_ *App, _ *api.OpResponse) tea.Cmd {
+	f := a.openBlock(t, func(_ *App, _ *api.OpResponse) tea.Cmd {
 		s.step2Blocked++
 		// App's successful-op refresh reloads both blocks and backlog.
 		return nil
 	})
-	f := a.form.(*form)
 	submit := f.submit
 	f.hint = "today's span, e.g. 13:00-15:00 · enter saves · esc cancels"
 	// AIDEV-NOTE: validate only fresh submissions. The shared form still
@@ -200,15 +198,12 @@ func (s *planMode) openBlockToday(a *App, t api.Task) tea.Cmd {
 		}
 		return submit(a, value)
 	}
-	return cmd
+	return f.focus()
 }
 
 func (s *planMode) freeText(a *App) string {
-	if !s.blocksLoaded {
-		if s.blocksFailed {
-			return "blocks not loaded"
-		}
-		return "loading blocks…"
+	if s.blocksState != loadLoaded {
+		return s.blocksState.notice("blocks")
 	}
 	from := a.clock.Now.Hour()*60 + a.clock.Now.Minute()
 	var spans []string
@@ -230,9 +225,9 @@ func (s *planMode) view(a *App, w, h int) string {
 		rightWidth := max(0, w-leftWidth-3)
 		left := []string{a.line("Backlog top 10", leftWidth)}
 		switch {
-		case !s.backlogLoaded && s.backlogFailed:
-			left = append(left, a.line("backlog not loaded", leftWidth))
-		case !s.backlogLoaded:
+		case s.backlogState == loadFailed:
+			left = append(left, a.line(s.backlogState.notice("backlog"), leftWidth))
+		case s.backlogState != loadLoaded:
 			left = append(left, a.line("loading backlog…", leftWidth))
 		case len(s.list.items) == 0:
 			left = append(left, a.line("backlog is empty", leftWidth))
@@ -254,12 +249,15 @@ func (s *planMode) view(a *App, w, h int) string {
 		a.line(fmt.Sprintf("placed %d · blocked %d · triage left %d", s.deck.placed, s.deck.blocked+s.step2Blocked, triageLeft), w),
 		a.line("Today's blocks · "+a.clock.Today.String(), w),
 	}
-	if !s.blocksLoaded {
+	if s.blocksState != loadLoaded {
 		lines = append(lines, a.line(s.freeText(a), w))
 	} else if len(s.blocks) == 0 {
 		lines = append(lines, a.line("no blocks today", w))
 	}
 	for _, b := range s.blocks {
+		if s.blocksState != loadLoaded {
+			break
+		}
 		lines = append(lines, a.line(fmt.Sprintf("b%d %s #%d %s · %s", b.ID, spanText(b.Start, b.End), b.TaskID, b.TaskTitle, b.Status), w))
 	}
 	return clip(lines, w, h)

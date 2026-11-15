@@ -16,11 +16,12 @@ type upcomingMsg struct {
 }
 
 type upcomingScreen struct {
-	list     taskList
+	listTab
 	deferred int
 }
 
-func (*upcomingScreen) load(a *App) tea.Cmd {
+func (s *upcomingScreen) load(a *App) tea.Cmd {
+	s.state = loadLoading
 	req, ctx, c := a.nextReq("upcoming"), a.ctx, a.api
 	return func() tea.Msg {
 		up, err := c.Upcoming(ctx)
@@ -34,25 +35,21 @@ func (s *upcomingScreen) update(a *App, msg tea.Msg) tea.Cmd {
 		return nil
 	}
 	if m.err != nil {
-		return a.handleReadErr(m.err)
+		return s.state.finish(a, m.err)
 	}
 	s.deferred = len(m.up.Deferred)
 	items := make([]api.Task, 0, s.deferred+len(m.up.DueSoon))
 	items = append(items, m.up.Deferred...)
 	items = append(items, m.up.DueSoon...)
-	s.list.set(items)
-	return nil
+	return s.accept(a, items, false, nil)
 }
 
-func (s *upcomingScreen) selection() (int64, string, bool) { return s.list.selection() }
-
 func (s *upcomingScreen) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
-	switch k.String() {
-	case "j":
-		s.list.move(1)
+	if s.move(k) {
 		return nil, true
-	case "k":
-		s.list.move(-1)
+	}
+	if a.inflight && (k.String() == "d") {
+		a.setBanner(bannerInfo, "busy…")
 		return nil, true
 	}
 	t, ok := s.list.selected()
@@ -65,7 +62,7 @@ func (s *upcomingScreen) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
 			return c.PlaceTask(ctx, client.Mut{IfMatch: t.ETag}, t.ID, api.PlaceRequest{How: "keep"})
 		}, nil, nil), true
 	case "d":
-		return a.openDefer(t, true, nil), true
+		return a.openDefer(t, true, nil).focus(), true
 	case "enter":
 		return a.openDetail(t.ID), true
 	default:
@@ -74,9 +71,6 @@ func (s *upcomingScreen) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
 }
 
 func (s *upcomingScreen) view(a *App, w, h int) string {
-	if len(s.list.items) == 0 {
-		return a.line("nothing upcoming", w)
-	}
 	headings := make(map[int]string, 2)
 	if s.deferred > 0 {
 		headings[0] = "Deferred"
@@ -84,5 +78,5 @@ func (s *upcomingScreen) view(a *App, w, h int) string {
 	if len(s.list.items) > s.deferred {
 		headings[s.deferred] = "Due soon"
 	}
-	return s.list.renderHeadings(a, w, h, func(t api.Task, width int) string { return taskRow(a, t, width) }, headings)
+	return s.listTab.view(a, "upcoming", "nothing upcoming", w, h, headings)
 }

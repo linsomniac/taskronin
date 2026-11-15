@@ -69,7 +69,7 @@ func openDeferForm(t *testing.T, a *App) *form {
 		return "deferred", func(ctx context.Context, c API, key string) (*api.OpResponse, error) {
 			return c.DeferTask(ctx, client.Mut{IfMatch: "g-1", Key: key}, 1, r)
 		}, nil
-	}, nil))
+	}, nil).focus())
 	return a.form.(*form)
 }
 
@@ -309,6 +309,12 @@ func TestFormRetryDefinitiveProblemDropsSnapshot(t *testing.T) { // M1; CF03 sti
 					wantKey = "K2"
 				} else {
 					eq(t, a.banner.text, tc.banner)
+				}
+				if !unknown && tc.status == 412 {
+					eq(t, a.form, nil)
+					press(t, a, "enter")
+					eq(t, f.count("DeferTask"), 2)
+					openDeferForm(t, a)
 				}
 				press(t, a, "enter")
 				eq(t, f.mustLast(t, "DeferTask").Mut.Key, wantKey)
@@ -624,7 +630,7 @@ func TestFormParseErrorSendsNothing(t *testing.T) {
 		return "blocked", func(ctx context.Context, c API, key string) (*api.OpResponse, error) {
 			return c.BlockTask(ctx, client.Mut{IfMatch: "g-1", Key: key}, 1, r)
 		}, err
-	}, nil))
+	}, nil).focus())
 	press(t, a, "enter")
 	fm := a.form.(*form)
 	if fm.errText == "" || !strings.Contains(viewText(a), fm.errText) {
@@ -649,7 +655,7 @@ func TestFormAfterHookRunsOnSuccessOnly(t *testing.T) {
 			eq(t, a.form, nil)
 			eq(t, r.OpID, f.resp.OpID)
 			return nil
-		}))
+		}).focus())
 		if fail {
 			f.errs["AddTask"] = notSent()
 		}

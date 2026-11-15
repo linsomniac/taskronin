@@ -40,7 +40,7 @@ func (l link) label() string {
 }
 
 func (a *App) openLog(date civil.Date, l link) tea.Cmd {
-	focus := a.openForm("Log "+l.label(), "enter saves · esc cancels", "", func(a *App, value string) (string, sendFunc, error) {
+	f := a.openForm("Log "+l.label(), "enter saves · esc cancels", "", func(a *App, value string) (string, sendFunc, error) {
 		r := api.AddEntryRequest{Title: value, TaskID: api.Opt[int64]{Set: true, Null: !l.Has, V: l.TaskID}}
 		if date != a.clock.Today {
 			r.WorkDate = &date
@@ -53,7 +53,6 @@ func (a *App) openLog(date civil.Date, l link) tea.Cmd {
 			return c.AddEntry(ctx, client.Mut{Key: key}, r)
 		}, nil
 	}, nil)
-	f := a.form.(*form)
 	// Historical dates and explicit selections retain their supplied link.
 	// A retry keeps both the echoed link and resolved request until Enter
 	// discards the snapshot for changed text or a definitive/stale reply.
@@ -65,5 +64,5 @@ func (a *App) openLog(date civil.Date, l link) tea.Cmd {
 			}
 		}
 	}
-	return tea.Batch(focus, a.fetchToday(false))
+	return tea.Batch(f.focus(), a.fetchToday(false))
 }

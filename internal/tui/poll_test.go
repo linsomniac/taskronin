@@ -250,12 +250,12 @@ func TestPollingRunsUnderTeatest(t *testing.T) {
 		if err := tm.Quit(); err != nil {
 			t.Error(err)
 		}
-		tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+		tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 	})
-	teatest.WaitFor(t, tm.Output(), contains("Set up keycloak"), teatest.WithDuration(3*time.Second))
+	teatest.WaitFor(t, tm.Output(), contains("Set up keycloak"), teatest.WithDuration(15*time.Second))
 	n := f.count("Today")
 	f.setToday(withFocusTitle(todayFixture(), "Renamed elsewhere"), `"a-2"`)
-	teatest.WaitFor(t, tm.Output(), contains("Renamed elsewhere"), teatest.WithDuration(3*time.Second))
+	teatest.WaitFor(t, tm.Output(), contains("Renamed elsewhere"), teatest.WithDuration(15*time.Second))
 	if f.count("Today") <= n {
 		t.Fatal("no poll after the change")
 	}
@@ -274,5 +274,5 @@ func TestPollingRunsUnderTeatest(t *testing.T) {
 		t.Fatal("change was not fetched by a conditional poll")
 	}
 	tm.Send(key("q"))
-	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 }

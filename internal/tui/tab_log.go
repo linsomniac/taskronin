@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -14,6 +15,7 @@ import (
 
 type entriesMsg struct {
 	req        int
+	to         civil.Date
 	page       *api.Page[api.Entry]
 	appendPage bool
 	err        error
@@ -24,15 +26,16 @@ type logScreen struct {
 	to         civil.Date
 	nextCursor string
 	pageReq    int
-	loading    bool
+	state      loadState
 }
 
 func (s *logScreen) load(a *App) tea.Cmd {
 	// AIDEV-NOTE: a full reload invalidates every older page at Cmd creation.
 	// Keep pageReq until its reply arrives, even across reloads, so a second
 	// append cannot overlap it. Old rows stay visible if this read fails, but
-	// their cursor cannot be used against the replacement range/list.
-	s.loading, s.nextCursor, s.to = true, "", a.clock.Today
+	// their cursor/range advance only after success, so paging and midnight
+	// navigation can retry after failure.
+	s.state = loadLoading
 	return s.loadPage(a, "", false)
 }
 
@@ -45,7 +48,7 @@ func (s *logScreen) loadPage(a *App, cursor string, appendPage bool) tea.Cmd {
 	}
 	return func() tea.Msg {
 		page, err := c.ListEntries(ctx, q)
-		return entriesMsg{req: req, page: page, appendPage: appendPage, err: err}
+		return entriesMsg{req: req, to: to, page: page, appendPage: appendPage, err: err}
 	}
 }
 
@@ -60,10 +63,11 @@ func (s *logScreen) update(a *App, msg tea.Msg) tea.Cmd {
 	if !a.latest("entries", m.req) {
 		return nil
 	}
-	s.loading = false
 	if m.err != nil {
-		return a.handleReadErr(m.err)
+		return s.state.finish(a, m.err)
 	}
+	s.state.finish(a, nil)
+	s.to = m.to
 	items := slices.Clone(m.page.Items)
 	if m.appendPage {
 		items = append(s.list.items, items...)
@@ -87,10 +91,10 @@ func (s *logScreen) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
 			delta = -1
 		}
 		s.list.move(delta)
-		if !s.loading && s.to != a.clock.Today {
+		if s.state != loadLoading && s.to != a.clock.Today {
 			return s.load(a), true
 		}
-		if s.list.cursor == len(s.list.items)-1 && s.nextCursor != "" && s.pageReq == 0 && !s.loading {
+		if s.list.cursor == len(s.list.items)-1 && s.nextCursor != "" && s.pageReq == 0 && s.state != loadLoading {
 			return s.loadPage(a, s.nextCursor, true), true
 		}
 		return nil, true
@@ -123,7 +127,7 @@ func (s *logScreen) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
 				return "entry link updated", func(ctx context.Context, c API, key string) (*api.OpResponse, error) {
 					return c.RelinkEntry(ctx, client.Mut{IfMatch: e.ETag, Key: key}, e.ID, r)
 				}, nil
-			}, nil), true
+			}, nil).focus(), true
 	case "X":
 		return a.confirm(fmt.Sprintf("delete e%d? (y/n)", e.ID), func(a *App) tea.Cmd {
 			return a.mutate("entry deleted", func(ctx context.Context, c API) (*api.OpResponse, error) {
@@ -135,8 +139,16 @@ func (s *logScreen) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
 }
 
 func (s *logScreen) view(a *App, w, h int) string {
+	notice := s.state.notice("log")
 	if len(s.list.items) == 0 {
+		if notice != "" {
+			return a.line(notice, w)
+		}
 		return a.line("no log entries", w)
+	}
+	bodyHeight := h
+	if notice != "" {
+		bodyHeight = max(0, h-1)
 	}
 	headings := make(map[int]string)
 	for i, e := range s.list.items {
@@ -144,7 +156,7 @@ func (s *logScreen) view(a *App, w, h int) string {
 			headings[i] = logDay(e.WorkDate)
 		}
 	}
-	return s.list.renderHeadings(a, w, h, func(e api.Entry, width int) string {
+	body := s.list.renderHeadings(a, w, bodyHeight, func(e api.Entry, width int) string {
 		text := fmt.Sprintf("%s  e%d", logDay(e.WorkDate), e.ID)
 		if e.Time != nil {
 			text += " " + hhmm(int(*e.Time))
@@ -158,6 +170,10 @@ func (s *logScreen) view(a *App, w, h int) string {
 		}
 		return a.line(text, width)
 	}, headings)
+	if notice != "" {
+		return clip(append([]string{a.line(notice+" · previous results", w)}, strings.Split(body, "\n")...), w, h)
+	}
+	return body
 }
 
 func logDay(date civil.Date) string {

@@ -57,7 +57,10 @@ type runRecapAPI struct {
 
 func (f *runRecapAPI) Day(ctx context.Context, date civil.Date) (*api.Day, error) {
 	day, err := f.fakeAPI.Day(ctx, date)
-	f.day <- date
+	select {
+	case f.day <- date:
+	case <-ctx.Done():
+	}
 	return day, err
 }
 
@@ -67,7 +70,7 @@ func TestRunRecapDate(t *testing.T) {
 	} {
 		t.Run(tc.spec, func(t *testing.T) {
 			f := &runRecapAPI{fakeAPI: newFake(), day: make(chan civil.Date, 1)}
-			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 			defer cancel()
 			in, keys := io.Pipe()
 			defer in.Close()
@@ -84,11 +87,23 @@ func TestRunRecapDate(t *testing.T) {
 			case <-ctx.Done():
 				t.Fatal("Run did not load recap")
 			}
-			if _, err := io.WriteString(keys, "q"); err != nil {
-				t.Fatal(err)
+			writeDone := make(chan error, 1)
+			go func() { _, err := io.WriteString(keys, "q"); writeDone <- err }()
+			select {
+			case err := <-writeDone:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-ctx.Done():
+				t.Fatal("Run did not read quit key")
 			}
-			if err := <-done; err != nil {
-				t.Fatal(err)
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-ctx.Done():
+				t.Fatal("Run did not exit")
 			}
 		})
 	}

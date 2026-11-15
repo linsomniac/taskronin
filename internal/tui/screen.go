@@ -69,3 +69,36 @@ func (stubScreen) handle(_ *App, _ tea.KeyPressMsg) (tea.Cmd, bool) { return nil
 func (stubScreen) update(_ *App, _ tea.Msg) tea.Cmd                 { return nil }
 func (s stubScreen) view(a *App, w, _ int) string                   { return a.line(s.name, w) }
 func (stubScreen) selection() (int64, string, bool)                 { return 0, "", false }
+
+// loadState distinguishes an unanswered read from a successful empty result.
+// Its address scopes read-error recovery to the owning screen (and Plan pane).
+type loadState uint8
+
+const (
+	loadLoading loadState = iota
+	loadLoaded
+	loadFailed
+)
+
+func (s *loadState) finish(a *App, err error) tea.Cmd {
+	if err != nil {
+		*s = loadFailed
+		return a.handleReadErr(err, s)
+	}
+	*s = loadLoaded
+	if a.banner.readError && a.banner.readTarget == s {
+		a.banner = banner{}
+	}
+	return nil
+}
+
+func (s loadState) notice(name string) string {
+	switch s {
+	case loadLoading:
+		return "loading " + name + "…"
+	case loadFailed:
+		return name + " not loaded · r retries"
+	default:
+		return ""
+	}
+}

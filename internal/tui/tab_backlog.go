@@ -9,34 +9,27 @@ import (
 	"taskronin/internal/client"
 )
 
-type backlogScreen struct{ list taskList }
+type backlogScreen struct{ listTab }
 
-func (*backlogScreen) load(a *App) tea.Cmd { return a.loadTasks("backlog", "backlog") }
+func (s *backlogScreen) load(a *App) tea.Cmd {
+	s.state = loadLoading
+	return a.loadTasks("backlog", "backlog")
+}
 
 func (s *backlogScreen) update(a *App, msg tea.Msg) tea.Cmd {
 	m, ok := msg.(tasksMsg)
 	if !ok || m.target != "backlog" || !a.latest(m.target, m.req) {
 		return nil
 	}
-	if m.err != nil {
-		return a.handleReadErr(m.err)
-	}
-	s.list.set(m.tasks)
-	if m.truncated {
-		a.setBanner(bannerInfo, "showing the first 2500")
-	}
-	return nil
+	return s.accept(a, m.tasks, m.truncated, m.err)
 }
 
-func (s *backlogScreen) selection() (int64, string, bool) { return s.list.selection() }
-
 func (s *backlogScreen) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
-	switch k.String() {
-	case "j":
-		s.list.move(1)
+	if s.move(k) {
 		return nil, true
-	case "k":
-		s.list.move(-1)
+	}
+	if a.inflight && (k.String() == "B" || k.String() == "d") {
+		a.setBanner(bannerInfo, "busy…")
 		return nil, true
 	}
 	t, ok := s.list.selected()
@@ -71,9 +64,9 @@ func (s *backlogScreen) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
 			return c.SetFocus(ctx, client.Mut{}, r)
 		}, nil, nil), true
 	case "B":
-		return a.openBlock(t, nil), true
+		return a.openBlock(t, nil).focus(), true
 	case "d":
-		return a.openDefer(t, false, nil), true
+		return a.openDefer(t, false, nil).focus(), true
 	case "e":
 		return a.editTask(t.ID), true
 	case "enter":
@@ -84,8 +77,5 @@ func (s *backlogScreen) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
 }
 
 func (s *backlogScreen) view(a *App, w, h int) string {
-	if len(s.list.items) == 0 {
-		return a.line("backlog is empty", w)
-	}
-	return s.list.render(a, w, h, func(t api.Task, width int) string { return taskRow(a, t, width) })
+	return s.listTab.view(a, "backlog", "backlog is empty", w, h, nil)
 }

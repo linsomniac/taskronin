@@ -50,6 +50,7 @@ type App struct {
 	clock        api.Clock
 	today        *api.Today
 	todayETag    string
+	todayLoad    loadState
 	pollReq      int
 	tab          Tab
 	tabs         [5]screen
@@ -159,11 +160,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 		if msg.err != nil {
-			return a, a.handleReadErr(msg.err)
+			return a, a.todayLoad.finish(a, msg.err)
 		}
-		if a.banner.readError {
-			a.banner = banner{}
-		}
+		a.todayLoad.finish(a, nil)
 		var cmds []tea.Cmd
 		if !msg.notModified && msg.today != nil {
 			changed := todayPayloadChanged(a.today, msg.today)
@@ -182,7 +181,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, a.form.update(a, msg))
 			// AIDEV-NOTE: a read-error banner may hide a held retry snapshot. Restore
 			// its warning on recovery, including a successful conditional 304.
-			if f, ok := a.form.(*form); ok && f.retry != nil {
+			if f, ok := a.form.(*form); ok && f.retry != nil && !a.banner.readError {
 				f.retryBanner(a)
 			}
 		}
@@ -266,6 +265,9 @@ func (a *App) handleKey(k tea.KeyPressMsg) tea.Cmd {
 	}
 	if cmd, consumed := a.current().handle(a, k); consumed {
 		return cmd
+	}
+	if binding.Matches(k, a.keys.Refresh) {
+		return a.refresh()
 	}
 	if binding.Matches(k, a.keys.Help) {
 		a.help.ShowAll = !a.help.ShowAll
@@ -372,6 +374,9 @@ type todayMsg struct {
 func (a *App) fetchToday(poll bool) tea.Cmd {
 	req, ctx, c := a.nextReq("today"), a.ctx, a.api
 	etag := ""
+	if !poll {
+		a.todayLoad = loadLoading
+	}
 	if poll {
 		etag = a.todayETag
 		a.pollReq = req

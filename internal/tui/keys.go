@@ -3,7 +3,7 @@ package tui
 import binding "charm.land/bubbles/v2/key"
 
 type keyMap struct {
-	Up, Down, Tabs, Add, Log, Search, Undo, Redo, Help, Escape, Quit, ForceQuit, AI binding.Binding
+	Up, Down, Tabs, Add, Log, Search, Undo, Redo, Help, Escape, Quit, ForceQuit, AI, Refresh binding.Binding
 }
 
 func newKeys() keyMap {
@@ -23,6 +23,7 @@ func newKeys() keyMap {
 		Escape:    bind([]string{"esc"}, "esc", "back/clear"),
 		Quit:      bind([]string{"q"}, "q", "quit/back"),
 		ForceQuit: bind([]string{"ctrl+c"}, "ctrl+c", "quit"),
+		Refresh:   bind([]string{"r"}, "r", "refresh"),
 		AI:        bind([]string{"A"}, "A", "AI changes"),
 	}
 }

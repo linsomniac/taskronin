@@ -24,19 +24,19 @@ type recapRow struct {
 }
 
 type recapMode struct {
-	date       civil.Date
-	req        int
-	day        *api.Day
-	rows       []recapRow
-	cursor     int
-	loadFailed bool
+	date   civil.Date
+	req    int
+	day    *api.Day
+	rows   []recapRow
+	cursor int
+	state  loadState
 }
 
 func newRecapMode(date civil.Date) *recapMode { return &recapMode{date: date} }
 
 func (s *recapMode) load(a *App) tea.Cmd {
 	req, ctx, c, date := a.nextReq("recap-day"), a.ctx, a.api, s.date
-	s.req, s.loadFailed = req, false
+	s.req, s.state = req, loadLoading
 	return func() tea.Msg {
 		day, err := c.Day(ctx, date)
 		return dayMsg{req: req, day: day, err: err}
@@ -52,14 +52,14 @@ func (s *recapMode) update(a *App, msg tea.Msg) tea.Cmd {
 		return nil
 	}
 	if m.err != nil {
-		s.loadFailed = true
-		return a.handleReadErr(m.err)
+		return s.state.finish(a, m.err)
 	}
 	if m.day == nil || m.day.Date != s.date {
 		return nil
 	}
 	selected := s.selected()
-	s.day, s.loadFailed, s.rows = m.day, false, nil
+	s.state.finish(a, nil)
+	s.day, s.rows = m.day, nil
 	for _, b := range m.day.Blocks {
 		s.rows = append(s.rows, recapRow{block: &b})
 	}
@@ -175,7 +175,7 @@ func (s *recapMode) openLink(a *App, e api.Entry) tea.Cmd {
 			return fmt.Sprintf("linked e%d → #%d", e.ID, id), func(ctx context.Context, c API, key string) (*api.OpResponse, error) {
 				return c.RelinkEntry(ctx, client.Mut{IfMatch: e.ETag, Key: key}, e.ID, r)
 			}, nil
-		}, nil)
+		}, nil).focus()
 }
 
 // recapLogPicker reuses form editing/rendering, but Enter only chooses the next
@@ -186,9 +186,9 @@ type recapLogPicker struct {
 }
 
 func (s *recapMode) openLogPicker(a *App) tea.Cmd {
-	cmd := a.openForm("Log · task # or - for none", s.taskHint(), "", nil, nil)
-	a.form = &recapLogPicker{form: a.form.(*form), date: s.date}
-	return cmd
+	f := a.openForm("Log · task # or - for none", s.taskHint(), "", nil, nil)
+	a.form = &recapLogPicker{form: f, date: s.date}
+	return f.focus()
 }
 
 func (p *recapLogPicker) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
@@ -209,12 +209,8 @@ func (p *recapLogPicker) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
 
 func (s *recapMode) view(a *App, w, h int) string {
 	lines := []string{a.styles.Header.Render(a.line(fmt.Sprintf("Recap %.3s %s", s.date.Weekday(), s.date), w))}
-	if s.day == nil {
-		text := "loading day…"
-		if s.loadFailed {
-			text = "day not loaded"
-		}
-		return clip(append(lines, a.line(text, w)), w, h)
+	if s.state != loadLoaded {
+		return clip(append(lines, a.line(s.state.notice("day"), w)), w, h)
 	}
 	lines = append(lines, a.line("j/k/↑/↓ move · w worked · m missed · a auto · x done · l log · L link", w))
 	selectedLine := -1

@@ -63,6 +63,10 @@ func (s *todayScreen) selection() (int64, string, bool) {
 }
 
 func (s *todayScreen) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
+	if a.inflight && (k.String() == "B") {
+		a.setBanner(bannerInfo, "busy…")
+		return nil, true
+	}
 	switch k.String() {
 	case "j":
 		s.cursor = min(s.cursor+1, len(s.rows)-1)
@@ -121,7 +125,7 @@ func (s *todayScreen) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
 				return "reblocked", func(ctx context.Context, c API, key string) (*api.OpResponse, error) {
 					return c.Reblock(ctx, client.Mut{IfMatch: b.ETag, Key: key}, b.ID, r)
 				}, nil
-			}, nil), true
+			}, nil).focus(), true
 	default:
 		return nil, false
 	}
@@ -129,8 +133,8 @@ func (s *todayScreen) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
 
 func (s *todayScreen) view(a *App, w, h int) string {
 	td := a.today
-	if td == nil {
-		return a.line("Loading Today…", w)
+	if a.todayLoad != loadLoaded {
+		return a.line(a.todayLoad.notice("Today"), w)
 	}
 	focus := "no focus"
 	b := td.CurrentBlock

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"time"
 
 	"charm.land/bubbles/v2/textinput"
@@ -47,7 +48,7 @@ const retryStaleBanner = "the database may have changed since the first attempt 
 
 func (a *App) openForm(title, hint, initial string,
 	submit func(a *App, value string) (string, sendFunc, error), after func(*App, *api.OpResponse) tea.Cmd,
-) tea.Cmd {
+) *form {
 	input := textinput.New()
 	styles := textinput.Styles{}
 	if a.cfg.Color {
@@ -60,8 +61,10 @@ func (a *App) openForm(title, hint, initial string,
 	input.SetValue(initial)
 	f := &form{title: title, hint: hint, input: input, submit: submit, after: after}
 	a.form = f
-	return f.input.Focus()
+	return f
 }
+
+func (f *form) focus() tea.Cmd { return f.input.Focus() }
 
 func (*form) load(_ *App) tea.Cmd              { return nil }
 func (*form) selection() (int64, string, bool) { return 0, "", false }
@@ -245,9 +248,19 @@ func (f *form) send(a *App) tea.Cmd {
 			if f.retry != nil {
 				f.retryBanner(a)
 			}
+		case errors.Is(err, client.ErrNotSent):
+			if snapshot != nil {
+				a.setBanner(bannerError, "not sent — outcome of the first attempt still unknown; enter resends the same request")
+			}
 		case errors.As(err, &problem):
 			// A definitive refusal ends this replay; keep handleErr's problem banner.
 			f.dropRetry(a)
+			// AIDEV-NOTE: a definitive 412 invalidates the captured If-Match.
+			// Close only this form; the next explicit action captures the
+			// refreshed record. CF03 unknown/not-sent cases above retain it.
+			if problem.Status == http.StatusPreconditionFailed && problem.Problem.Code != "generation_mismatch" && a.form == f {
+				a.form = nil
+			}
 		case snapshot != nil:
 			a.setBanner(bannerError, "not sent — outcome of the first attempt still unknown; enter resends the same request")
 		}
@@ -287,5 +300,5 @@ func (a *App) openAdd() tea.Cmd {
 			a.setBanner(bannerInfo, fmt.Sprintf("#%d %s", r.Task.ID, a.banner.text))
 		}
 		return nil
-	})
+	}).focus()
 }
