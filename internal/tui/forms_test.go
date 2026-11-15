@@ -97,14 +97,14 @@ func TestFormRetrySendsSnapshot(t *testing.T) {
 	}
 	eq(t, f.count("RefreshGeneration"), 1)
 	eq(t, f.count("Generation"), 1)
-	// Editing and restoring the original spelling still discards the old snapshot.
+	// I1 controller ruling: restoring the original spelling resends the snapshot.
 	typeText(t, a, " ")
 	_, cmd := a.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	drain(t, a, cmd)
 	eq(t, fm.input.Value(), "tomorrow")
 	press(t, a, "enter")
-	eq(t, f.mustLast(t, "DeferTask").Mut.Key, "")
-	eq(t, f.mustLast(t, "DeferTask").Req.(api.DeferRequest).Until.V.Date, civil.MustDate("2026-10-30"))
+	eq(t, f.mustLast(t, "DeferTask").Mut.Key, "K2")
+	eq(t, f.mustLast(t, "DeferTask").Req, first.Req)
 }
 
 func TestFormRetryRefusedWhenStale(t *testing.T) {
@@ -114,7 +114,13 @@ func TestFormRetryRefusedWhenStale(t *testing.T) {
 		fm := openDeferForm(t, a)
 		f.errs["DeferTask"] = outcomeUnknown("K2")
 		press(t, a, "enter")
+		first := f.mustLast(t, "DeferTask").Req.(api.DeferRequest)
 		f.gen = "fedcba9876543210"
+		f.clock.Today = civil.MustDate("2026-10-29")
+		f.setToday(api.Today{Clock: f.clock}, "restored")
+		visible := &recScreen{}
+		a.setTabScreen(TabToday, visible)
+		reads := f.count("Today")
 		press(t, a, "enter")
 		eq(t, f.count("DeferTask"), 1)
 		eq(t, fm.retry, (*formRetry)(nil))
@@ -122,8 +128,13 @@ func TestFormRetryRefusedWhenStale(t *testing.T) {
 		if !strings.Contains(a.banner.text, "may have changed since the first attempt") {
 			t.Fatal(a.banner.text)
 		}
+		eq(t, f.count("Today"), reads+1) // M4: refresh aggregate and visible screen.
+		eq(t, visible.loads, 1)
+		eq(t, a.todayETag, "restored")
 		press(t, a, "enter")
 		eq(t, f.mustLast(t, "DeferTask").Mut.Key, "")
+		eq(t, first.Until.V.Date, civil.MustDate("2026-10-29"))
+		eq(t, f.mustLast(t, "DeferTask").Req.(api.DeferRequest).Until.V.Date, civil.MustDate("2026-10-30")) // M6
 	})
 	for _, age := range []time.Duration{client.PendingResendWindow, 7*24*time.Hour + time.Second} {
 		t.Run(age.String(), func(t *testing.T) {
@@ -195,12 +206,214 @@ func TestFormRetryPreflightFailureSendsNothing(t *testing.T) {
 				t.Fatal("preflight failure lost retry")
 			}
 			eq(t, f.count("Today"), reads)
-			if a.banner.text != "cannot reach the Taskronin server" && a.banner.text != "server did not answer" {
-				t.Fatalf("preflight read must use read error policy: %s", a.banner.text)
-			}
+			eq(t, a.banner.text, "not sent — outcome of the first attempt still unknown; enter resends the same request")
+			eq(t, a.banner.readError, false)
+			banner := a.banner.text
+			drain(t, a, a.fetchToday(false))
+			eq(t, a.banner.text, banner)
 			press(t, a, "enter")
 			eq(t, f.mustLast(t, "DeferTask").Mut.Key, "K2")
 		}
+	}
+}
+
+func TestFormRetryEditAndCloseBanners(t *testing.T) { // I1
+	for _, changed := range []bool{false, true} {
+		f := newFake()
+		a := newTestApp(t, f)
+		fm := openDeferForm(t, a)
+		f.errs["DeferTask"] = outcomeUnknown("K2")
+		press(t, a, "enter")
+		snapshot := fm.retry
+		typeText(t, a, " ")
+		if fm.retry != snapshot {
+			t.Fatal("editing discarded the snapshot before enter")
+		}
+		eq(t, a.banner.text, "text changed — enter sends a NEW request; the first attempt may have saved")
+		if !changed {
+			_, cmd := a.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
+			drain(t, a, cmd)
+			eq(t, a.banner.text, "outcome unknown — enter resends the same request")
+		}
+		press(t, a, "esc")
+		eq(t, a.form, nil)
+		eq(t, a.banner.text, "closed — the first attempt may have saved; check before re-adding")
+		eq(t, f.count("DeferTask"), 1)
+	}
+}
+
+func TestFormRetryChangedInputSendsNewRequest(t *testing.T) { // I1: brief's "tomorrow " -> "tomorrow".
+	f := newFake()
+	a := newTestApp(t, f)
+	fm := openDeferForm(t, a)
+	typeText(t, a, " ")
+	f.errs["DeferTask"] = outcomeUnknown("K2")
+	press(t, a, "enter")
+	snapshot := fm.retry
+	f.clock.Today = civil.MustDate("2026-10-29")
+	f.setToday(api.Today{Clock: f.clock}, "next-day")
+	drain(t, a, a.fetchToday(false))
+	_, cmd := a.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
+	drain(t, a, cmd)
+	if fm.retry != snapshot {
+		t.Fatal("snapshot must survive editing until enter")
+	}
+	eq(t, a.banner.text, "text changed — enter sends a NEW request; the first attempt may have saved")
+	press(t, a, "enter")
+	eq(t, f.mustLast(t, "DeferTask").Mut.Key, "")
+	eq(t, f.mustLast(t, "DeferTask").Req.(api.DeferRequest).Until.V.Date, civil.MustDate("2026-10-30"))
+	eq(t, f.count("RefreshGeneration"), 0)
+}
+
+func TestFormRetryNotSentKeepsUnknownOutcome(t *testing.T) { // I2
+	f := newFake()
+	a := newTestApp(t, f)
+	fm := openDeferForm(t, a)
+	f.errs["DeferTask"] = outcomeUnknown("K2")
+	press(t, a, "enter")
+	snapshot := fm.retry
+	f.errs["DeferTask"] = notSent()
+	press(t, a, "enter")
+	eq(t, a.banner.text, "not sent — outcome of the first attempt still unknown; enter resends the same request")
+	if fm.retry != snapshot {
+		t.Fatal("not-sent resend lost snapshot")
+	}
+	press(t, a, "enter")
+	eq(t, f.mustLast(t, "DeferTask").Mut.Key, "K2")
+}
+
+func TestFormRetryDefinitiveProblemDropsSnapshot(t *testing.T) { // M1; CF03 still protects wrapped unknowns.
+	for _, tc := range []struct {
+		code   string
+		status int
+		banner string
+	}{
+		{"precondition_failed", 412, "changed elsewhere — refreshed"},
+		{"validation", 422, "bad input"},
+	} {
+		for _, unknown := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/unknown=%v", tc.code, unknown), func(t *testing.T) {
+				f := newFake()
+				a := newTestApp(t, f)
+				fm := openDeferForm(t, a)
+				f.errs["DeferTask"] = outcomeUnknown("K2")
+				press(t, a, "enter")
+				err := problem(tc.code, tc.status, "bad input")
+				if unknown {
+					err = &client.OutcomeUnknownError{Key: "K2", Err: err}
+				}
+				f.errs["DeferTask"] = err
+				press(t, a, "enter")
+				eq(t, fm.retry != nil, unknown)
+				wantKey := ""
+				if unknown {
+					wantKey = "K2"
+				} else {
+					eq(t, a.banner.text, tc.banner)
+				}
+				press(t, a, "enter")
+				eq(t, f.mustLast(t, "DeferTask").Mut.Key, wantKey)
+			})
+		}
+	}
+}
+
+func TestFormUnknownWithoutKeyHasNoRetry(t *testing.T) { // M2
+	f := newFake()
+	a := newTestApp(t, f)
+	fm := openDeferForm(t, a)
+	f.errs["DeferTask"] = outcomeUnknown("")
+	press(t, a, "enter")
+	eq(t, fm.retry, (*formRetry)(nil))
+	eq(t, fm.waiting, false)
+	eq(t, fm.input.Value(), "tomorrow")
+	eq(t, a.banner.text, "outcome unknown — refreshed; check before repeating")
+}
+
+func TestFormZeroClockCapturesFirstSendTime(t *testing.T) { // M3
+	f := newFake()
+	a := newTestApp(t, f)
+	a.clock.Now = api.Time{}
+	press(t, a, "a")
+	typeText(t, a, "text")
+	fm := a.form.(*form)
+	f.errs["AddTask"] = outcomeUnknown("K3")
+	_, cmd := a.Update(key("enter"))
+	eq(t, f.count("Clock"), 0) // The fallback read belongs to the command.
+	op := cmd()
+	t0 := f.clock.Now.Time
+	f.clock.Now.Time = t0.Add(5 * time.Second)
+	f.setToday(api.Today{Clock: f.clock}, "later")
+	drain(t, a, a.fetchToday(false))
+	_, cmd = a.Update(op)
+	drain(t, a, cmd)
+	eq(t, f.count("Clock"), 1)
+	eq(t, fm.retry.at, t0)
+	press(t, a, "enter")
+	eq(t, f.mustLast(t, "AddTask").Mut.Key, "K3")
+	eq(t, a.form, nil)
+}
+
+func TestFormZeroClockReadFailureSendsNothing(t *testing.T) { // M3
+	f := newFake()
+	a := newTestApp(t, f)
+	a.clock.Now = api.Time{}
+	press(t, a, "a")
+	typeText(t, a, "text")
+	fm := a.form.(*form)
+	f.errs["Clock"] = notSent()
+	press(t, a, "enter")
+	eq(t, f.count("AddTask"), 0)
+	eq(t, fm.waiting, false)
+	eq(t, fm.retry, (*formRetry)(nil))
+	eq(t, a.banner.text, "cannot reach the Taskronin server")
+}
+
+func TestFormEarlierSuccessKeepsNewerForm(t *testing.T) { // M5
+	f := newFake()
+	a := newTestApp(t, f)
+	press(t, a, "a")
+	typeText(t, a, "first")
+	_, cmd := a.Update(key("enter"))
+	drain(t, a, a.openLog(a.clock.Today, link{Why: "no task"}))
+	next := a.form
+	typeText(t, a, "second")
+	drain(t, a, cmd)
+	if a.form != next {
+		t.Fatal("earlier reply closed the newer form")
+	}
+	eq(t, a.form.(*form).input.Value(), "second")
+}
+
+func TestFormVisibleCaret(t *testing.T) { // M7: visible in plain and colour modes, including scrolling.
+	for _, color := range []bool{false, true} {
+		t.Run(fmt.Sprintf("color=%v", color), func(t *testing.T) {
+			a := newTestApp(t, newFake(), func(c *Config) { c.Color = color })
+			press(t, a, "a")
+			typeText(t, a, "宽bc")
+			fm := a.form.(*form)
+			fm.input.SetCursor(1)
+			if !strings.Contains(viewText(a), "宽▏bc") {
+				t.Fatal("missing caret at the editing position")
+			}
+			fm.input.CursorEnd()
+			typeText(t, a, strings.Repeat("宽", 100))
+			for _, width := range []int{100, 20, 3, 2, 1} {
+				a.Update(tea.WindowSizeMsg{Width: width, Height: 8})
+				out := viewText(a)
+				if !strings.Contains(out, "▏") {
+					t.Fatalf("width %d lost the scrolled caret", width)
+				}
+				if !color && strings.ContainsRune(out, '\x1b') {
+					t.Fatalf("plain form emitted ANSI: %q", out)
+				}
+				for _, line := range strings.Split(out, "\n") {
+					if lipgloss.Width(line) > width {
+						t.Fatalf("oversized line %q", line)
+					}
+				}
+			}
+		})
 	}
 }
 

@@ -65,6 +65,9 @@ func (a *App) handleErr(err error) tea.Cmd {
 	var unknown *client.OutcomeUnknownError
 	var problem *client.ProblemError
 	switch {
+	case errors.Is(err, errRetryStale):
+		a.setBanner(bannerError, retryStaleBanner)
+		return a.refresh()
 	case errors.As(err, &unknown):
 		a.setBanner(bannerError, "outcome unknown — refreshed; check before repeating")
 		return a.refresh()

@@ -55,7 +55,8 @@ func (a *App) openLog(date civil.Date, l link) tea.Cmd {
 	}, nil)
 	f := a.form.(*form)
 	// Historical dates and explicit selections retain their supplied link.
-	// A retry keeps both the echoed link and resolved request until edited.
+	// A retry keeps both the echoed link and resolved request until Enter
+	// discards the snapshot for changed text or a definitive/stale reply.
 	if date == a.clock.Today && l.Why != "selected" {
 		f.onToday = func(a *App) {
 			if date == a.clock.Today {

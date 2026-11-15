@@ -56,7 +56,7 @@ func (a *App) openForm(title, hint, initial string,
 	}
 	styles.Cursor.Blink = false
 	input.SetStyles(styles)
-	input.SetVirtualCursor(a.cfg.Color)
+	input.SetVirtualCursor(false) // view renders a static caret in plain and colour modes.
 	input.SetValue(initial)
 	f := &form{title: title, hint: hint, input: input, submit: submit, after: after}
 	a.form = f
@@ -74,6 +74,9 @@ func (f *form) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
 	switch k.String() {
 	case "esc":
 		a.form = nil
+		if f.retry != nil {
+			a.setBanner(bannerError, "closed — the first attempt may have saved; check before re-adding")
+		}
 		return nil, true
 	case "enter":
 		return f.send(a), true
@@ -93,8 +96,12 @@ func (f *form) update(a *App, msg tea.Msg) tea.Cmd {
 	var cmd tea.Cmd
 	f.input, cmd = f.input.Update(msg)
 	if f.input.Value() != old {
-		f.errText, f.retry = "", nil
-		if f.onToday != nil {
+		f.errText = ""
+		// AIDEV-NOTE: retain the snapshot until Enter compares the final text.
+		// Editing and then restoring the original value must still resend it.
+		if f.retry != nil {
+			f.retryBanner(a)
+		} else if f.onToday != nil {
 			f.onToday(a)
 		}
 	}
@@ -105,14 +112,40 @@ func (f *form) view(a *App, w, h int) string {
 	// Sanitize a display copy before textinput applies styles; preserve the
 	// original text and cursor for editing and the request snapshot.
 	input := f.input
-	input.SetWidth(max(1, w-3))
-	input.SetValue(textsafe.SanitizeLine(f.input.Value()))
-	input.SetCursor(f.input.Position())
+	if w < 4 {
+		input.Prompt = "" // Reserve a cell for the caret even in a tiny terminal.
+	}
+	input.SetWidth(max(1, w-textsafe.Width(input.Prompt)-1))
+	value := []rune(textsafe.SanitizeLine(f.input.Value()))
+	pos := min(f.input.Position(), len(value))
+	// The caret is display-only. Keeping it just before textinput's hidden
+	// cursor also keeps it visible when the input scrolls horizontally.
+	input.SetValue(string(value[:pos]) + "▏" + string(value[pos:]))
+	input.SetCursor(pos + 1)
+	inputLine := input.View()
+	if w == 1 {
+		inputLine = "▏" // A wide glyph cannot share this sole cell with the caret.
+	}
 	bottom := a.styles.Dim.Render(a.line(f.hint, w))
 	if f.errText != "" {
 		bottom = a.styles.Err.Render(a.line(f.errText, w))
 	}
-	return clip([]string{a.styles.Info.Render(a.line(f.title, w)), input.View(), bottom}, w, h)
+	return clip([]string{a.styles.Info.Render(a.line(f.title, w)), inputLine, bottom}, w, h)
+}
+
+func (f *form) retryBanner(a *App) {
+	if f.input.Value() == f.retry.value {
+		a.setBanner(bannerError, "outcome unknown — enter resends the same request")
+	} else {
+		a.setBanner(bannerError, "text changed — enter sends a NEW request; the first attempt may have saved")
+	}
+}
+
+func (f *form) dropRetry(a *App) {
+	f.retry = nil
+	if f.onToday != nil {
+		f.onToday(a)
+	}
 }
 
 func (f *form) send(a *App) tea.Cmd {
@@ -129,7 +162,10 @@ func (f *form) send(a *App) tea.Cmd {
 	if snapshot != nil && value == snapshot.value {
 		send = snapshot.send
 	} else {
-		f.retry, snapshot = nil, nil
+		if snapshot != nil {
+			f.dropRetry(a)
+			snapshot = nil
+		}
 		f.label, send, err = f.submit(a, value)
 		if err != nil {
 			f.errText = err.Error()
@@ -140,7 +176,8 @@ func (f *form) send(a *App) tea.Cmd {
 	// AIDEV-NOTE: retry snapshot. Resolve once in Update and capture the FIRST
 	// submission's server time here, never when its reply arrives. Resends keep
 	// the same body/key/gen/at, and check fresh time and identity before sending.
-	// gen is written only by this cmd and read by onErr after opMsg delivery;
+	// If no clock has loaded, read it once before the first send instead.
+	// gen/at are written only by this cmd and read by onErr after opMsg delivery;
 	// Bubble Tea's message channel orders those accesses. No cmd reads App/form.
 	return a.mutate(f.label, func(ctx context.Context, c API) (*api.OpResponse, error) {
 		key := ""
@@ -161,6 +198,13 @@ func (f *form) send(a *App) tea.Cmd {
 			}
 			key = snapshot.key
 		} else {
+			if at.IsZero() {
+				clock, err := c.Clock(ctx)
+				if err != nil {
+					return nil, &formReadError{err: err}
+				}
+				at = clock.Now.Time
+			}
 			var err error
 			gen, err = c.Generation(ctx)
 			if err != nil {
@@ -169,7 +213,10 @@ func (f *form) send(a *App) tea.Cmd {
 		}
 		return send(ctx, c, key)
 	}, func(a *App, r *api.OpResponse) tea.Cmd {
-		a.form = nil
+		f.waiting = false
+		if a.form == f {
+			a.form = nil
+		}
 		if f.after != nil {
 			return f.after(a, r)
 		}
@@ -177,22 +224,32 @@ func (f *form) send(a *App) tea.Cmd {
 	}, func(a *App, err error) {
 		f.waiting = false
 		var read *formReadError
-		if errors.As(err, &read) {
-			return
-		}
 		var unknown *client.OutcomeUnknownError
+		var problem *client.ProblemError
 		switch {
-		case errors.Is(err, errRetryStale), snapshot != nil && errors.Is(err, client.ErrGenerationMismatch):
-			f.retry = nil
-			if f.onToday != nil {
-				f.onToday(a)
+		case errors.Is(err, errRetryStale):
+			f.dropRetry(a)
+		case snapshot != nil && errors.Is(err, client.ErrGenerationMismatch):
+			f.dropRetry(a)
+			if errors.As(err, &unknown) {
+				a.setBanner(bannerError, retryStaleBanner)
 			}
-			a.setBanner(bannerError, retryStaleBanner)
+		case errors.As(err, &read):
+			if snapshot != nil {
+				a.setBanner(bannerError, "not sent — outcome of the first attempt still unknown; enter resends the same request")
+			}
 		case errors.As(err, &unknown):
-			if snapshot == nil {
+			if snapshot == nil && unknown.Key != "" {
 				f.retry = &formRetry{value: value, key: unknown.Key, gen: gen, at: at, send: send}
 			}
-			a.setBanner(bannerError, "outcome unknown — enter resends the same request")
+			if f.retry != nil {
+				f.retryBanner(a)
+			}
+		case errors.As(err, &problem):
+			// A definitive refusal ends this replay; keep handleErr's problem banner.
+			f.dropRetry(a)
+		case snapshot != nil:
+			a.setBanner(bannerError, "not sent — outcome of the first attempt still unknown; enter resends the same request")
 		}
 	})
 }
