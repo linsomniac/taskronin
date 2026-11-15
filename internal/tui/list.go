@@ -42,42 +42,52 @@ func (a *App) loadTasks(target, view string) tea.Cmd {
 	}
 }
 
-type taskList struct {
-	items  []api.Task
+// recordList shares identity-preserving selection and scrolling between tasks
+// and entries. The owning screen supplies identity when replacing its records.
+type recordList[T any] struct {
+	items  []T
+	id     func(T) int64
 	cursor int
 	selID  int64
 	offset int
 }
 
+type taskList struct{ recordList[api.Task] }
+
 func (l *taskList) set(items []api.Task) {
-	l.items = items
+	l.setItems(items, func(t api.Task) int64 { return t.ID })
+}
+
+func (l *recordList[T]) setItems(items []T, id func(T) int64) {
+	l.items, l.id = items, id
 	if len(items) == 0 {
 		l.cursor, l.selID, l.offset = 0, 0, 0
 		return
 	}
-	// AIDEV-NOTE: refreshes preserve identity, not position. If that task
+	// AIDEV-NOTE: refreshes preserve identity, not position. If that record
 	// vanished, adopt the clamped row's ID so the next refresh follows it.
 	for i, t := range items {
-		if t.ID == l.selID {
+		if id(t) == l.selID {
 			l.cursor = i
 			return
 		}
 	}
 	l.cursor = min(max(0, l.cursor), len(items)-1)
-	l.selID = items[l.cursor].ID
+	l.selID = id(items[l.cursor])
 }
 
-func (l *taskList) move(delta int) {
+func (l *recordList[T]) move(delta int) {
 	if len(l.items) == 0 {
 		return
 	}
 	l.cursor = min(max(0, l.cursor+delta), len(l.items)-1)
-	l.selID = l.items[l.cursor].ID
+	l.selID = l.id(l.items[l.cursor])
 }
 
-func (l *taskList) selected() (api.Task, bool) {
+func (l *recordList[T]) selected() (T, bool) {
 	if l.cursor < 0 || l.cursor >= len(l.items) {
-		return api.Task{}, false
+		var zero T
+		return zero, false
 	}
 	return l.items[l.cursor], true
 }
@@ -87,13 +97,13 @@ func (l *taskList) selection() (int64, string, bool) {
 	return t.ID, t.Title, ok
 }
 
-func (l *taskList) render(a *App, w, h int, row func(api.Task, int) string) string {
+func (l *recordList[T]) render(a *App, w, h int, row func(T, int) string) string {
 	return l.renderHeadings(a, w, h, row, nil)
 }
 
 // Headings occupy display lines without becoming selectable rows. offset is a
 // display-line offset so scrolling also accounts for Upcoming's two headings.
-func (l *taskList) renderHeadings(a *App, w, h int, row func(api.Task, int) string, headings map[int]string) string {
+func (l *recordList[T]) renderHeadings(a *App, w, h int, row func(T, int) string, headings map[int]string) string {
 	if w <= 0 || h <= 0 || len(l.items) == 0 {
 		return ""
 	}

@@ -101,6 +101,7 @@ func NewApp(cfg Config) *App {
 	a.tabs[TabTriage] = &triageScreen{}
 	a.tabs[TabBacklog] = &backlogScreen{}
 	a.tabs[TabUpcoming] = &upcomingScreen{}
+	a.tabs[TabLog] = &logScreen{}
 	switch cfg.StartMode {
 	case ModeTriage:
 		a.modeScreen = newCardMode(0)
