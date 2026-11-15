@@ -1,0 +1,39 @@
+{{define "content"}}
+<h1>Report</h1>
+<form method="get" action="/ui/report">
+<label>From <input name="from" value="{{.Data.From}}"></label>
+<label>To <input name="to" value="{{.Data.To}}"></label>
+<label>Tag <input name="tag" value="{{.Data.Tag}}"></label>
+<label>Project <input name="project" value="{{.Data.Project}}"></label>
+<label><input type="checkbox" name="todo" value="1"{{if .Data.Todo}} checked{{end}}> Include to-do tasks</label>
+<label><input type="checkbox" name="upcoming" value="1"{{if .Data.IncludeUpcoming}} checked{{end}}> Include upcoming tasks</label>
+<button type="submit">Filter</button>
+</form>
+{{range .Data.Days}}
+<section aria-label="{{day .Date}}">
+<h2>{{day .Date}}</h2>
+{{range .Lines}}
+<article data-entry="{{.EntryID}}">
+<p>{{if .Time.Valid}}<time>{{hhmm .Time.V}}</time> {{end}}{{if eq .Kind "complete"}}✓ {{end}}{{.Title}}{{if .TaskID.Valid}} [<a href="/ui/tasks/{{.TaskID.V}}">#{{.TaskID.V}}{{if eq (index $.Data.FirstEntries .TaskID.V) .EntryID}} {{(index $.Data.Tasks .TaskID.V).Title}}{{end}}</a>]{{end}}{{if .Reopened}} (reopened){{end}}</p>
+{{if .Notes}}<div class="notes">{{md .Notes}}</div>{{end}}
+</article>
+{{end}}
+</section>
+{{else}}<p>No entries in this date range.</p>{{end}}
+{{with .Data.Todo}}
+<section aria-label="Triage">
+<h2>Triage</h2>
+{{range .Triage}}{{template "taskrow" (row $ .)}}{{else}}<p>Nothing to triage.</p>{{end}}
+</section>
+<section aria-label="Backlog">
+<h2>Backlog</h2>
+{{range .Backlog}}{{template "taskrow" (row $ .)}}{{else}}<p>No backlog tasks.</p>{{end}}
+</section>
+{{end}}
+{{if .Data.IncludeUpcoming}}
+<section aria-label="Upcoming">
+<h2>Upcoming</h2>
+{{range .Data.Upcoming}}{{template "taskrow" (row $ .)}}{{else}}<p>No upcoming tasks.</p>{{end}}
+</section>
+{{end}}
+{{end}}
