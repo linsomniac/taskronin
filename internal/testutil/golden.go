@@ -10,14 +10,20 @@ import (
 	"testing"
 )
 
-var updateGolden = flag.Bool("update", false, "update testdata/golden files")
+func init() {
+	// AIDEV-NOTE: teatest's golden helper also registers -update. Reuse its
+	// boolean flag when both helpers are linked into the TUI end-to-end tests.
+	if flag.Lookup("update") == nil {
+		flag.Bool("update", false, "update testdata/golden files")
+	}
+}
 
 // Golden compares got with testdata/golden/<name>.golden, relative to the
 // calling package's working directory. Pass -update to rewrite the fixture.
 func Golden(t testing.TB, name string, got []byte) {
 	t.Helper()
 	p := filepath.Join("testdata", "golden", name+".golden")
-	if *updateGolden {
+	if flag.Lookup("update").Value.String() == "true" {
 		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 			t.Fatalf("create golden directory: %v", err)
 		}

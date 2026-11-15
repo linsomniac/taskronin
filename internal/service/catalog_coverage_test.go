@@ -12,9 +12,7 @@ import (
 
 // IDs whose tests live in other plans (catalog §17). Plans B and C remove
 // their IDs here when they add Test<PFX><NN>_<suffix> scenario tests.
-var notPlanA = map[string]string{
-	"TRI-17": "C",
-}
+var notPlanA = map[string]string{}
 
 func TestCatalogCoverage(t *testing.T) {
 	ids := catalogIDs(t, "../../docs/superpowers/specs/2026-10-25-taskronin-behavior-catalog.md")
