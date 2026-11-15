@@ -114,7 +114,7 @@ func TestTodayActions(t *testing.T) {
 	td.Focus = nil
 	f.setToday(td, `"a-2"`)
 	drain(t, a, a.fetchToday(false))
-	press(t, a, "x")
+	press(t, a, "esc", "x")
 	eq(t, a.banner.text, "no focus task")
 	eq(t, f.count("CompleteTask"), 1)
 }
@@ -128,11 +128,13 @@ func TestTodaySelectionAndLog(t *testing.T) {
 	eq(t, a.form.(*form).title, "Log → #42 (focus)")
 	press(t, a, "esc", "j", "l")
 	eq(t, a.form.(*form).title, "Log → #57 (selected)")
-	press(t, a, "esc", "j", "j", "j", "j")
+	press(t, a, "esc", "j", "j", "j")
 	id, _, selected := a.current().selection()
-	eq(t, id, int64(57)) // Last row is triage; navigation clamps here.
+	eq(t, id, int64(57)) // Last selectable row is triage in this fixture.
 	eq(t, selected, true)
-	press(t, a, "B", "U")
+	press(t, a, "B")
+	eq(t, a.form.(*form).title, "Block #57")
+	press(t, a, "esc", "U")
 	eq(t, a.form, nil)
 	eq(t, f.count("Reblock")+f.count("Unblock"), 0)
 	press(t, a, "f")
@@ -181,7 +183,7 @@ func TestTodayActionsCaptureAndGuard(t *testing.T) {
 			case "U":
 				eq(t, f.mustLast(t, "Unblock").ID, int64(8))
 			case "x":
-				eq(t, f.mustLast(t, "CompleteTask").ID, int64(42))
+				eq(t, f.mustLast(t, "CompleteTask").ID, int64(57))
 			}
 		})
 	}

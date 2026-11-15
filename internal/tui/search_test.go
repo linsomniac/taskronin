@@ -214,7 +214,8 @@ func TestSearchRevealedAfterOwnOpReloadsQuery(t *testing.T) { // M2.
 			f.aiPages = []api.AIChanges{{Ops: []api.OpSummary{aiOp(12)}}}
 			a := newTestApp(t, f)
 			searchFor(t, a, "original query")
-			press(t, a, "A")
+			// Exercise hidden-screen invalidation independently of the A key guard.
+			drain(t, a, a.openOverlay(newAIOverlay()))
 			f.hits = []api.SearchHit{{Kind: "task", ID: 60, Title: "fresh result"}}
 			press(t, a, k)
 			eq(t, f.count("Search"), 1)

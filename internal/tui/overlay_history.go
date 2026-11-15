@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"taskronin/internal/api"
+	"taskronin/internal/civil"
 	"taskronin/internal/client"
 	"taskronin/internal/textsafe"
 )
@@ -71,10 +72,7 @@ func (s *historyScreen) view(a *App, w, h int) string {
 	}
 	lines := []string{fmt.Sprintf("History for #%d", s.id), "j/k scroll · esc back"}
 	for _, e := range s.page.Items {
-		stamp := e.Op.At.Format("15:04")
-		if e.Op.At.Format("2006-01-02") != a.clock.Today.String() {
-			stamp = e.Op.At.Format("2006-01-02 15:04")
-		}
+		stamp := eventTime(e.Op.At, a.clock.Today)
 		lines = append(lines, textsafe.SanitizeLine(fmt.Sprintf("%s %s by %s  %s:%s", stamp, e.Op.Kind, e.Op.Actor, e.Entity, e.Action)))
 	}
 	if len(s.page.Items) == 0 {
@@ -84,4 +82,11 @@ func (s *historyScreen) view(a *App, w, h int) string {
 		lines = append(lines, "more… (older events not shown)")
 	}
 	return overlayViewport(&s.viewport, lines, w, h)
+}
+
+func eventTime(at api.Time, today civil.Date) string {
+	if at.Format("2006-01-02") != today.String() {
+		return at.Format("2006-01-02 15:04")
+	}
+	return at.Format("15:04")
 }

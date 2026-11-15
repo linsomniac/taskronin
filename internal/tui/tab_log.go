@@ -129,7 +129,7 @@ func (s *logScreen) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
 				}, nil
 			}, nil).focus(), true
 	case "X":
-		return a.confirm(fmt.Sprintf("delete e%d? (y/n)", e.ID), func(a *App) tea.Cmd {
+		return a.confirm(fmt.Sprintf("delete e%d?", e.ID), func(a *App) tea.Cmd {
 			return a.mutate("entry deleted", func(ctx context.Context, c API) (*api.OpResponse, error) {
 				return c.DeleteEntry(ctx, client.Mut{IfMatch: e.ETag}, e.ID)
 			}, nil, nil)

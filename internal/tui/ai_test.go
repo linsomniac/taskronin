@@ -325,7 +325,9 @@ func TestAIStackedLoadsRemainIndependent(t *testing.T) { // M1.
 					_, lowerLoad = a.Update(key("j"))
 				}
 				searchFor(t, a, "between overlays")
-				_, upperLoad := a.Update(key("A"))
+				// Build a synthetic stack to retain reply-isolation coverage; the
+				// public A binding now refuses to stack AI overlays (P17).
+				upperLoad := a.openOverlay(newAIOverlay())
 				if lowerFirst {
 					drain(t, a, lowerLoad)
 					drain(t, a, upperLoad)
@@ -363,7 +365,7 @@ func TestAIStackedFailedLoadReleasesGuard(t *testing.T) { // M1.
 	a := newTestApp(t, f)
 	_, lower := a.Update(key("A"))
 	searchFor(t, a, "between overlays")
-	press(t, a, "A")
+	drain(t, a, a.openOverlay(newAIOverlay())) // Synthetic stack; A no longer opens over overlays.
 	f.errs["AIChanges"] = notSent()
 	drain(t, a, lower)
 	press(t, a, "esc", "esc")

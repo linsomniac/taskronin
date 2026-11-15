@@ -218,7 +218,9 @@ func (s *planMode) freeText(a *App) string {
 
 func (s *planMode) view(a *App, w, h int) string {
 	if s.step == 1 {
-		return (&cardMode{deck: s.deck}).view(a, w, h)
+		header := a.line("Plan 1/3 · enter skips to backlog", w)
+		body := s.deck.screenView(a, w, max(0, h-1))
+		return clip(append([]string{header}, strings.Split(body, "\n")...), w, h)
 	}
 	if s.step == 2 {
 		leftWidth := max(0, w/2)

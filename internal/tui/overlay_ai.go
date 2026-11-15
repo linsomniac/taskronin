@@ -164,7 +164,7 @@ func (s *aiScreen) view(a *App, w, h int) string {
 	}
 	lines = append(lines, a.line(hint, w))
 	body := s.list.render(a, w, max(0, h-len(lines)), func(op api.OpSummary, width int) string {
-		text := fmt.Sprintf("%d %s %s by %s", op.Seq, op.At.Format("15:04"), op.Kind, op.Actor)
+		text := fmt.Sprintf("%d %s %s by %s", op.Seq, eventTime(op.At, a.clock.Today), op.Kind, op.Actor)
 		if op.State == "reverted" {
 			text += " [reverted]"
 		}

@@ -14,13 +14,16 @@ import (
 )
 
 type todayRow struct {
-	taskID int64
-	title  string
-	block  *api.Block
+	taskID  int64
+	title   string
+	etag    string
+	section string
+	block   *api.Block
 }
 
 type todayScreen struct {
 	rows   []todayRow
+	scroll int // Extra lines below the selected task, including nonselectable tail sections.
 	cursor int // -1 leaves logging to the implicit focus/current-block rule.
 }
 
@@ -37,15 +40,24 @@ func (s *todayScreen) update(a *App, msg tea.Msg) tea.Cmd {
 	}
 	s.rows, s.cursor = nil, -1
 	for _, b := range a.today.Blocks {
-		s.rows = append(s.rows, todayRow{taskID: b.TaskID, title: b.TaskTitle, block: &b})
+		s.rows = append(s.rows, todayRow{taskID: b.TaskID, title: b.TaskTitle, etag: b.TaskETag, section: "blocks", block: &b})
 	}
 	for _, t := range a.today.TriageTop[:min(5, len(a.today.TriageTop))] {
-		s.rows = append(s.rows, todayRow{taskID: t.ID, title: t.Title})
+		s.rows = append(s.rows, todayRow{taskID: t.ID, title: t.Title, etag: t.ETag, section: "triage"})
+	}
+
+	for _, section := range []struct {
+		name  string
+		tasks []api.Task
+	}{{"overdue", a.today.Overdue}, {"due soon", a.today.DueSoon}} {
+		for _, t := range section.tasks {
+			s.rows = append(s.rows, todayRow{taskID: t.ID, title: t.Title, etag: t.ETag, section: section.name})
+		}
 	}
 	// A task can have several blocks and a triage row. Follow the exact row
 	// across a refresh; if it disappears, require a new explicit selection.
 	for i, row := range s.rows {
-		if row.taskID == selected.taskID && ((row.block == nil && selected.block == nil) ||
+		if row.taskID == selected.taskID && row.section == selected.section && ((row.block == nil && selected.block == nil) ||
 			(row.block != nil && selected.block != nil && row.block.ID == selected.block.ID)) {
 			s.cursor = i
 			break
@@ -69,27 +81,42 @@ func (s *todayScreen) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
 	}
 	switch todayKeys.command(k) {
 	case "j":
-		s.cursor = min(s.cursor+1, len(s.rows)-1)
+		if s.cursor < len(s.rows)-1 {
+			s.cursor++
+			s.scroll = 0
+		} else {
+			s.scroll++
+		}
 		return nil, true
 	case "k":
-		if s.cursor >= 0 {
+		if s.scroll > 0 {
+			s.scroll--
+		} else if s.cursor >= 0 {
 			s.cursor = max(0, s.cursor-1)
 		}
 		return nil, true
 	case "esc":
-		s.cursor = -1
+		s.cursor, s.scroll = -1, 0
 		return nil, false // Also clear the app banner.
 	case "l":
 		return a.openLog(a.clock.Today, a.logLink()), true
+
 	case "x":
-		if a.today == nil || a.today.Focus == nil {
+		var target api.Task
+		switch {
+		case s.cursor >= 0 && s.cursor < len(s.rows):
+			row := s.rows[s.cursor]
+			target = api.Task{ID: row.taskID, Title: row.title, ETag: row.etag}
+		case a.today != nil && a.today.Focus != nil:
+			target = *a.today.Focus
+		default:
 			a.setBanner(bannerInfo, "no focus task")
 			return nil, true
 		}
-		focus := *a.today.Focus
 		return a.mutate("completed", func(ctx context.Context, c API) (*api.OpResponse, error) {
-			return c.CompleteTask(ctx, client.Mut{IfMatch: focus.ETag}, focus.ID, api.CompleteRequest{})
+			return c.CompleteTask(ctx, client.Mut{IfMatch: target.ETag}, target.ID, api.CompleteRequest{})
 		}, nil, nil), true
+
 	case "f", "B", "U":
 		id, _, ok := s.selection()
 		if !ok {
@@ -106,6 +133,10 @@ func (s *todayScreen) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
 			}, nil, nil), true
 		}
 		if s.rows[s.cursor].block == nil {
+			if k.String() == "B" {
+				row := s.rows[s.cursor]
+				return a.openBlock(api.Task{ID: row.taskID, Title: row.title, ETag: row.etag}, nil).focus(), true
+			}
 			a.setBanner(bannerInfo, "select a block row")
 			return nil, true
 		}
@@ -175,6 +206,7 @@ func (s *todayScreen) view(a *App, w, h int) string {
 		}
 		lines = append(lines, a.row(todayTaskText(task), w, selected))
 	}
+	rowIndex := len(td.Blocks) + min(5, len(td.TriageTop))
 	for _, section := range []struct {
 		title string
 		tasks []api.Task
@@ -182,7 +214,12 @@ func (s *todayScreen) view(a *App, w, h int) string {
 		if len(section.tasks) > 0 {
 			lines = append(lines, a.line(section.title, w))
 			for _, t := range section.tasks {
-				lines = append(lines, a.row(todayTaskText(t), w, false))
+				selected := rowIndex == s.cursor
+				if selected {
+					selectedLine = len(lines)
+				}
+				lines = append(lines, a.row(todayTaskText(t), w, selected))
+				rowIndex++
 			}
 		}
 	}
@@ -234,7 +271,9 @@ func (s *todayScreen) view(a *App, w, h int) string {
 	if h > 0 && selectedLine >= h {
 		start = selectedLine - h + 1
 	}
-	return clip(lines[start:], w, h)
+	// j/k continue beyond task rows into log, interruptions, AI and notices.
+	s.scroll = min(s.scroll, max(0, len(lines)-h-start))
+	return clip(lines[min(len(lines), start+s.scroll):], w, h)
 }
 
 func todayTaskText(t api.Task) string {

@@ -138,7 +138,7 @@ func TestCardAcceptNew(t *testing.T) { // TRI-18 (TUI side).
 			f.tasks["triage"] = []api.Task{task(1, "A", "new"), task(2, "B", "new"), task(3, "C", "new", "slipped"), task(4, "D", "surfaced")}
 			a := cardApp(t, f)
 			press(t, a, "A")
-			if !strings.Contains(viewText(a), "accept 2 new → bottom? (y/n)") {
+			if !strings.Contains(viewText(a), "accept 2 new → bottom? [y/N]") {
 				t.Fatal(viewText(a))
 			}
 			eq(t, f.count("AcceptNew"), 0)

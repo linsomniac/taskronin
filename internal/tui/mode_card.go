@@ -208,17 +208,19 @@ func (s *cardMode) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
 
 const cardLegend = "k keep · t top · b bottom · p place · d defer · B block · x done · D drop · s skip · A accept new"
 
-func (s *cardMode) view(a *App, w, h int) string {
-	if s.deck.state == loadFailed {
-		return a.line(s.deck.state.notice("triage"), w)
+func (s *cardMode) view(a *App, w, h int) string { return s.deck.screenView(a, w, h) }
+
+func (d *cardDeck) screenView(a *App, w, h int) string {
+	if d.state == loadFailed {
+		return a.line(d.state.notice("triage"), w)
 	}
-	if _, ok := s.deck.current(); !ok {
-		if s.deck.state != loadLoaded {
+	if _, ok := d.current(); !ok {
+		if d.state != loadLoaded {
 			return a.line("loading…", w)
 		}
-		return a.line(fmt.Sprintf("Triage clear (%d skipped)", s.deck.skipped), w)
+		return a.line(fmt.Sprintf("Triage clear (%d skipped)", d.skipped), w)
 	}
-	return s.deck.view(a, w, h)
+	return d.view(a, w, h)
 }
 
 func (d *cardDeck) view(a *App, w, h int) string {
@@ -369,7 +371,7 @@ func (d *cardDeck) acceptNew(a *App) tea.Cmd {
 		a.setBanner(bannerInfo, "no new-only tasks")
 		return nil
 	}
-	return a.confirm(fmt.Sprintf("accept %d new → bottom? (y/n)", len(r.Items)), func(a *App) tea.Cmd {
+	return a.confirm(fmt.Sprintf("accept %d new → bottom?", len(r.Items)), func(a *App) tea.Cmd {
 		return a.mutate("accepted new tasks", func(ctx context.Context, c API) (*api.OpResponse, error) {
 			return c.AcceptNew(ctx, client.Mut{}, r)
 		}, func(_ *App, _ *api.OpResponse) tea.Cmd {

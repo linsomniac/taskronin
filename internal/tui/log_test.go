@@ -114,7 +114,7 @@ func TestLogTabActions(t *testing.T) {
 		t.Run("delete "+answer, func(t *testing.T) {
 			a, f := logApp(t)
 			press(t, a, "X")
-			if !strings.Contains(viewText(a), "delete e9? (y/n)") {
+			if !strings.Contains(viewText(a), "delete e9? [y/N]") {
 				t.Fatal("missing confirmation", viewText(a))
 			}
 			eq(t, f.count("DeleteEntry"), 0)

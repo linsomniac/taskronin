@@ -132,6 +132,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, a.poll()
 	case editorTaskMsg:
 		if !a.latest("editor", msg.req) {
+			// AIDEV-NOTE: this stale read cannot launch an editor; release its
+			// reserved mutation guard so later actions are not stranded.
+			a.inflight = false
 			return a, nil
 		}
 		if msg.err != nil {
@@ -243,6 +246,10 @@ func (a *App) handleKey(k tea.KeyPressMsg) tea.Cmd {
 	if binding.Matches(k, a.keys.ForceQuit) {
 		return a.quit()
 	}
+	if binding.Matches(k, a.keys.Quit) && a.inflight {
+		a.setBanner(bannerInfo, "busy… (ctrl+c forces)")
+		return nil
+	}
 	if a.form != nil {
 		cmd, _ := a.form.handle(a, k)
 		return cmd
@@ -256,6 +263,10 @@ func (a *App) handleKey(k tea.KeyPressMsg) tea.Cmd {
 			return a.closeOverlay()
 		}
 	} else if a.mode != ModeTabs && binding.Matches(k, a.keys.Quit, a.keys.Escape) {
+		if binding.Matches(k, a.keys.Escape) && a.banner.text != "" {
+			a.banner = banner{}
+			return nil
+		}
 		return a.exitMode()
 	}
 	// AIDEV-NOTE: arrow aliases apply only to lists in tabs/overlays. In card
@@ -302,7 +313,7 @@ func (a *App) handleKey(k tea.KeyPressMsg) tea.Cmd {
 			return c.Redo(ctx, client.Mut{})
 		}, nil, nil)
 	}
-	if a.mode == ModeTabs && binding.Matches(k, a.keys.AI) {
+	if a.mode == ModeTabs && len(a.overlays) == 0 && binding.Matches(k, a.keys.AI) {
 		return a.openOverlay(newAIOverlay())
 	}
 	if a.mode != ModeTabs || len(a.overlays) > 0 {
@@ -329,12 +340,17 @@ func (a *App) quit() tea.Cmd { a.quitting = true; return tea.Quit }
 func (a *App) View() tea.View {
 	w, h := a.width, a.height
 	footer := a.helpView(w)
-	if a.banner.text != "" && !a.help.ShowAll {
+	if a.banner.text != "" {
 		style := a.styles.Info
 		if a.banner.kind == bannerError {
 			style = a.styles.Err
 		}
-		footer = style.Render(a.line(a.banner.text, w))
+		notice := style.Render(a.line(a.banner.text, w))
+		if a.help.ShowAll {
+			footer = notice + "\n" + footer
+		} else {
+			footer = notice
+		}
 	}
 	bottom := append(a.draftLines(w), strings.Split(footer, "\n")...)
 	formHeight := 0
