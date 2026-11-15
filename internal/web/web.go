@@ -3,6 +3,7 @@ package web
 
 import (
 	"embed"
+	"html/template"
 	"log/slog"
 	"net/http"
 	"time"
@@ -24,6 +25,9 @@ const (
 //go:embed static
 var staticFS embed.FS
 
+//go:embed templates
+var templateFS embed.FS
+
 // Options supplies the service and configuration for the bound loopback listener.
 type Options struct {
 	Svc       *service.Service
@@ -35,10 +39,11 @@ type Options struct {
 }
 
 type app struct {
-	o       Options
-	hosts   map[string]bool
-	origins map[string]bool
-	mux     *http.ServeMux
+	o         Options
+	hosts     map[string]bool
+	origins   map[string]bool
+	mux       *http.ServeMux
+	templates map[string]*template.Template
 }
 
 // New constructs the web handler, rejecting Listen unless it has a numeric port.
@@ -55,14 +60,20 @@ func newApp(o Options) (*app, error) {
 	if err != nil {
 		return nil, err
 	}
+	if o.Logger == nil {
+		o.Logger = slog.Default()
+	}
 	a := &app{o: o, hosts: hosts, origins: make(map[string]bool, len(hosts))}
 	for host := range hosts {
 		a.origins["http://"+host] = true
+	}
+	if err := a.parseTemplates(); err != nil {
+		return nil, err
 	}
 	a.mux = a.routes()
 	return a, nil
 }
 
 func (a *app) handler() http.Handler {
-	return securityHeaders(a.checkHost(routeClass(bodyLimit(readDeadline(a.mux)))))
+	return securityHeaders(a.checkHost(routeClass(a.bodyLimit(readDeadline(a.mux)))))
 }

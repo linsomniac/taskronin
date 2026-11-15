@@ -1,0 +1,33 @@
+{{define "content"}}
+{{$stale := or (eq .Err.Code "precondition_failed") (eq .Err.Code "generation_mismatch")}}
+<section class="error" data-code="{{.Err.Code}}">
+<h1>{{.Title}}</h1>
+{{if $stale}}
+<p>This changed elsewhere since the page was loaded — <a href="{{.Return}}">reload</a>.</p>
+{{else}}
+<p>{{.Err.Detail}}</p>
+{{end}}
+{{if .Err.Fields}}
+<ul>{{range .Err.Fields}}<li>{{.Field}}: {{.Message}}</li>{{end}}</ul>
+{{end}}
+{{if .Err.Conflicts}}
+<ul>{{range .Err.Conflicts}}<li>{{short .OpID}} — {{.Kind}}</li>{{end}}</ul>
+{{end}}
+{{with .Resubmit}}
+<h2>{{if $stale}}Your input — reload, then paste{{else}}Your input{{end}}</h2>
+<form method="post" action="{{.Action}}">
+{{template "csrfnonce" $}}
+{{range $key, $values := .Keep}}{{range $values}}
+<input type="hidden" name="{{$key}}" value="{{.}}">
+{{end}}{{end}}
+{{range .Fields}}
+<p><label>{{.Name}}
+{{if .Long}}<textarea name="{{.Name}}"{{if $stale}} readonly{{end}}>
+{{.Value}}</textarea>{{else}}<input type="text" name="{{.Name}}" value="{{.Value}}"{{if $stale}} readonly{{end}}>{{end}}
+</label></p>
+{{end}}
+{{if not $stale}}<button type="submit">Try again</button>{{end}}
+</form>
+{{end}}
+</section>
+{{end}}

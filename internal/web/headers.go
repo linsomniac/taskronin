@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"taskronin/internal/domain"
 )
 
 func hostAllowlist(listen string) (map[string]bool, error) {
@@ -87,13 +89,24 @@ func routeClass(next http.Handler) http.Handler {
 	})
 }
 
-func bodyLimit(next http.Handler) http.Handler {
+func (a *app) bodyLimit(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 			if status := parsePostForm(w, r); status != 0 {
-				// AIDEV-TODO: Plan D Task 3/4 (DF10) routes htmx form errors
-				// through renderError here once the renderer exists.
-				http.Error(w, http.StatusText(status), status)
+				// AIDEV-NOTE: Plan D DF10 routes htmx form errors through
+				// renderError so the fixed htmx config displays the failure.
+				if r.Header.Get("HX-Request") == "true" {
+					code := domain.CodeMalformed
+					switch status {
+					case http.StatusRequestEntityTooLarge:
+						code = domain.CodeTooLarge
+					case http.StatusUnsupportedMediaType:
+						code = domain.CodeUnsupportedMedia
+					}
+					a.renderError(w, r, domain.Errorf(code, "%s", http.StatusText(status)))
+				} else {
+					http.Error(w, http.StatusText(status), status)
+				}
 				return
 			}
 		}

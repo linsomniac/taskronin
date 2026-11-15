@@ -1,0 +1,30 @@
+{{define "layout"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="htmx-config" content='{"allowEval":false,"allowScriptTags":false,"selfRequestsOnly":true,"includeIndicatorStyles":false,"historyCacheSize":0,"refreshOnHistoryMiss":true}'>
+<title>{{.Title}} · Taskronin</title>
+<link rel="stylesheet" href="/static/app.css?v={{.Version}}">
+<script src="/static/htmx-2.0.11.min.js"></script>
+</head>
+<body hx-boost="true" hx-headers='{"X-CSRF-Token":"{{.CSRF}}"}'>
+{{if .CSRF}}
+<nav aria-label="Main">
+<a href="/ui/"{{if eq .Tab "today"}} aria-current="page"{{end}}>Today</a>
+<a href="/ui/triage"{{if eq .Tab "triage"}} aria-current="page"{{end}}>Triage</a>
+<a href="/ui/backlog"{{if eq .Tab "backlog"}} aria-current="page"{{end}}>Backlog</a>
+<a href="/ui/upcoming"{{if eq .Tab "upcoming"}} aria-current="page"{{end}}>Upcoming</a>
+<a href="/ui/log"{{if eq .Tab "log"}} aria-current="page"{{end}}>Log</a>
+<a href="/ui/report"{{if eq .Tab "report"}} aria-current="page"{{end}}>Report</a>
+<a href="/ui/search"{{if eq .Tab "search"}} aria-current="page"{{end}}>Search</a>
+<a href="/ui/ai-changes"{{if eq .Tab "ai"}} aria-current="page"{{end}}>AI changes</a>
+<form method="post" action="/ui/logout" hx-boost="false">
+{{template "hidden" $}}
+<button type="submit">Log out</button>
+</form>
+</nav>
+{{end}}
+<main>{{template "content" .}}</main>
+</body>
+</html>{{end}}

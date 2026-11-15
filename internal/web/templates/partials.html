@@ -1,0 +1,14 @@
+{{define "csrfnonce"}}
+<input type="hidden" name="_csrf" value="{{.CSRF}}">
+<input type="hidden" name="_nonce" value="{{nonce}}">
+{{end}}
+
+{{define "hidden"}}
+{{template "csrfnonce" .}}
+<input type="hidden" name="_gen" value="{{.Gen}}">
+<input type="hidden" name="_return" value="{{.Return}}">
+{{end}}
+
+{{/* AIDEV-NOTE: Invoke row partials with (row $ .). In them, use .V for
+row data and .P for page state, including {{template "hidden" .P}} and
+{{etag .P.Gen .V.Version}}. Page-level forms use {{template "hidden" $}}. */}}

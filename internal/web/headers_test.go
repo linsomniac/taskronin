@@ -210,7 +210,7 @@ func TestBodyLimit(t *testing.T) {
 			originalBody := r.Body
 			var called bool
 			var form url.Values
-			h := web.BodyLimit(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			h := newTestApp(t).App.BodyLimit(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				called, form = true, r.PostForm
 				if tc.method == http.MethodGet && (r.Body != originalBody || r.PostForm != nil || r.Form != nil) {
 					t.Error("GET body/form was changed")
