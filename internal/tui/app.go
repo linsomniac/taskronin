@@ -103,7 +103,7 @@ func NewApp(cfg Config) *App {
 	a.tabs[TabUpcoming] = &upcomingScreen{}
 	switch cfg.StartMode {
 	case ModeTriage:
-		a.modeScreen = stubScreen{name: "Triage"}
+		a.modeScreen = newCardMode(0)
 	case ModePlan:
 		a.modeScreen = stubScreen{name: "Plan"}
 	case ModeRecap:
@@ -200,7 +200,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.onErr != nil {
 				msg.onErr(a, msg.err)
 			}
-			return a, cmd
+			// Card screens can use a definitive 412's Current after handleErr
+			// schedules its refresh; forms retain their own retry/error policy.
+			return a, tea.Batch(cmd, a.current().update(a, msg))
 		}
 		a.setBanner(bannerInfo, msg.label)
 		if msg.resp != nil {

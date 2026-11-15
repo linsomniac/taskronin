@@ -27,12 +27,16 @@ func (s *triageScreen) update(a *App, msg tea.Msg) tea.Cmd {
 
 func (s *triageScreen) selection() (int64, string, bool) { return s.list.selection() }
 
-func (s *triageScreen) handle(_ *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
+func (s *triageScreen) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
 	switch k.String() {
 	case "j":
 		s.list.move(1)
 	case "k":
 		s.list.move(-1)
+	case "enter":
+		if t, ok := s.list.selected(); ok {
+			return a.enterMode(ModeTriage, newCardMode(t.ID)), true
+		}
 	default:
 		return nil, false
 	}
