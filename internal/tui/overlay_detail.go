@@ -1,0 +1,175 @@
+package tui
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+
+	"taskronin/internal/api"
+	"taskronin/internal/client"
+	"taskronin/internal/textsafe"
+)
+
+type detailScreen struct {
+	id       int64
+	req      int
+	detail   *api.TaskDetail
+	viewport viewport.Model
+}
+
+type detailMsg struct {
+	req    int
+	detail *api.TaskDetail
+	err    error
+}
+
+func (a *App) openDetail(id int64) tea.Cmd {
+	return a.openOverlay(&detailScreen{id: id, viewport: viewport.New()})
+}
+
+func (s *detailScreen) load(a *App) tea.Cmd {
+	req, ctx, c, id := a.nextReq("detail"), a.ctx, a.api, s.id
+	s.req = req
+	return func() tea.Msg {
+		d, err := c.GetTask(ctx, id)
+		return detailMsg{req: req, detail: d, err: err}
+	}
+}
+
+func (s *detailScreen) update(a *App, msg tea.Msg) tea.Cmd {
+	m, ok := msg.(detailMsg)
+	if !ok || m.req != s.req || !a.latest("detail", m.req) {
+		return nil
+	}
+	if m.err != nil {
+		return a.handleReadErr(m.err)
+	}
+	s.detail = m.detail
+	return nil
+}
+
+func (s *detailScreen) selection() (int64, string, bool) {
+	if s.detail == nil {
+		return 0, "", false
+	}
+	return s.id, s.detail.Title, true
+}
+
+func (s *detailScreen) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
+	switch k.String() {
+	case "j":
+		s.viewport.ScrollDown(1)
+	case "k":
+		s.viewport.ScrollUp(1)
+	case "e":
+		return a.editTask(s.id), true
+	case "h":
+		return a.openHistory(s.id), true
+	case "t":
+		if s.detail != nil {
+			return s.tagsForm(a), true
+		}
+	default:
+		return nil, false
+	}
+	return nil, true
+}
+
+func (s *detailScreen) tagsForm(a *App) tea.Cmd {
+	id, etag := s.id, s.detail.ETag
+	return a.openForm(fmt.Sprintf("Tags for #%d", id), "+tag or tag adds · -tag removes · enter saves · esc cancels", "",
+		func(_ *App, value string) (string, sendFunc, error) {
+			r := api.UpdateTaskRequest{}
+			for _, token := range strings.Fields(value) {
+				if strings.HasPrefix(token, "-") {
+					r.TagsRemove = append(r.TagsRemove, strings.TrimPrefix(token, "-"))
+				} else {
+					r.TagsAdd = append(r.TagsAdd, strings.TrimPrefix(token, "+"))
+				}
+			}
+			return "tags updated", func(ctx context.Context, c API, key string) (*api.OpResponse, error) {
+				return c.UpdateTask(ctx, client.Mut{IfMatch: etag, Key: key}, id, r)
+			}, nil
+		}, nil)
+}
+
+func (s *detailScreen) view(a *App, w, h int) string {
+	if s.detail == nil {
+		return a.line(fmt.Sprintf("Loading #%d…", s.id), w)
+	}
+	d := s.detail
+	var lines []string
+	add := func(text string) { lines = append(lines, textsafe.SanitizeLine(text)) }
+	add(fmt.Sprintf("#%d %s", s.id, d.Title))
+	add("e edit · t tags · h history · j/k scroll · esc back")
+	add("Status: " + d.Status + " · View: " + d.View)
+	for _, field := range []struct {
+		name  string
+		value *string
+	}{{"Project", d.Project}, {"Priority", d.Priority}} {
+		if field.value != nil {
+			add(field.name + ": " + *field.value)
+		}
+	}
+	add("Tags: " + strings.Join(d.Tags, ", "))
+	add("Origin: " + d.Origin)
+	for _, field := range []struct {
+		name  string
+		value *api.Moment
+	}{{"Defer", d.Defer}, {"Due", d.Due}} {
+		if field.value != nil {
+			text := field.name + ": " + field.value.Date.String()
+			if field.value.Time != nil {
+				text += " " + hhmm(int(*field.value.Time))
+			}
+			add(text)
+		}
+	}
+	add(fmt.Sprintf("Slips: %d lifetime, %d since triage", d.Slips.Lifetime, d.Slips.SinceTriage))
+	add("Reasons")
+	for _, r := range d.Reasons {
+		add(r.Reason + " since " + r.Since.Format("2006-01-02 15:04"))
+	}
+	add("Notes")
+	lines = append(lines, strings.Split(textsafe.Sanitize(d.Notes), "\n")...)
+	add("Blocks")
+	for _, b := range d.Blocks {
+		text := fmt.Sprintf("b%d %s %s %s", b.ID, b.Date, spanText(b.Start, b.End), b.Status)
+		if b.Slipped {
+			text += " (slipped)"
+		}
+		if b.NeedsReblock {
+			text += " (reblock?)"
+		}
+		add(text)
+	}
+	add("Entries")
+	for _, e := range d.Entries {
+		text := fmt.Sprintf("e%d %s", e.ID, e.WorkDate)
+		if e.Time != nil {
+			text += " " + hhmm(int(*e.Time))
+		}
+		add(text + " " + e.Title + " (" + e.Kind + ")")
+	}
+	if len(d.Interruptions) > 0 {
+		add("Interruptions")
+		for _, i := range d.Interruptions {
+			add(interruptionLine(i, nil, nil))
+		}
+	}
+	return overlayViewport(&s.viewport, lines, w, h)
+}
+
+// overlayViewport receives sanitized lines and clips before viewport styling.
+func overlayViewport(v *viewport.Model, lines []string, w, h int) string {
+	v.SetWidth(max(0, w))
+	v.SetHeight(max(0, h))
+	for i, line := range lines {
+		lines[i] = textsafe.Truncate(line, max(0, w), "…")
+	}
+	v.SetContentLines(lines)
+	return v.View()
+}

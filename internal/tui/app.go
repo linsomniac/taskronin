@@ -56,6 +56,7 @@ type App struct {
 	modeScreen   screen
 	exitWithMode bool
 	overlays     []screen
+	overlayDirty bool // An own op requires reloading the underlying tab/mode on reveal.
 	form         screen
 	banner       banner
 	inflight     bool
@@ -78,6 +79,9 @@ func NewApp(cfg Config) *App {
 	}
 	if cfg.Editor.Getenv == nil {
 		cfg.Editor.Getenv = func(string) string { return "" }
+	}
+	if cfg.Editor.Exec == nil {
+		cfg.Editor.Exec = tea.ExecProcess
 	}
 	if cfg.RecapDate == (civil.Date{}) {
 		cfg.RecapDate = cfg.Clock.Today
@@ -119,6 +123,27 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, a.handleKey(msg)
 	case pollMsg:
 		return a, a.poll()
+	case editorTaskMsg:
+		if !a.latest("editor", msg.req) {
+			return a, nil
+		}
+		if msg.err != nil {
+			a.inflight = false
+			return a, a.handleReadErr(msg.err)
+		}
+		d := msg.detail
+		return a, a.prepareEditor(editTarget{kind: "task", id: msg.id, etag: d.ETag, origTitle: d.Title, origNotes: d.Notes})
+	case editorSetupMsg:
+		a.inflight = false
+		a.setBanner(bannerError, msg.prefix+msg.err.Error())
+		return a, nil
+	case editorDoneMsg:
+		return a, a.editorDone(msg)
+	case draftDiscardedMsg:
+		if msg.err != nil {
+			a.appendBanner("cannot discard draft at " + msg.path + ": " + msg.err.Error())
+		}
+		return a, nil
 	case todayMsg:
 		if msg.poll && a.pollReq == msg.req {
 			a.pollReq = 0
@@ -178,8 +203,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		var after tea.Cmd
+		// The refresh below covers any screen revealed by the success hook.
+		a.overlayDirty = false
 		if msg.after != nil {
 			after = msg.after(a, msg.resp)
+		}
+		if len(a.overlays) > 0 {
+			a.overlayDirty = true
 		}
 		return a, tea.Batch(a.refresh(), after)
 	}
@@ -210,8 +240,7 @@ func (a *App) handleKey(k tea.KeyPressMsg) tea.Cmd {
 	}
 	if len(a.overlays) > 0 {
 		if binding.Matches(k, a.keys.Escape) {
-			a.closeOverlay()
-			return nil
+			return a.closeOverlay()
 		}
 	} else if a.mode != ModeTabs && binding.Matches(k, a.keys.Quit, a.keys.Escape) {
 		return a.exitMode()
@@ -330,7 +359,12 @@ func (a *App) fetchToday(poll bool) tea.Cmd {
 	}
 }
 
-func (a *App) refresh() tea.Cmd { return tea.Batch(a.fetchToday(false), a.current().load(a)) }
+func (a *App) refresh() tea.Cmd {
+	if len(a.overlays) == 0 {
+		a.overlayDirty = false
+	}
+	return tea.Batch(a.fetchToday(false), a.current().load(a))
+}
 
 type opMsg struct {
 	label string
@@ -377,9 +411,17 @@ func (a *App) openOverlay(s screen) tea.Cmd {
 	return s.load(a)
 }
 
-func (a *App) closeOverlay() {
+func (a *App) closeOverlay() tea.Cmd {
 	if n := len(a.overlays); n > 0 {
 		a.overlays[n-1] = nil
 		a.overlays = a.overlays[:n-1]
+		// AIDEV-NOTE: own ops refresh the visible overlay immediately. Coalesce
+		// the hidden tab/mode's reload until the last overlay is closed; polls
+		// deliberately do not reload overlays (CF02).
+		if len(a.overlays) == 0 && a.overlayDirty {
+			a.overlayDirty = false
+			return a.current().load(a)
+		}
 	}
+	return nil
 }
