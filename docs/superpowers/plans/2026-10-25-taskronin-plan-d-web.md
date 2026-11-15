@@ -15,7 +15,7 @@
 ## Global Constraints
 
 - **Execution context:** each implementer receives its task text, these Global Constraints and the "Form contract" section below, with read access to the three specs and every plan file. A citation such as "Plan A Task 32 Interfaces: `service.TodayView`" is binding: open that block for the exact fields. Web handlers and templates use Plan A's `domain`/`service` types (Plan A Tasks 5, 16a–35b), never the `api` wire types of arch §6.5.
-- Go `1.26.0`, toolchain `go1.26.10`, module `taskronin`, Linux only.
+- Go `1.26.0`, toolchain `go1.26.11`, module `taskronin`, Linux only.
 - New direct dependencies: `github.com/yuin/goldmark v1.8.6`, `github.com/microcosm-cc/bluemonday v1.0.27`; `golang.org/x/net` at `v0.61.0` (bluemonday requires v0.26.0, which govulncheck flags; v0.61.0 matches the pinned x/crypto v0.58.0 / x/sys v0.49.0 / x/term v0.47.0; tests import `golang.org/x/net/html`). No other dependency changes.
 - Allowed imports (arch §1.3; `internal/archtest` checks non-test imports, Plan A Task 1): `markdown` → no internal packages, third-party goldmark + bluemonday. `web` → `service`, `domain`, `civil`, `datespec`, `auth`, `markdown`, `textsafe`, `clock`, `buildinfo` only; never `store`, `api`, `server`, `client`.
 - **Test packages (P6):** every `internal/web` test is in package `web_test` and may import `testutil`; internals are reached only through `internal/web/export_test.go` (package `web`, never imports `testutil`). This keeps `web[test] → testutil → server → web` from becoming an import cycle once Task 11 makes `server` import `web`.

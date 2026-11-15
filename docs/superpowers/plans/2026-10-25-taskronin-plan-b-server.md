@@ -14,7 +14,7 @@
 
 ## Global Constraints
 
-- Go `1.26.0`, toolchain `go1.26.10`, module `taskronin`; nothing hard-codes `taskronin/` outside import paths. Linux only.
+- Go `1.26.0`, toolchain `go1.26.11`, module `taskronin`; nothing hard-codes `taskronin/` outside import paths. Linux only.
 - Dependencies exactly as A§1.1; this plan adds as direct requirements only cobra v1.10.2, BurntSushi/toml v1.6.0, x/term v0.47.0, go-sdk v1.8.0, jsonschema-go (go-sdk's required version), lipgloss/v2 v2.0.6 (if Plan A has not). No shell-words, go-systemd or UUID libraries.
 - Import graph exactly A§1.3, enforced by `internal/archtest`. `cli` per-file exceptions: only `cmd_serve.go` → `server`; only `cmd_{init,migrate,restore,import,purge,scrub,passwd,backup}.go` → `offline`; only `cmd_mcp.go` → `mcpserver` (`cmd_tui.go`/`cmd_plan.go` → `tui` is Plan C). `client` and `editor` may import `clock`; `cli` may not (pass `nil` clocks; the packages default to `clock.Real{}`).
 - R1: `server` handlers decode → exactly one service call → encode; no rule or authz in `server`. R2: `cli` verbs and `mcpserver` reach data only through `client`.
