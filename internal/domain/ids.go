@@ -52,6 +52,10 @@ func ParseOpID(s string) (OpID, error) {
 	return id, nil
 }
 
+// ValidOpIDPrefix reports whether s is 1 to 32 lowercase hex characters, the
+// leading part of an op ID as `tkr` prints it.
+func ValidOpIDPrefix(s string) bool { return len(s) >= 1 && lowerHex(s, min(len(s), 32)) }
+
 func lowerHex(s string, size int) bool {
 	if len(s) != size {
 		return false

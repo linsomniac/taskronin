@@ -93,7 +93,8 @@ MCP configuration:
 `tkr mcp` speaks MCP over stdio. It refuses the owner token and needs the `mcp`
 token (use `--token-file` to point at another one). Changes made through
 non-owner tokens can be reviewed with `tkr ai-changes` and reverted with
-`tkr revert`.
+`tkr ai-changes --revert OPID` (or `tkr revert OPID` for any operation); the
+8-character ID they print is enough unless it is ambiguous.
 
 ## Backups
 

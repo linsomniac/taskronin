@@ -167,6 +167,40 @@ func TestListOpsAIOnly(t *testing.T) {
 	}
 }
 
+func TestListOpsIDPrefix(t *testing.T) {
+	st := newTestStore(t)
+	var ops []domain.OpRecord
+	for _, hexID := range []string{"abc00000000000000000000000000000", "abcd0000000000000000000000000000",
+		"abd00000000000000000000000000000", "ffffffffffffffffffffffffffffffff"} {
+		op := opFixture(domain.OpTaskAdd)
+		id, err := domain.ParseOpID(hexID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		op.ID = id
+		ops = append(ops, mustInsertOp(t, st.Writer, op))
+	}
+	for _, tc := range []struct {
+		prefix string
+		want   []domain.OpRecord
+	}{
+		{"", []domain.OpRecord{ops[3], ops[2], ops[1], ops[0]}},
+		{"ab", []domain.OpRecord{ops[2], ops[1], ops[0]}},
+		{"abc", []domain.OpRecord{ops[1], ops[0]}},
+		{"abcd", []domain.OpRecord{ops[1]}},
+		{"f", []domain.OpRecord{ops[3]}},
+		{"ffffffffffffffffffffffffffffffff", []domain.OpRecord{ops[3]}},
+		{"e", nil},
+	} {
+		t.Run(tc.prefix, func(t *testing.T) {
+			got, err := ListOps(t.Context(), st.Reader, OpQuery{IDPrefix: tc.prefix, Limit: 20})
+			if err != nil || !slices.Equal(got, tc.want) {
+				t.Fatalf("ListOps(%q) = %+v, %v; want %+v", tc.prefix, got, err, tc.want)
+			}
+		})
+	}
+}
+
 func TestEventsAfterTriageKey(t *testing.T) {
 	st := newTestStore(t)
 	a := insertOp(t, st, domain.OpTaskAdd)

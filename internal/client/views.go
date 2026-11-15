@@ -155,10 +155,13 @@ func (c *Client) GetBlock(ctx context.Context, id int64) (*api.Block, error) {
 	return readView[api.Block](ctx, c, "/blocks/"+strconv.FormatInt(id, 10), nil)
 }
 
-// ListOps reads a page of operations matching the actor and sequence filters.
+// ListOps reads a page of operations matching the actor, op ID prefix and sequence filters.
 func (c *Client) ListOps(ctx context.Context, q OpsQuery) (*api.Page[api.OpSummary], error) {
 	values := pageValues(q.PageQuery)
 	values.Set("actor", q.Actor)
+	if q.OpPrefix != "" {
+		values.Set("op_prefix", q.OpPrefix)
+	}
 	values.Set("since_seq", strconv.FormatInt(q.SinceSeq, 10))
 	return readView[api.Page[api.OpSummary]](ctx, c, "/ops", values)
 }

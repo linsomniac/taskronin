@@ -290,6 +290,74 @@ func TestRevert(t *testing.T) {
 	}
 }
 
+func TestRevertPrefix(t *testing.T) {
+	srv, sys := captureServer(t)
+	const adds = 3*16 + 1 // pigeonhole: four ops share a first hex digit
+	for i := range adds {
+		if _, err := srv.Client.AddTask(t.Context(), client.Mut{}, api.AddTaskRequest{Title: fmt.Sprintf("t%d", i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	listOps := func() []api.OpSummary {
+		t.Helper()
+		page, err := srv.Client.ListOps(t.Context(), client.OpsQuery{PageQuery: client.PageQuery{Limit: 500}})
+		if err != nil || page.NextCursor != nil {
+			t.Fatalf("ops: %+v, %v", page, err)
+		}
+		return page.Items
+	}
+	ops := listOps()
+	byFirst := map[byte][]string{}
+	for _, op := range ops {
+		byFirst[op.OpID[0]] = append(byFirst[op.OpID[0]], op.OpID)
+	}
+	var shared []string // newest first, as ListOps orders them
+	for _, ids := range byFirst {
+		if len(ids) > 3 {
+			shared = ids
+			break
+		}
+	}
+	out, stderr, code := runCLI(t, sys, "", "revert", shared[0][:1])
+	if code != 2 || out != "" || !strings.Contains(stderr, "matches more than 3 operations") ||
+		!strings.Contains(stderr, shared[0]) || !strings.Contains(stderr, shared[1]) || !strings.Contains(stderr, shared[2]) ||
+		strings.Contains(stderr, shared[3]) || !strings.Contains(stderr, "use more characters or the full ID") {
+		t.Fatalf("ambiguous: exit=%d stdout=%q stderr=%q", code, out, stderr)
+	}
+	missing := strings.Repeat("0", 16)
+	for _, op := range ops {
+		for strings.HasPrefix(op.OpID, missing) {
+			missing = strings.Repeat(string(missing[0]+1), 16)
+		}
+	}
+	if out, stderr, code := runCLI(t, sys, "", "revert", missing); code != 5 || out != "" || !strings.Contains(stderr, missing) {
+		t.Fatalf("missing: exit=%d stdout=%q stderr=%q", code, out, stderr)
+	}
+	for _, bad := range []string{"XYZ", "c0ffee!", ops[0].OpID + "0"} {
+		if out, stderr, code := runCLI(t, sys, "", "revert", bad); code != 2 || out != "" {
+			t.Fatalf("invalid %q: exit=%d stdout=%q stderr=%q", bad, code, out, stderr)
+		}
+	}
+	for _, op := range listOps() {
+		if op.State != "active" {
+			t.Fatalf("a rejected prefix reverted %+v", op)
+		}
+	}
+	target := ops[0] // the newest add, of the last task
+	prefix := target.OpID[:8]
+	for _, op := range ops[1:] {
+		for strings.HasPrefix(op.OpID, prefix) {
+			prefix = target.OpID[:len(prefix)+1]
+		}
+	}
+	if out := captureRun(t, sys, "", "revert", prefix); !strings.Contains(out, "reverted") {
+		t.Fatalf("unique prefix revert = %q", out)
+	}
+	if task, err := srv.Client.GetTask(t.Context(), adds); err != nil || task.DeletedAt == nil {
+		t.Fatalf("task = %+v, %v", task, err)
+	}
+}
+
 func TestFirstRunBeforeInit(t *testing.T) {
 	sys, paths := testSys(t)
 	out, stderr, code := runCLI(t, sys, "", "add", "x")

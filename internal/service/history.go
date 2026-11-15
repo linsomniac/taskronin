@@ -49,9 +49,11 @@ type HistoryIn struct {
 	Cursor string
 }
 
-// ListOpsIn filters operations by actor and exclusive lower sequence bound.
+// ListOpsIn filters operations by actor, op ID prefix and exclusive lower
+// sequence bound.
 type ListOpsIn struct {
 	Actor    string
+	OpPrefix string // 1 to 32 lowercase hex characters; empty means any.
 	SinceSeq domain.OpSeq
 	Limit    int
 	Cursor   string
@@ -111,10 +113,13 @@ func (s *Service) ListOps(ctx context.Context, a domain.Actor, in ListOpsIn) (Pa
 	if in.SinceSeq < 0 {
 		return Page[OpSummary]{}, validation("since_seq", errors.New("must not be negative"))
 	}
+	if in.OpPrefix != "" && !domain.ValidOpIDPrefix(in.OpPrefix) {
+		return Page[OpSummary]{}, validation("op_prefix", errors.New("must be 1 to 32 lowercase hex characters"))
+	}
 	var page Page[OpSummary]
 	err = s.read(ctx, a, domain.ScopeRead, false, func(q store.Q, _ time.Time, _ civil.Date) error {
 		var err error
-		page, err = opPage(ctx, q, "ops", store.OpQuery{Actor: in.Actor, SinceSeq: in.SinceSeq,
+		page, err = opPage(ctx, q, "ops", store.OpQuery{Actor: in.Actor, IDPrefix: in.OpPrefix, SinceSeq: in.SinceSeq,
 			BeforeSeq: domain.OpSeq(cursor.ID), Limit: limit})
 		return err
 	})

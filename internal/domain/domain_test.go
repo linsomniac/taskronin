@@ -386,3 +386,18 @@ func TestParseTokenExpiry(t *testing.T) {
 		}
 	}
 }
+
+func TestValidOpIDPrefix(t *testing.T) {
+	full := NewOpID().String()
+	for _, tc := range []struct {
+		s    string
+		want bool
+	}{
+		{"a", true}, {"0123456789abcdef", true}, {full, true},
+		{"", false}, {full + "0", false}, {"A", false}, {"abcg", false}, {"ab-c", false}, {" ab", false},
+	} {
+		if got := ValidOpIDPrefix(tc.s); got != tc.want {
+			t.Errorf("ValidOpIDPrefix(%q) = %v, want %v", tc.s, got, tc.want)
+		}
+	}
+}

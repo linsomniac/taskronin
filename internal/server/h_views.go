@@ -251,7 +251,7 @@ func (s *Server) getBlock(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) listOps(w http.ResponseWriter, r *http.Request) {
 	q := newReadQuery(r)
-	in := service.ListOpsIn{Actor: q.values.Get("actor"), SinceSeq: domain.OpSeq(q.integer("since_seq")), Limit: q.limit(), Cursor: q.values.Get("cursor")}
+	in := service.ListOpsIn{Actor: q.values.Get("actor"), OpPrefix: q.values.Get("op_prefix"), SinceSeq: domain.OpSeq(q.integer("since_seq")), Limit: q.limit(), Cursor: q.values.Get("cursor")}
 	if q.err != nil {
 		s.writeProblem(w, r, q.err)
 		return

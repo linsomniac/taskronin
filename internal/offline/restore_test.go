@@ -748,7 +748,11 @@ func TestPendingRefusedAfterRestore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pending := &client.PendingStore{Dir: srv.Paths.PendingDir, Clock: srv.Clock}
+	// AIDEV-NOTE: the pending store must stamp CreatedAt with the clock Resend
+	// checks its age against: srv.Client runs on the real clock, while srv.Clock
+	// is the server's fake catalog clock (October 2026). Mixing them made this
+	// test fail once real time passed the 7-day resend window.
+	pending := &client.PendingStore{Dir: srv.Paths.PendingDir}
 	req := client.PendingRequest{Key: api.NewIdempotencyKey(), Method: "POST", Path: "/tasks",
 		Generation: gen, Actor: actor, Body: []byte(`{"title":"queued"}`)}
 	if err := pending.Save(req); err != nil {

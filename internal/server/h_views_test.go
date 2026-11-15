@@ -325,6 +325,7 @@ func TestReadQueryValidation(t *testing.T) {
 		{"/ai-changes?all=yes", domain.CodeMalformed, ""},
 		{"/ops?since_seq=x", domain.CodeMalformed, ""},
 		{"/ops?since_seq=-1", domain.CodeValidation, "since_seq"},
+		{"/ops?op_prefix=XYZ", domain.CodeValidation, "op_prefix"},
 		{"/ops/not-an-op", domain.CodeMalformed, ""},
 		{"/search?q=x&kind=all&cursor=!!", domain.CodeMalformed, ""},
 		{"/entries?task=1&cursor=!!", domain.CodeMalformed, ""},

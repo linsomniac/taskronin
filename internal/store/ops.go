@@ -106,20 +106,25 @@ func CountOpsSince(ctx context.Context, q Q, actor string, since time.Time) (n i
 	return n, nullTime(at), MapErr(err)
 }
 
-// OpQuery selects operations with optional actor, AI and exclusive sequence filters.
+// OpQuery selects operations with optional actor, AI, op ID prefix and
+// exclusive sequence filters.
 type OpQuery struct {
 	Actor               string
 	AIOnly              bool
+	IDPrefix            string       // Lowercase hex, validated by the caller; empty means any.
 	SinceSeq, BeforeSeq domain.OpSeq // Zero means unbounded.
 	Limit               int
 }
 
 // ListOps returns matching operations in descending sequence order.
 func ListOps(ctx context.Context, q Q, oq OpQuery) ([]domain.OpRecord, error) {
+	// AIDEV-NOTE: the prefix match is a range: op IDs are lowercase hex, and 'g'
+	// sorts after every hex digit, so [p, p||'g') holds exactly the IDs starting with p.
 	rows, err := q.QueryContext(ctx, `SELECT `+opColumns+` FROM ops
 		WHERE (?1 = '' OR actor = ?1) AND (?2 = 0 OR `+aiOpFilter+`)
-		AND (?3 = 0 OR seq > ?3) AND (?4 = 0 OR seq < ?4) ORDER BY seq DESC LIMIT ?5`,
-		oq.Actor, oq.AIOnly, oq.SinceSeq, oq.BeforeSeq, oq.Limit)
+		AND (?3 = 0 OR seq > ?3) AND (?4 = 0 OR seq < ?4)
+		AND (?6 = '' OR (op_id >= ?6 AND op_id < ?6 || 'g')) ORDER BY seq DESC LIMIT ?5`,
+		oq.Actor, oq.AIOnly, oq.SinceSeq, oq.BeforeSeq, oq.Limit, oq.IDPrefix)
 	if err != nil {
 		return nil, MapErr(err)
 	}

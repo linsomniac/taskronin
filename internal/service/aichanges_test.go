@@ -249,6 +249,25 @@ func TestListOps(t *testing.T) {
 	}
 }
 
+func TestListOpsPrefix(t *testing.T) {
+	s := testutil.NewScenario(t)
+	s.Add("A")
+	first := s.Last.OpID
+	s.Add("B")
+	for _, prefix := range []string{first.String(), first.String()[:31]} {
+		p, err := s.Svc.ListOps(s.Ctx(), s.Actor, service.ListOpsIn{OpPrefix: prefix, Limit: 2})
+		if err != nil || len(p.Items) != 1 || p.Items[0].OpID != first || p.NextCursor != "" {
+			t.Fatalf("ListOps(%q) = %+v, %v", prefix, p, err)
+		}
+	}
+	for _, prefix := range []string{"ABC", "xyz", first.String() + "0", "a-b"} {
+		_, err := s.Svc.ListOps(s.Ctx(), s.Actor, service.ListOpsIn{OpPrefix: prefix})
+		if de, ok := domain.AsError(err); !ok || de.Code != domain.CodeValidation || len(de.Fields) != 1 || de.Fields[0].Field != "op_prefix" {
+			t.Fatalf("ListOps(%q) error = %v", prefix, err)
+		}
+	}
+}
+
 func TestListAIChanges(t *testing.T) {
 	s := testutil.NewScenario(t)
 	id := s.Add("A")

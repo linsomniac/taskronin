@@ -3,7 +3,6 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -16,8 +15,6 @@ import (
 
 func init() { register(aiChangesCommand) }
 
-var opPrefix = regexp.MustCompile(`^[0-9a-f]{1,32}$`)
-
 func aiChangesCommand(e *env) *cobra.Command {
 	var all, ack bool
 	var revert string
@@ -27,7 +24,7 @@ func aiChangesCommand(e *env) *cobra.Command {
 			if revert != "" && (ack || all) {
 				return usagef("--revert cannot be combined with --ack or --all")
 			}
-			if revert != "" && !opPrefix.MatchString(revert) {
+			if revert != "" && !domain.ValidOpIDPrefix(revert) {
 				return usagef("invalid operation ID %q", revert)
 			}
 			c, err := e.client()
@@ -119,6 +116,9 @@ func (e *env) printAIChanges(changes *api.AIChanges) error {
 
 // revertAIChange accepts the 8-hex form printed in the listing: expand a short
 // prefix against the full history, refusing ambiguous matches.
+// AIDEV-NOTE: unlike `tkr revert` (resolveOpID, server-side op_prefix over
+// every op), this resolves only among AI changes, so a prefix can never pick
+// an owner op here; keep the two resolvers' wording in step.
 func (e *env) revertAIChange(c *client.Client, id string) error {
 	if len(id) != 32 {
 		changes, err := allAIChanges(e, c, true)

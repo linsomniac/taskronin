@@ -181,6 +181,7 @@ type SearchQuery struct {
 // OpsQuery filters operation history.
 type OpsQuery struct {
 	Actor    string
+	OpPrefix string
 	SinceSeq int64
 	PageQuery
 }

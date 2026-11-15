@@ -1783,7 +1783,7 @@ under `/api/v1` unless shown otherwise.
 | `POST /blocks/{id}/unblock` | write | `{}` → `OpResponse{block}` | IfM |
 | `POST /blocks/{id}/outcome` | write | `OutcomeRequest` → `OpResponse{block}` | IfM |
 | `POST /focus` | write | `FocusRequest` → `OpResponse{task?}` | no IfM (§14 D3) |
-| `GET /ops?actor&since_seq&limit&cursor` | read | → `Page[OpSummary]` | |
+| `GET /ops?actor&op_prefix&since_seq&limit&cursor` | read | → `Page[OpSummary]` | `op_prefix`: 1–32 lowercase hex, keeps ops whose ID starts with it (422 otherwise) |
 | `GET /ops/{op_id}` | read | → `OpDetail` | |
 | `POST /ops/{op_id}/revert` | scopes of op | `{}` → `OpResponse` | 409 `revert_conflict`/`not_revertible` |
 | `POST /undo`, `POST /redo` | scopes of op | `{}` → `OpResponse` | 409: empty stack (§3.9), `revert_conflict`, `not_revertible` |
@@ -2681,7 +2681,7 @@ func ParseClock(s string, allow2400 bool) (civil.Minute, error)
 | `tkr drop ID` | — | `POST …/drop` | |
 | `tkr delete ID` / `tkr undelete ID` | `-y` | `POST …/delete` / `…/undelete` | |
 | `tkr undo` / `tkr redo` | — | `POST /undo` / `/redo` | Prints the reverted op's effects. |
-| `tkr revert OPID` | — | `POST /ops/{op}/revert` | |
+| `tkr revert OPID` | — | `GET /ops?op_prefix`, `POST /ops/{op}/revert` | OPID is the full ID or a unique prefix; a shorter one is resolved first: no match → not_found (exit 5), several → usage error listing up to 3 (exit 2). |
 | `tkr purge task\|entry ID` / `tkr purge --repair-ledger` | `--with-entries`, `--keep-recovery-files`, `-y` | `offline.Purge` | **Offline** (S4, §12.6): needs the server stopped; password prompt (TTY only). Scrubs the live DB and every backup set, then (unless `--keep-recovery-files`) deletes this host's pending requests and drafts after confirmation; prints scrubbed IDs, linked entries left alone, per-set results, and that earlier exports/log lines are out of reach (D§5.11). |
 | `tkr scrub-backups` | `--check`, `--resume`, `--keep-recovery-files`, `-y` | `offline.ScrubBackups` | Offline (S1, §12.7): the standalone/resumable form of purge steps 7–9; password prompt on a TTY. `--check` exits 8 when any set `contains` purged content (§9.6); it rewrites no backup but still finishes an interrupted rewrite and replays the ledger on the live DB (§12.7 step 2–3), and its help says so (B-M7). |
 | `tkr pending` / `tkr pending retry [KEY]` / `tkr pending discard KEY` | — | lists (with last error) / resends with the original idempotency key / deletes a saved request | §9.6 |
