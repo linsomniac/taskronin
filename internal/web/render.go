@@ -157,27 +157,27 @@ func (a *app) logError(w http.ResponseWriter, r *http.Request, err error) {
 		"request_id", safe(w.Header().Get("X-Request-ID")), "error", safe(err.Error()))
 }
 
-func (a *app) renderError(w http.ResponseWriter, r *http.Request, err error) {
+// viewError shares diagnostics and retry metadata with login; callers retain
+// their own status, navigation and resubmit behavior.
+func (a *app) viewError(w http.ResponseWriter, r *http.Request, err error) (*domain.Error, int) {
 	de, _ := domain.AsError(err)
 	status := statusFor(de.Code)
-	p := a.newPage(r, http.StatusText(status), "", nil)
 	viewError := *de
-	p.Err = &viewError
 	if status == http.StatusInternalServerError {
 		diagnostic := error(de)
 		if de.Err != nil {
 			diagnostic = de.Err
 		}
 		a.logError(w, r, diagnostic)
-		p.Err = domain.Errorf(domain.CodeInternal, "internal error")
+		viewError = *domain.Errorf(domain.CodeInternal, "internal error")
 	} else {
-		p.Err.Fields = slices.Clone(de.Fields)
-		for i := range p.Err.Fields {
-			switch p.Err.Fields[i].Field {
+		viewError.Fields = slices.Clone(de.Fields)
+		for i := range viewError.Fields {
+			switch viewError.Fields[i].Field {
 			case "work_date":
-				p.Err.Fields[i].Field = "date"
+				viewError.Fields[i].Field = "date"
 			case "time":
-				p.Err.Fields[i].Field = "at"
+				viewError.Fields[i].Field = "at"
 			}
 		}
 	}
@@ -188,6 +188,13 @@ func (a *app) renderError(w http.ResponseWriter, r *http.Request, err error) {
 		}
 		w.Header().Set("Retry-After", strconv.FormatInt(int64(seconds), 10))
 	}
+	return &viewError, status
+}
+
+func (a *app) renderError(w http.ResponseWriter, r *http.Request, err error) {
+	de, status := a.viewError(w, r, err)
+	p := a.newPage(r, http.StatusText(status), "", nil)
+	p.Err = de
 	_, hasSession := sessionFrom(r.Context())
 	if hasSession && r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/ui/") &&
 		r.URL.Path != "/ui/login" && r.URL.Path != "/ui/logout" &&

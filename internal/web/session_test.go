@@ -112,6 +112,167 @@ func TestLoginRegeneratesSession(t *testing.T) {
 	}
 }
 
+func TestSessionStrayCookies(t *testing.T) {
+	for _, tc := range []struct {
+		name, prefix string
+		valid        bool
+		status       int
+	}{
+		{"junk first valid second", "tr_session=junk; ", true, http.StatusOK},
+		{"valid fourth", strings.Repeat("tr_session="+strings.Repeat("A", 43)+"; ", 3), true, http.StatusOK},
+		{"valid fifth ignored", strings.Repeat("tr_session=junk; ", 4), true, http.StatusSeeOther},
+		{"five junk cookies", strings.Repeat("tr_session="+strings.Repeat("A", 43)+"; ", 5), false, http.StatusSeeOther},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ta := newTestApp(t).login()
+			valid := ta.cookies[web.SessionCookie]
+			cookies := tc.prefix
+			if tc.valid {
+				cookies += "tr_session=" + valid
+			}
+			w := ta.get("/ui/", "Cookie", cookies)
+			if w.Code != tc.status {
+				t.Fatalf("stray cookies = %d, want %d", w.Code, tc.status)
+			}
+			if tc.status == http.StatusOK {
+				if token := scrapeForm(t, w.Body.String(), "/ui/logout").Get("_csrf"); token == "" {
+					t.Error("selected session has no CSRF token")
+				}
+				if w.Header().Get("Set-Cookie") != "" {
+					t.Error("valid session cookie was overwritten")
+				}
+			} else {
+				assertRedirect(t, w, "/ui/login")
+				assertClearedSessionCookie(t, w)
+			}
+			if w := ta.get("/ui/", "Cookie", "tr_session="+valid); w.Code != http.StatusOK {
+				t.Error("cookie selection invalidated the stored session")
+			}
+		})
+	}
+}
+
+func TestSessionUnauthenticatedRedirectClearsCookie(t *testing.T) {
+	for _, method := range []string{http.MethodGet, http.MethodHead} {
+		t.Run(method, func(t *testing.T) {
+			ta := newTestApp(t)
+			w := ta.request(method, "/ui/", nil, "Cookie", "tr_session=junk")
+			assertRedirect(t, w, "/ui/login")
+			assertClearedSessionCookie(t, w)
+		})
+	}
+}
+
+func TestLoginRegeneratesAuthenticatedCookie(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		junk      int
+		oldStatus int
+	}{
+		{"valid second", 1, http.StatusSeeOther},
+		{"valid fourth", 3, http.StatusSeeOther},
+		{"valid fifth ignored", 4, http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ta := newTestApp(t).login()
+			old := ta.cookies[web.SessionCookie]
+			cookies := strings.Repeat("tr_session=junk; ", tc.junk) + "tr_session=" + old
+			w := ta.post("/ui/login", url.Values{"password": {testutil.Password}}, "Cookie", cookies)
+			assertRedirect(t, w, "/ui/")
+			current := ta.cookies[web.SessionCookie]
+			if current == old {
+				t.Fatal("login reused the old session")
+			}
+			if w := ta.get("/ui/", "Cookie", "tr_session="+old); w.Code != tc.oldStatus {
+				t.Errorf("old session = %d, want %d", w.Code, tc.oldStatus)
+			}
+			if w := ta.get("/ui/", "Cookie", "tr_session=junk; tr_session="+current); w.Code != http.StatusOK {
+				t.Errorf("new session behind stray cookie = %d, want 200", w.Code)
+			}
+		})
+	}
+}
+
+func TestLoginErrorWithSessionOmitsNav(t *testing.T) {
+	ta := newTestApp(t).login()
+	password := rand.Text()
+	w := ta.post("/ui/login", url.Values{"password": {password}}, "Cookie", "tr_session=junk; tr_session="+ta.cookies[web.SessionCookie])
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("bad password = %d", w.Code)
+	}
+	assertLoginForm(t, w.Body.String())
+	if strings.Contains(w.Body.String(), password) || strings.Contains(ta.Logs.String(), password) {
+		t.Error("login error exposed password")
+	}
+	if w := ta.get("/ui/"); w.Code != http.StatusOK {
+		t.Error("failed login invalidated the authenticated session")
+	}
+}
+
+func TestLoginOriginRefusalBeforePasswordGate(t *testing.T) {
+	ta := newTestApp(t)
+	h := ta.H
+	// A regression may reach the sixth password-gate wait on the fake clock.
+	// Bound every request so the failure is reported instead of hanging.
+	ta.H = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+		h.ServeHTTP(w, r.WithContext(ctx))
+	})
+	wrong := rand.Text()
+	for i := range 6 {
+		w := ta.post("/ui/login", url.Values{"password": {wrong}}, "Origin", "http://evil.example")
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("cross-origin attempt %d = %d, want 403", i+1, w.Code)
+		}
+	}
+	w := ta.post("/ui/login", url.Values{"password": {testutil.Password}})
+	assertRedirect(t, w, "/ui/")
+}
+
+func TestLoginInternalError(t *testing.T) {
+	ta := newTestApp(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	password := rand.Text()
+	r := httptest.NewRequestWithContext(ctx, http.MethodPost, "/ui/login", strings.NewReader(url.Values{"password": {password}}.Encode()))
+	r.Host = testListen
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.Header.Set("Origin", "http://"+testListen)
+	w := httptest.NewRecorder()
+	w.Header().Set("X-Request-ID", "trace-"+password)
+	ta.H.ServeHTTP(w, r)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("internal login error = %d, want 500", w.Code)
+	}
+	assertErrorCode(t, w.Body.String(), "internal")
+	assertLoginForm(t, w.Body.String())
+	if !strings.Contains(nodeText(parseHTML(t, w.Body.String())), "internal error") || strings.Contains(w.Body.String(), "context canceled") {
+		t.Error("internal login error was not masked")
+	}
+	if !strings.Contains(ta.Logs.String(), "context canceled") || !strings.Contains(ta.Logs.String(), "trace-[redacted]") {
+		t.Error("private diagnostic was not logged with redaction")
+	}
+	if strings.Contains(w.Body.String(), password) || strings.Contains(ta.Logs.String(), password) {
+		t.Error("internal login error exposed password")
+	}
+}
+
+func assertClearedSessionCookie(t *testing.T, w *httptest.ResponseRecorder) {
+	t.Helper()
+	values := w.Header().Values("Set-Cookie")
+	if len(values) != 1 {
+		t.Fatalf("clearing cookies = %v, want only the root session cookie", values)
+	}
+	cookie, err := http.ParseSetCookie(values[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cookie.Name != web.SessionCookie || cookie.Value != "" || cookie.MaxAge != -1 || cookie.Path != "/" || !cookie.HttpOnly || cookie.SameSite != http.SameSiteLaxMode || cookie.Secure {
+		t.Errorf("cleared session cookie = %+v", cookie)
+	}
+}
+
 func TestSCP05_BearerOnUI(t *testing.T) {
 	ta := newTestApp(t)
 	bearer := "Bearer tkr_1_" + strings.Repeat("A", 43)
@@ -225,10 +386,14 @@ func (c loginGateClock) After(d time.Duration) <-chan time.Time {
 }
 
 func TestLoginRateLimited(t *testing.T) {
-	for _, tc := range []struct{ remote, key string }{
-		{"127.0.0.1:54321", "127.0.0.1"},
-		{"[::1]:54321", "::1"},
-		{"unparsed-remote", "unparsed-remote"},
+	for _, tc := range []struct {
+		remote, key, retry string
+		advance            time.Duration
+	}{
+		{"127.0.0.1:54321", "127.0.0.1", "20", 0},
+		{"[::1]:54321", "::1", "20", 0},
+		{"unparsed-remote", "unparsed-remote", "20", 0},
+		{"127.0.0.1:54322", "127.0.0.1", "19", 1500 * time.Millisecond},
 	} {
 		t.Run(tc.remote, func(t *testing.T) {
 			waits := make(chan time.Duration, 3)
@@ -266,6 +431,7 @@ func TestLoginRateLimited(t *testing.T) {
 					t.Fatal("gate reservation timed out")
 				}
 			}
+			ta.Clock.Advance(tc.advance)
 			requestCtx, requestCancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer requestCancel()
 			r := httptest.NewRequestWithContext(requestCtx, http.MethodPost, "/ui/login", strings.NewReader(url.Values{"password": {testutil.Password}}.Encode()))
@@ -275,7 +441,7 @@ func TestLoginRateLimited(t *testing.T) {
 			r.Header.Set("X-Forwarded-For", "192.0.2.99")
 			w := httptest.NewRecorder()
 			ta.H.ServeHTTP(w, r)
-			if w.Code != http.StatusTooManyRequests || w.Header().Get("Retry-After") != "20" || w.Header().Get("Set-Cookie") != "" {
+			if w.Code != http.StatusTooManyRequests || w.Header().Get("Retry-After") != tc.retry || w.Header().Get("Set-Cookie") != "" {
 				t.Fatalf("rate limited login = %d %v", w.Code, w.Header())
 			}
 			assertErrorCode(t, w.Body.String(), "rate_limited")

@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -83,7 +84,7 @@ func (ta *testApp) submit(pagePath, action string, overrides url.Values) *httpte
 		if len(values) == 0 {
 			form.Del(key)
 		} else {
-			form.Set(key, values[0])
+			form[key] = slices.Clone(values)
 		}
 	}
 	return ta.post(action, form)
@@ -348,13 +349,13 @@ func TestHarnessSubmitOverrides(t *testing.T) {
 		if err := r.ParseForm(); err != nil {
 			t.Fatal(err)
 		}
-		want := url.Values{"title": {"new"}, "id": {"1", "2"}}
+		want := url.Values{"title": {"new"}, "id": {"3", "4"}, "etag": {"etag-3", "etag-4"}}
 		if r.URL.Path != "/ui/action" || !reflect.DeepEqual(r.PostForm, want) {
 			t.Errorf("submit = %s %v, want /ui/action %v", r.URL.Path, r.PostForm, want)
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
-	if w := ta.submit("/ui/page", "/ui/action", url.Values{"title": {"new", "ignored"}, "drop": {}}); w.Code != http.StatusNoContent {
+	if w := ta.submit("/ui/page", "/ui/action", url.Values{"title": {"new"}, "id": {"3", "4"}, "etag": {"etag-3", "etag-4"}, "drop": {}}); w.Code != http.StatusNoContent {
 		t.Errorf("submit response = %d", w.Code)
 	}
 }
