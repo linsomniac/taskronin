@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"testing"
 
@@ -434,5 +435,228 @@ func TestCardRender(t *testing.T) {
 				t.Fatal("too many lines")
 			}
 		}
+	}
+}
+
+func TestCardEmptyStateWaitsForSuccessfulLoad(t *testing.T) { // M1.
+	t.Run("initial pending", func(t *testing.T) {
+		f := newFake()
+		a := NewApp(Config{API: f, Ctx: t.Context(), Clock: f.clock, StartMode: ModeTriage, PollInterval: -1})
+		a.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+		cmd := a.Init()
+		if out := viewText(a); !strings.Contains(out, "loading…") || strings.Contains(out, "Triage clear") {
+			t.Fatalf("pending initial load: %s", out)
+		}
+		drain(t, a, cmd)
+		if !strings.Contains(viewText(a), "Triage clear (0 skipped)") {
+			t.Fatal(viewText(a))
+		}
+	})
+	t.Run("end reload pending", func(t *testing.T) {
+		f := newFake()
+		f.tasks["triage"] = []api.Task{task(1, "A", "new")}
+		a := cardApp(t, f)
+		_, cmd := a.Update(key("s"))
+		if out := viewText(a); !strings.Contains(out, "loading…") || strings.Contains(out, "Triage clear") {
+			t.Fatalf("pending end reload: %s", out)
+		}
+		drain(t, a, cmd)
+		if !strings.Contains(viewText(a), "Triage clear (1 skipped)") {
+			t.Fatal(viewText(a))
+		}
+	})
+	t.Run("initial failure then recovery", func(t *testing.T) {
+		f := newFake()
+		f.errs["ListTasks"] = notSent()
+		a := cardApp(t, f)
+		eq(t, a.banner.text, "cannot reach the Taskronin server")
+		if out := viewText(a); !strings.Contains(out, "triage not loaded") || strings.Contains(out, "Triage clear") {
+			t.Fatalf("failed initial load: %s", out)
+		}
+		cmd := a.current().load(a)
+		if !strings.Contains(viewText(a), "loading…") {
+			t.Fatal(viewText(a))
+		}
+		drain(t, a, cmd)
+		if !strings.Contains(viewText(a), "Triage clear (0 skipped)") {
+			t.Fatal(viewText(a))
+		}
+	})
+}
+
+func TestCardCurrentAndRenderingArePure(t *testing.T) { // M2.
+	a := newTestApp(t, newFake())
+	d := &cardDeck{queue: []api.Task{task(1, "A", "new")}}
+	s := &cardMode{deck: d}
+	for _, action := range []struct {
+		name string
+		run  func()
+	}{
+		{"current", func() { d.current() }},
+		{"selection", func() { s.selection() }},
+		{"view", func() { s.view(a, 100, 30) }},
+	} {
+		t.Run(action.name, func(t *testing.T) {
+			d.seen = nil
+			action.run()
+			eq(t, d.seen, map[int64]bool(nil))
+		})
+	}
+}
+
+func TestCardTransitionsMarkOnlyPresentedTasks(t *testing.T) { // M2.
+	d := &cardDeck{}
+	d.refill([]api.Task{task(1, "A", "new"), task(2, "B", "new")})
+	eq(t, d.seen, map[int64]bool{1: true})
+	d.advance()
+	eq(t, d.seen, map[int64]bool{1: true, 2: true})
+	d.advance()
+	d.refill([]api.Task{task(1, "A", "new"), task(2, "B", "new"), task(3, "C", "new")})
+	eq(t, d.seen, map[int64]bool{1: true, 2: true, 3: true})
+	fresh := task(3, "fresh", "new", "overdue")
+	d.replace(fresh)
+	seen := maps.Clone(d.seen)
+	eq(t, seen, map[int64]bool{1: true, 2: true, 3: true})
+	got, ok := d.current()
+	eq(t, ok, true)
+	eq(t, got, fresh)
+	eq(t, d.seen, seen)
+}
+
+func TestCardRefillNeverDuplicatesQueuedIDs(t *testing.T) { // M3.
+	d := &cardDeck{queue: []api.Task{task(1, "A", "new"), task(2, "B", "new"), task(3, "C", "new")}, idx: 1}
+	d.refill([]api.Task{task(1, "A", "new"), task(2, "B", "new"), task(3, "C", "new"), task(4, "D", "new")})
+	var ids []int64
+	for _, v := range d.queue {
+		ids = append(ids, v.ID)
+	}
+	eq(t, ids, []int64{1, 2, 3, 4})
+}
+
+func TestCardSelectedStartWrapsOnceWithDistinctTotals(t *testing.T) { // M2/M3.
+	f := newFake()
+	f.tasks["triage"] = []api.Task{task(1, "A", "new"), task(2, "B", "new"), task(3, "C", "new")}
+	a := newTestApp(t, f, func(c *Config) { c.StartTab = TabTriage })
+	press(t, a, "j", "enter")
+	d := a.modeScreen.(*cardMode).deck
+	if !d.seen[2] || d.seen[1] || d.seen[3] {
+		t.Errorf("start should present only #2: seen=%v", d.seen)
+	}
+	for i, id := range []int64{2, 3, 1} {
+		selectedID(t, a, id)
+		want := fmt.Sprintf("Card %d/3", i+1)
+		if out := viewText(a); !strings.Contains(out, want) {
+			t.Errorf("missing %q: %s", want, out)
+		}
+		press(t, a, "s")
+	}
+	eq(t, len(d.queue), 3)
+	eq(t, d.skipped, 3)
+	drain(t, a, a.current().load(a))
+	_, _, ok := a.current().selection()
+	eq(t, ok, false)
+	if !strings.Contains(viewText(a), "Triage clear (3 skipped)") {
+		t.Fatal(viewText(a))
+	}
+}
+
+func TestCardSmallHeightKeepsLegend(t *testing.T) { // M4.
+	f := newFake()
+	v := task(1, "A", "new", "overdue")
+	v.Notes = strings.Repeat("note\n", 10)
+	f.tasks["triage"] = []api.Task{v}
+	a := cardApp(t, f)
+	for _, height := range []int{1, 3, 5} {
+		out := a.current().view(a, 160, height)
+		if !strings.Contains(out, cardLegend) {
+			t.Errorf("height %d lost legend: %s", height, out)
+		}
+		if strings.Count(out, "\n") >= height {
+			t.Errorf("height %d overflow: %s", height, out)
+		}
+	}
+}
+
+func TestCardOmitsEmptyTags(t *testing.T) { // M4.
+	f := newFake()
+	f.tasks["triage"] = []api.Task{task(1, "A", "new")}
+	a := cardApp(t, f)
+	if strings.Contains(viewText(a), "Tags:") {
+		t.Fatal("empty tags should not occupy a card line")
+	}
+}
+
+func TestCardFormStale412UsesFreshETagOnNextAttempt(t *testing.T) { // M6.
+	for _, tc := range []struct{ key, text, method string }{{"p", "before 3", "PlaceTask"}, {"d", "+2d", "DeferTask"}, {"B", "13:00-15:00", "BlockTask"}} {
+		t.Run(tc.key, func(t *testing.T) {
+			f := newFake()
+			f.tasks["triage"] = []api.Task{task(1, "A", "new"), task(2, "B", "new")}
+			a := cardApp(t, f)
+			fresh := task(1, "fresh", "new", "overdue")
+			fresh.ETag = "g-1b"
+			b, err := json.Marshal(fresh)
+			if err != nil {
+				t.Fatal(err)
+			}
+			press(t, a, tc.key)
+			typeText(t, a, tc.text)
+			f.errs[tc.method] = &client.ProblemError{Status: 412, Problem: api.Problem{Code: "precondition_failed", Current: b}}
+			press(t, a, "enter")
+			eq(t, f.count(tc.method), 1)
+			eq(t, a.banner.text, "changed elsewhere — refreshed")
+			selectedID(t, a, 1)
+			d := a.modeScreen.(*cardMode).deck
+			eq(t, d.placed, 0)
+			current, _ := d.current()
+			eq(t, current.ID, fresh.ID)
+			eq(t, current.Title, fresh.Title)
+			eq(t, current.ETag, fresh.ETag)
+			eq(t, current.Reasons[1].Reason, "overdue")
+			if a.form == nil { // A stale form may close to require explicit review.
+				press(t, a, tc.key)
+				typeText(t, a, tc.text)
+			}
+			press(t, a, "enter")
+			eq(t, f.count(tc.method), 2)
+			eq(t, f.mustLast(t, tc.method).Mut.IfMatch, "g-1b")
+			selectedID(t, a, 2)
+			eq(t, d.placed, 1)
+		})
+	}
+}
+
+func TestCardBulkAcceptanceDoesNotMarkUnpresentedTasksSeen(t *testing.T) { // M2.
+	f := newFake()
+	f.tasks["triage"] = []api.Task{task(1, "A", "new"), task(2, "B", "new"), task(3, "C", "overdue")}
+	a := cardApp(t, f)
+	press(t, a, "A", "y")
+	d := a.modeScreen.(*cardMode).deck
+	selectedID(t, a, 3)
+	eq(t, d.seen, map[int64]bool{1: true, 3: true})
+	eq(t, len(d.queue), 3)
+	press(t, a, "s")
+	if !strings.Contains(viewText(a), "Triage clear (1 skipped)") {
+		t.Fatal(viewText(a))
+	}
+}
+
+func TestCardEmptyDeckStaleBulkReplyCompletesReload(t *testing.T) { // M1/M6.
+	f := newFake()
+	f.tasks["triage"] = []api.Task{task(1, "A", "new")}
+	a := cardApp(t, f)
+	press(t, a, "s", "A")
+	fresh := task(1, "A", "new", "overdue")
+	fresh.ETag = "g-1b"
+	b, err := json.Marshal(fresh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.tasks["triage"] = []api.Task{fresh}
+	f.errs["AcceptNew"] = &client.ProblemError{Status: 412, Problem: api.Problem{Code: "precondition_failed", Current: b}}
+	press(t, a, "y")
+	eq(t, f.count("AcceptNew"), 1)
+	eq(t, a.banner.text, "changed elsewhere — refreshed")
+	if !strings.Contains(viewText(a), "Triage clear (1 skipped)") {
+		t.Fatal("the successful end-of-deck reload must finish: " + viewText(a))
 	}
 }
