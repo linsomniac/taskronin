@@ -22,6 +22,10 @@ func (a *app) routes() *http.ServeMux {
 	mux.HandleFunc("GET /ui/ai-changes", a.aiChanges)
 	mux.HandleFunc("GET /ui/tasks/{id}", a.taskDetail)
 	mux.HandleFunc("GET /ui/tasks/{id}/history", a.taskHistory)
+	mux.HandleFunc("POST /ui/tasks", a.addTask)
+	mux.HandleFunc("POST /ui/tasks/{id}/edit", a.editTask)
+	mux.HandleFunc("POST /ui/tasks/{id}/tags", a.taskTags)
+	mux.HandleFunc("POST /ui/tasks/{id}/due", a.taskDue)
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/ui/", http.StatusSeeOther)
 	})

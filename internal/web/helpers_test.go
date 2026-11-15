@@ -158,6 +158,7 @@ func (ta *testApp) request(method, path string, form url.Values, hdr ...string) 
 	response := w.Result()
 	defer response.Body.Close()
 	for _, cookie := range response.Cookies() {
+		// Keep both tr_session and tr_flash across the POST/redirect/GET cycle.
 		if cookie.MaxAge < 0 {
 			delete(ta.cookies, cookie.Name)
 		} else {
@@ -307,13 +308,14 @@ func inertErrors(t *testing.T, body string) []string {
 			problems = append(problems, fmt.Sprintf("unsafe element %s", n.Data))
 		}
 		for _, a := range n.Attr {
-			if strings.HasPrefix(a.Key, "on") {
+			key := strings.TrimPrefix(a.Key, "data-") // htmx also accepts data-hx-*.
+			if strings.HasPrefix(a.Key, "on") || strings.HasPrefix(key, "hx-on") {
 				problems = append(problems, fmt.Sprintf("event attribute %s", a.Key))
 			}
-			switch a.Key {
+			switch key {
 			case "srcdoc":
 				problems = append(problems, "unsafe srcdoc attribute")
-			case "href", "src", "action", "formaction":
+			case "href", "src", "action", "formaction", "hx-get", "hx-post", "hx-put", "hx-patch", "hx-delete", "hx-push-url", "hx-replace-url":
 				value := strings.ToLower(strings.TrimSpace(urlSpace.Replace(a.Val)))
 				if strings.HasPrefix(value, "javascript:") || strings.HasPrefix(value, "vbscript:") || strings.HasPrefix(value, "data:") {
 					problems = append(problems, fmt.Sprintf("unsafe %s = %q", a.Key, a.Val))
@@ -410,6 +412,11 @@ func TestAssertInertBrowserURLsAndElements(t *testing.T) {
 		`<a href=" VBSCRIPT:msgbox(1)">x</a>`, `<a href="data:text/html,x">x</a>`,
 		`<embed src="/x">`, `<base href="/x">`, `<object data="/x"></object>`,
 		`<div srcdoc="&lt;script&gt;x&lt;/script&gt;"></div>`,
+		`<a hx-get="javascript:alert(1)">x</a>`, `<form hx-post="data:text/html,x"></form>`,
+		`<a hx-push-url="java&#9;script:alert(1)">x</a>`, `<div hx-replace-url="data:text/html,x"></div>`,
+		`<div hx-put="javascript:alert(1)"></div>`, `<div hx-patch="data:text/html,x"></div>`,
+		`<div hx-delete="javascript:alert(1)"></div>`, `<div hx-on:click="alert(1)"></div>`,
+		`<div data-hx-get="javascript:alert(1)"></div>`, `<div data-hx-on--load="alert(1)"></div>`,
 	} {
 		t.Run(unsafe, func(t *testing.T) {
 			if problems := inertErrors(t, script+unsafe); len(problems) == 0 {

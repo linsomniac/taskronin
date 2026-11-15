@@ -1,6 +1,7 @@
 package web_test
 
 import (
+	"bytes"
 	"database/sql"
 	"fmt"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 	"taskronin/internal/domain"
 	"taskronin/internal/service"
 	"taskronin/internal/testutil"
+	"taskronin/internal/web"
 )
 
 func (ta *testApp) mustOp(out *service.OpResult, err error) *service.OpResult {
@@ -369,14 +371,78 @@ func TestListPaging(t *testing.T) {
 func TestViewsEscapeHostileTitle(t *testing.T) {
 	ta := newTestApp(t).login()
 	const title = `<script>alert(1)</script>"' onmouseover=x`
-	ta.addTask(service.AddTaskIn{Title: title})
+	const notes = "<script>x</script>\n\n[c](javascript:alert(1)) **bold**"
+	ta.addTask(service.AddTaskIn{Title: title, Notes: notes})
 	ta.addTask(service.AddTaskIn{Title: title, Place: &service.AddPlacement{How: "bottom"}})
 	ta.addTask(service.AddTaskIn{Title: title, Place: &service.AddPlacement{How: "defer", Defer: testutil.Moment("10-30 09:00")}})
 	ta.mustOp(ta.Svc.AddEntry(t.Context(), ta.meta(), service.AddEntryIn{Title: title}))
-	for _, path := range []string{"/ui/", "/ui/triage", "/ui/backlog", "/ui/upcoming", "/ui/log"} {
+	for _, path := range []string{"/ui/", "/ui/triage", "/ui/backlog", "/ui/upcoming", "/ui/log", "/ui/tasks/1"} {
 		body := ta.viewBody(path)
 		assertInert(t, body)
 		requireText(t, body, title)
+		if path == "/ui/triage" || path == "/ui/tasks/1" {
+			requireConfirmValue(t, body, "/ui/tasks/1/drop", "Drop #1 "+title+"?")
+		}
+		if path == "/ui/tasks/1" {
+			if form := scrapeForm(t, body, "/ui/tasks/1/edit"); form.Get("notes") != notes {
+				t.Error("hostile notes did not round-trip")
+			}
+		}
+	}
+}
+
+func TestViewsEscapeHostileMetadata(t *testing.T) {
+	ta := newTestApp(t)
+	const hostile = `"><img src=x onerror=alert(1)>javascript:alert(1)`
+	// Tags/projects reject these characters at the service boundary. Exercise
+	// the template with hostile snapshot data as well as the POST error surface.
+	detail := domain.TaskDetail{TaskView: domain.TaskView{Task: domain.Task{
+		ID: 1, Title: hostile, Project: hostile, Notes: hostile, Status: domain.StatusOpen, Version: 1,
+	}, View: domain.ViewTriage, Tags: []string{hostile}}}
+	tmpl, err := ta.App.Template("task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body bytes.Buffer
+	if err := tmpl.ExecuteTemplate(&body, "layout", web.Page{CSRF: "token", Gen: ta.Svc.Generation(), Return: "/ui/tasks/1", Data: detail}); err != nil {
+		t.Fatal(err)
+	}
+	assertInert(t, body.String())
+	requireText(t, body.String(), "Project: "+hostile, "Remove "+hostile)
+	edit := scrapeForm(t, body.String(), "/ui/tasks/1/edit")
+	if edit.Get("project") != hostile || edit.Get("notes") != hostile || edit.Get("title") != hostile {
+		t.Error("hostile edit values did not round-trip")
+	}
+	scrapeFormWhere(t, body.String(), "/ui/tasks/1/tags", url.Values{"remove": {hostile}})
+	requireConfirmValue(t, body.String(), "/ui/tasks/1/delete", "Delete #1 "+hostile+"?")
+
+	ta.login()
+	for _, field := range []string{"tags", "project"} {
+		w := ta.submit("/ui/triage", "/ui/tasks", url.Values{"title": {"Invalid metadata"}, "notes": {hostile}, field: {hostile}})
+		if w.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("hostile %s = %d %s", field, w.Code, w.Body)
+		}
+		assertInert(t, w.Body.String())
+		form := scrapeForm(t, w.Body.String(), "/ui/tasks")
+		if form.Get(field) != hostile || form.Get("notes") != hostile {
+			t.Error("hostile validation input did not round-trip")
+		}
+	}
+}
+
+func requireConfirmValue(t *testing.T, body, action, want string) {
+	t.Helper()
+	found := false
+	walkHTML(parseHTML(t, body), func(n *html.Node) {
+		if n.Type == html.ElementNode && n.Data == "form" && attr(n, "action") == action {
+			found = true
+			if got := attr(n, "hx-confirm"); got != want {
+				t.Errorf("confirmation = %q, want literal %q", got, want)
+			}
+		}
+	})
+	if !found {
+		t.Errorf("missing confirmation form %s", action)
 	}
 }
 

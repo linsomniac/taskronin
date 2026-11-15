@@ -1,0 +1,131 @@
+package web
+
+import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
+	"fmt"
+	"net/http"
+	"strings"
+	"time"
+	"unicode/utf8"
+
+	"taskronin/internal/service"
+)
+
+const flashCookie = "tr_flash"
+
+func flashLines(res *service.OpResult) []string {
+	lines := make([]string, 0, len(res.Effects)+len(res.Warnings)+2)
+	for _, effect := range res.Effects {
+		lines = append(lines, effectLine(effect))
+	}
+	lines = append(lines, res.Warnings...)
+	if res.NoChange {
+		lines = append(lines, "no change")
+	}
+	if res.Replayed {
+		lines = append(lines, "already applied")
+	}
+	return lines
+}
+
+// AIDEV-NOTE: Mirror effectLine in internal/cli/effects.go (DF21). The copy
+// uses service.Effect because A§1.3 forbids web importing cli or api.
+func effectLine(effect service.Effect) string {
+	id := effect.TaskID
+	switch effect.Kind {
+	case service.EffDeferred:
+		return fmt.Sprintf("#%d deferred to %s", id, effect.To)
+	case service.EffUndeferred:
+		return fmt.Sprintf("#%d no longer deferred", id)
+	case service.EffDueSet:
+		return fmt.Sprintf("#%d due %s", id, effect.To)
+	case service.EffDueCleared:
+		return fmt.Sprintf("#%d due cleared", id)
+	case service.EffBlocked:
+		return fmt.Sprintf("b%d blocked %s", effect.BlockID, effect.To)
+	case service.EffBlockMoved:
+		return fmt.Sprintf("b%d moved %s → %s", effect.BlockID, effect.From, effect.To)
+	case service.EffBlockCancelled:
+		return fmt.Sprintf("b%d cancelled (%s)", effect.BlockID, effect.To)
+	case service.EffBlockResolved:
+		return fmt.Sprintf("b%d resolved %s", effect.BlockID, effect.To)
+	case service.EffOutcomeSet:
+		return fmt.Sprintf("b%d outcome %s", effect.BlockID, effect.To)
+	case service.EffSlipped:
+		return fmt.Sprintf("b%d slipped", effect.BlockID)
+	case service.EffUnslipped:
+		return fmt.Sprintf("b%d no longer counts as slipped", effect.BlockID)
+	case service.EffReasonAdded:
+		return fmt.Sprintf("#%d +%s", id, effect.Reason)
+	case service.EffReasonRemoved:
+		return fmt.Sprintf("#%d −%s", id, effect.Reason)
+	case service.EffFocusSet:
+		return fmt.Sprintf("focus → #%d", id)
+	case service.EffFocusCleared:
+		return "focus cleared"
+	case service.EffInterrupted:
+		return "interrupted #" + effect.From
+	case service.EffRetitled:
+		return fmt.Sprintf("#%d retitled '%s' → '%s'", id, effect.From, effect.To)
+	case service.EffEntryLogged, service.EffEntryUpdated, service.EffEntryRelinked, service.EffEntryDeleted, service.EffEntryRestored:
+		return fmt.Sprintf("e%d %s", effect.EntryID, strings.TrimPrefix(string(effect.Kind), "entry_"))
+	case service.EffReverted:
+		return "reverted op " + effect.From
+	default:
+		return fmt.Sprintf("#%d %s", id, effect.Kind)
+	}
+}
+
+func (a *app) setFlash(w http.ResponseWriter, r *http.Request, lines []string) {
+	s, ok := sessionFrom(r.Context())
+	if !ok || s.CSRF == "" {
+		return
+	}
+	text := strings.Join(lines, "\n")
+	// AIDEV-NOTE: 1400 UTF-8 bytes leave room for base64 expansion, the
+	// SHA-256 MAC and all cookie attributes within 2 KiB. Never split a rune.
+	const maxText = 1400
+	if len(text) > maxText {
+		end := maxText - len("…")
+		for !utf8.RuneStart(text[end]) {
+			end--
+		}
+		text = text[:end] + "…"
+	}
+	value := base64.RawURLEncoding.EncodeToString([]byte(text)) + "." +
+		base64.RawURLEncoding.EncodeToString(flashMAC(s.CSRF, []byte(text)))
+	setCookie(w, flashCookie, value, "/ui/", time.Time{}, 60)
+}
+
+func (a *app) readFlash(w http.ResponseWriter, r *http.Request) []string {
+	cookie, err := r.Cookie(flashCookie)
+	if err != nil {
+		return nil
+	}
+	setCookie(w, flashCookie, "", "/ui/", time.Time{}, -1)
+	s, ok := sessionFrom(r.Context())
+	if !ok || s.CSRF == "" || len(cookie.Value) > 2048 {
+		return nil
+	}
+	body, signature, ok := strings.Cut(cookie.Value, ".")
+	if !ok {
+		return nil
+	}
+	text, err := base64.RawURLEncoding.DecodeString(body)
+	if err != nil || len(text) == 0 || !utf8.Valid(text) {
+		return nil
+	}
+	mac, err := base64.RawURLEncoding.DecodeString(signature)
+	if err != nil || !hmac.Equal(mac, flashMAC(s.CSRF, text)) {
+		return nil
+	}
+	return strings.Split(string(text), "\n")
+}
+
+func flashMAC(csrf string, text []byte) []byte {
+	h := hmac.New(sha256.New, []byte(csrf))
+	_, _ = h.Write(text)
+	return h.Sum(nil)
+}

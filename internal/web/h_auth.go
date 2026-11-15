@@ -21,7 +21,7 @@ func (a *app) login(w http.ResponseWriter, r *http.Request) {
 		a.renderLoginError(w, r, err)
 		return
 	}
-	setCookie(w, SessionCookie, s.CookieValue, s.ExpiresAt, 0)
+	setCookie(w, SessionCookie, s.CookieValue, "/", s.ExpiresAt, 0)
 	w.Header().Set("Cache-Control", "no-store")
 	http.Redirect(w, r, "/ui/", http.StatusSeeOther)
 }
@@ -42,7 +42,7 @@ func (a *app) logout(w http.ResponseWriter, r *http.Request) {
 		a.renderError(w, r, err)
 		return
 	}
-	setCookie(w, SessionCookie, "", time.Time{}, -1)
+	setCookie(w, SessionCookie, "", "/", time.Time{}, -1)
 	w.Header().Set("Cache-Control", "no-store")
 	http.Redirect(w, r, "/ui/login", http.StatusSeeOther)
 }

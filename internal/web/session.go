@@ -42,7 +42,7 @@ func (a *app) session(next http.Handler) http.Handler {
 		}
 		w.Header().Set("Cache-Control", "no-store")
 		if r.Method == http.MethodGet || r.Method == http.MethodHead {
-			setCookie(w, SessionCookie, "", time.Time{}, -1)
+			setCookie(w, SessionCookie, "", "/", time.Time{}, -1)
 			http.Redirect(w, r, "/ui/login", http.StatusSeeOther)
 			return
 		}
@@ -74,9 +74,9 @@ func (a *app) authenticateSession(r *http.Request) (sessionInfo, error) {
 }
 
 //nolint:gosec // G124: plain-HTTP loopback v1 (A§7.5); Secure would drop the cookie; HttpOnly+SameSite=Lax set
-func setCookie(w http.ResponseWriter, name, value string, expires time.Time, maxAge int) {
+func setCookie(w http.ResponseWriter, name, value, path string, expires time.Time, maxAge int) {
 	http.SetCookie(w, &http.Cookie{
-		Name: name, Value: value, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode,
+		Name: name, Value: value, Path: path, HttpOnly: true, SameSite: http.SameSiteLaxMode,
 		Expires: expires, MaxAge: maxAge,
 	})
 }

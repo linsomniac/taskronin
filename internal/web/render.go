@@ -31,6 +31,7 @@ type page struct {
 	Data       any
 	Err        *domain.Error
 	Resubmit   *resubmit
+	Flash      []string
 }
 
 type resubmit struct {
@@ -124,6 +125,7 @@ func (a *app) newPage(r *http.Request, title, tab string, data any) page {
 }
 
 func (a *app) renderPage(w http.ResponseWriter, r *http.Request, status int, name string, p page) {
+	p.Flash = a.readFlash(w, r)
 	var buf bytes.Buffer
 	tmpl, ok := a.templates[name]
 	var err error

@@ -25,6 +25,10 @@
 </form>
 </nav>
 {{end}}
-<main>{{template "content" .}}</main>
+<main>
+{{if .Flash}}<section class="flash" role="status" aria-label="Action result">
+<ul>{{range .Flash}}<li>{{.}}</li>{{end}}</ul>
+</section>{{end}}
+{{template "content" .}}</main>
 </body>
 </html>{{end}}
