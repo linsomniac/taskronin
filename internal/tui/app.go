@@ -98,6 +98,9 @@ func NewApp(cfg Config) *App {
 		a.tabs[i] = stubScreen{name: name}
 	}
 	a.tabs[TabToday] = &todayScreen{cursor: -1}
+	a.tabs[TabTriage] = &triageScreen{}
+	a.tabs[TabBacklog] = &backlogScreen{}
+	a.tabs[TabUpcoming] = &upcomingScreen{}
 	switch cfg.StartMode {
 	case ModeTriage:
 		a.modeScreen = stubScreen{name: "Triage"}

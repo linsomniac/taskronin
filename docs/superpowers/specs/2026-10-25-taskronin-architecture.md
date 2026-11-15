@@ -2921,7 +2921,7 @@ elsewhere — refreshed", no retry. Width math via Lip Gloss; all user text via
 | Today tab | `GET /today` | `f` focus (`POST /focus`), `B` reblock passed block, `U` unblock, `l` log, `x` done focus task |
 | Triage tab (list) | `GET /tasks?view=triage` | `enter` opens Triage-card mode on the selection |
 | Backlog tab | `GET /tasks?view=backlog` | `J`/`K` reorder (`POST …/place before/after` neighbour), `x`, `B`, `d`, `f`, `e`, `D` drop |
-| Upcoming tab | `GET /upcoming` | `d` change defer, `k` keep (undefer → backlog) |
+| Upcoming tab | `GET /upcoming` | `d` change defer, `K` keep (undefer → backlog) |
 | Log tab | `GET /entries?from=today-13&to=today` (paged) | `l` log, `e` edit entry (`PATCH`), `L` relink, `X` delete |
 | Triage-card mode (`tkr triage -i`) | `GET /tasks?view=triage` one card at a time with reasons and slip counts | `k` keep · `t` top · `b` bottom · `p` place before/after N · `d` defer · `B` block · `x` done · `D` drop · `s` skip · `A` accept all `new` → bottom (`POST /triage/accept-new`) |
 | Plan mode (`tkr plan`) | 1) triage cards; 2) backlog top 10 with today's free slots (`GET /blocks?from=today&to=today`); 3) summary | triage keys; `B` block today (`POST /tasks/{id}/block`); `enter` next step |
