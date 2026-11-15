@@ -69,10 +69,17 @@ func (s *historyScreen) view(a *App, w, h int) string {
 	}
 	lines := []string{fmt.Sprintf("History for #%d", s.id), "j/k scroll · esc back"}
 	for _, e := range s.page.Items {
-		lines = append(lines, textsafe.SanitizeLine(fmt.Sprintf("%s %s by %s  %s:%s", e.Op.At.Format("15:04"), e.Op.Kind, e.Op.Actor, e.Entity, e.Action)))
+		stamp := e.Op.At.Format("15:04")
+		if e.Op.At.Format("2006-01-02") != a.clock.Today.String() {
+			stamp = e.Op.At.Format("2006-01-02 15:04")
+		}
+		lines = append(lines, textsafe.SanitizeLine(fmt.Sprintf("%s %s by %s  %s:%s", stamp, e.Op.Kind, e.Op.Actor, e.Entity, e.Action)))
 	}
 	if len(s.page.Items) == 0 {
 		lines = append(lines, "No history")
+	}
+	if s.page.NextCursor != nil {
+		lines = append(lines, "more… (older events not shown)")
 	}
 	return overlayViewport(&s.viewport, lines, w, h)
 }

@@ -56,7 +56,7 @@ type App struct {
 	modeScreen   screen
 	exitWithMode bool
 	overlays     []screen
-	overlayDirty bool // An own op requires reloading the underlying tab/mode on reveal.
+	overlayDirty bool // A refresh or poll change requires reloading the tab/mode on reveal.
 	form         screen
 	banner       banner
 	inflight     bool
@@ -164,8 +164,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			changed := todayPayloadChanged(a.today, msg.today)
 			a.today, a.todayETag, a.clock = msg.today, msg.etag, msg.today.Clock
 			cmds = append(cmds, a.tabs[TabToday].update(a, msg))
-			if msg.poll && changed && len(a.overlays) == 0 && a.current() != a.tabs[TabToday] {
-				cmds = append(cmds, a.current().load(a))
+			if msg.poll && changed {
+				if len(a.overlays) > 0 {
+					a.overlayDirty = true
+				} else if a.current() != a.tabs[TabToday] {
+					cmds = append(cmds, a.current().load(a))
+				}
 			}
 		}
 		// Only accepted, successful reads may refresh a form's implicit link.
@@ -207,9 +211,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.overlayDirty = false
 		if msg.after != nil {
 			after = msg.after(a, msg.resp)
-		}
-		if len(a.overlays) > 0 {
-			a.overlayDirty = true
 		}
 		return a, tea.Batch(a.refresh(), after)
 	}
@@ -360,9 +361,7 @@ func (a *App) fetchToday(poll bool) tea.Cmd {
 }
 
 func (a *App) refresh() tea.Cmd {
-	if len(a.overlays) == 0 {
-		a.overlayDirty = false
-	}
+	a.overlayDirty = len(a.overlays) > 0
 	return tea.Batch(a.fetchToday(false), a.current().load(a))
 }
 
@@ -417,7 +416,8 @@ func (a *App) closeOverlay() tea.Cmd {
 		a.overlays = a.overlays[:n-1]
 		// AIDEV-NOTE: own ops refresh the visible overlay immediately. Coalesce
 		// the hidden tab/mode's reload until the last overlay is closed; polls
-		// deliberately do not reload overlays (CF02).
+		// deliberately do not reload overlays (CF02). Error/explicit refreshes
+		// and changed poll payloads also mark that underlying screen dirty.
 		if len(a.overlays) == 0 && a.overlayDirty {
 			a.overlayDirty = false
 			return a.current().load(a)

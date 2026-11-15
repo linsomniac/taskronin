@@ -191,3 +191,131 @@ func TestDetailAndHistoryScrollSanitizeAndClip(t *testing.T) {
 		}
 	}
 }
+
+func TestDetailRefreshReloadsRevealedScreenOnce(t *testing.T) {
+	for _, mode := range []bool{false, true} {
+		for _, tc := range []struct {
+			name string
+			err  error
+		}{
+			{"explicit refresh", nil},
+			{"precondition", problem("precondition_failed", 412, "stale")},
+			{"generation", problem("generation_mismatch", 412, "restored")},
+			{"unknown", outcomeUnknown("op-key")},
+		} {
+			t.Run(fmt.Sprintf("mode=%v/%s", mode, tc.name), func(t *testing.T) {
+				f := newFake()
+				a := newTestApp(t, f)
+				base, lower, upper := &recScreen{}, &recScreen{}, &recScreen{}
+				if mode {
+					drain(t, a, a.enterMode(ModePlan, base))
+				} else {
+					a.setTabScreen(TabBacklog, base)
+					press(t, a, "3")
+				}
+				drain(t, a, a.openOverlay(lower))
+				drain(t, a, a.openOverlay(upper))
+				if tc.err == nil {
+					drain(t, a, a.refresh())
+				} else {
+					f.errs["Undo"] = tc.err
+					drain(t, a, a.mutate("undo", func(ctx context.Context, c API) (*api.OpResponse, error) {
+						return c.Undo(ctx, client.Mut{})
+					}, nil, nil))
+					eq(t, f.count("Undo"), 1)
+				}
+				eq(t, upper.loads, 2)
+				eq(t, lower.loads, 1)
+				eq(t, base.loads, 1)
+				press(t, a, "esc")
+				eq(t, base.loads, 1)
+				press(t, a, "esc")
+				eq(t, base.loads, 2)
+				drain(t, a, a.openOverlay(lower))
+				press(t, a, "esc")
+				eq(t, base.loads, 2)
+			})
+		}
+	}
+}
+
+func TestDetailTabbedNotesReachLastLine(t *testing.T) {
+	f := detailFixture()
+	d := f.details[42]
+	d.Notes = strings.Repeat("\t12345678901234567890\n", 20) + "LAST NOTE"
+	d.Blocks, d.Entries = nil, nil
+	f.details[42] = d
+	a := newTestApp(t, f)
+	drain(t, a, a.openDetail(42))
+	a.Update(tea.WindowSizeMsg{Width: 20, Height: 8})
+	for range 100 {
+		for _, line := range strings.Split(viewText(a), "\n") {
+			if lipgloss.Width(line) > 20 {
+				t.Fatalf("oversized line: %q", line)
+			}
+		}
+		press(t, a, "j")
+	}
+	if !strings.Contains(viewText(a), "LAST NOTE") {
+		t.Fatalf("last note is unreachable at the bottom:\n%s", viewText(a))
+	}
+}
+
+func TestDetailTagsRejectEmptyNames(t *testing.T) {
+	for _, value := range []string{"", "   ", "+", "-", "+db -old +", "x -"} {
+		t.Run(value, func(t *testing.T) {
+			f := detailFixture()
+			a := newTestApp(t, f)
+			drain(t, a, a.openDetail(42))
+			press(t, a, "t")
+			typeText(t, a, value)
+			fm := a.form.(*form)
+			press(t, a, "enter")
+			eq(t, f.count("UpdateTask"), 0)
+			eq(t, a.form == fm, true)
+			eq(t, fm.input.Value(), value)
+			eq(t, fm.waiting, false)
+			if fm.errText == "" || !strings.Contains(viewText(a), fm.errText) {
+				t.Fatal("missing validation error")
+			}
+			fm.input.SetValue("+db -old x")
+			press(t, a, "enter")
+			eq(t, f.count("UpdateTask"), 1)
+			eq(t, a.form, nil)
+			eq(t, f.mustLast(t, "UpdateTask").Req, any(api.UpdateTaskRequest{TagsAdd: []string{"db", "x"}, TagsRemove: []string{"old"}}))
+		})
+	}
+}
+
+func TestDetailHistoryDatesAndMore(t *testing.T) {
+	for _, more := range []bool{false, true} {
+		t.Run(fmt.Sprintf("more=%v", more), func(t *testing.T) {
+			f := detailFixture()
+			for _, days := range []int{-1, 1} {
+				f.history[42] = append(f.history[42], api.EventView{Op: api.OpSummary{
+					At: api.Time{Time: f.clock.Now.AddDate(0, 0, days)}, Kind: "task.update", Actor: "owner",
+				}, Entity: "task", Action: "update"})
+			}
+			if more {
+				f.historyNext = ptr("older")
+			}
+			a := newTestApp(t, f)
+			drain(t, a, a.openHistory(42))
+			v := viewText(a)
+			for _, want := range []string{"\n10:00 task.update", "2026-10-27 10:00 task.update", "2026-10-29 10:00 task.update"} {
+				if !strings.Contains(v, want) {
+					t.Fatalf("missing %q in\n%s", want, v)
+				}
+			}
+			eq(t, strings.Contains(v, "2026-10-28 10:00 task.update"), false)
+			eq(t, strings.Contains(v, "more… (older events not shown)"), more)
+			if more {
+				content := a.current().view(a, 100, 28)
+				if !strings.HasSuffix(strings.TrimSpace(content), "more… (older events not shown)") {
+					t.Fatal("more marker is not the last row")
+				}
+			}
+			eq(t, f.mustLast(t, "TaskHistory"), call{Method: "TaskHistory", ID: 42, Q: client.PageQuery{Limit: 100}})
+		})
+	}
+}

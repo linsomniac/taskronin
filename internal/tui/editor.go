@@ -137,7 +137,7 @@ func (a *App) editorDone(msg editorDoneMsg) tea.Cmd {
 	}, func(_ *App, _ *api.OpResponse) tea.Cmd {
 		return discardDraft(msg.draft)
 	}, func(a *App, _ error) {
-		a.appendBanner(" — " + kept)
+		a.appendBanner(kept)
 	})
 }
 

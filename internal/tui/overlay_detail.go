@@ -82,8 +82,15 @@ func (s *detailScreen) tagsForm(a *App) tea.Cmd {
 	id, etag := s.id, s.detail.ETag
 	return a.openForm(fmt.Sprintf("Tags for #%d", id), "+tag or tag adds · -tag removes · enter saves · esc cancels", "",
 		func(_ *App, value string) (string, sendFunc, error) {
+			tokens := strings.Fields(value)
+			if len(tokens) == 0 {
+				return "", nil, fmt.Errorf("enter at least one tag")
+			}
 			r := api.UpdateTaskRequest{}
-			for _, token := range strings.Fields(value) {
+			for _, token := range tokens {
+				if token == "+" || token == "-" {
+					return "", nil, fmt.Errorf("tag name required after %q", token)
+				}
 				if strings.HasPrefix(token, "-") {
 					r.TagsRemove = append(r.TagsRemove, strings.TrimPrefix(token, "-"))
 				} else {
@@ -168,6 +175,9 @@ func overlayViewport(v *viewport.Model, lines []string, w, h int) string {
 	v.SetWidth(max(0, w))
 	v.SetHeight(max(0, h))
 	for i, line := range lines {
+		// AIDEV-NOTE: ANSI width treats tabs as zero cells, but Lip Gloss
+		// expands them. Expand first so clipping and scroll heights agree.
+		line = strings.ReplaceAll(line, "\t", "    ")
 		lines[i] = textsafe.Truncate(line, max(0, w), "…")
 	}
 	v.SetContentLines(lines)

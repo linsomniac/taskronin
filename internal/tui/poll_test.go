@@ -68,6 +68,50 @@ func TestPollNeverReloadsOverlays(t *testing.T) {
 	eq(t, a.today.Focus.Title, "Changed below overlay")
 }
 
+func TestPollBehindOverlayReloadsRevealedScreen(t *testing.T) {
+	for _, mode := range []bool{false, true} {
+		for _, change := range []string{"payload", "clock", "304"} {
+			t.Run(fmt.Sprintf("mode=%v/%s", mode, change), func(t *testing.T) {
+				f := fakeWithToday(todayFixture())
+				a := newTestApp(t, f)
+				base, lower, upper := &recScreen{}, &recScreen{}, &recScreen{}
+				if mode {
+					drain(t, a, a.enterMode(ModePlan, base))
+				} else {
+					a.setTabScreen(TabBacklog, base)
+					press(t, a, "3")
+				}
+				drain(t, a, a.openOverlay(lower))
+				drain(t, a, a.openOverlay(upper))
+				switch change {
+				case "payload":
+					f.setToday(withFocusTitle(todayFixture(), "Changed below overlay"), "changed")
+				case "clock":
+					td := todayFixture()
+					td.Clock.Now.Time = td.Clock.Now.Add(5 * time.Second)
+					f.setToday(td, "clock-tick")
+				}
+				drain(t, a, func() tea.Msg { return pollMsg{} })
+				drain(t, a, func() tea.Msg { return pollMsg{} }) // A subsequent 304 must preserve a pending reload.
+				eq(t, base.loads, 1)
+				eq(t, lower.loads, 1)
+				eq(t, upper.loads, 1)
+				press(t, a, "esc")
+				eq(t, base.loads, 1)
+				press(t, a, "esc")
+				want := 1
+				if change == "payload" {
+					want++
+				}
+				eq(t, base.loads, want)
+				drain(t, a, a.openOverlay(lower))
+				press(t, a, "esc")
+				eq(t, base.loads, want)
+			})
+		}
+	}
+}
+
 func TestPollChangeReloadsVisibleMode(t *testing.T) {
 	f := fakeWithToday(todayFixture())
 	a := newTestApp(t, f)

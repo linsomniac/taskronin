@@ -81,7 +81,9 @@ func typeText(t *testing.T, a *App, s string) {
 
 func drain(t *testing.T, a *App, cmd tea.Cmd) {
 	t.Helper()
-	timer := time.NewTimer(2 * time.Second)
+	// AIDEV-NOTE: this is a hang guard, not a speed check. Editor cascades
+	// fsync drafts while make check runs other I/O-heavy packages under -race.
+	timer := time.NewTimer(30 * time.Second)
 	defer timer.Stop()
 	queue := []tea.Cmd{cmd}
 	for n := 0; len(queue) > 0; {
@@ -99,7 +101,7 @@ func drain(t *testing.T, a *App, cmd tea.Cmd) {
 		select {
 		case msg = <-result:
 		case <-timer.C:
-			t.Fatal("drain exceeded 2 seconds")
+			t.Fatalf("drain exceeded 30-second hang guard after %d messages", n)
 		}
 		switch msg := msg.(type) {
 		case tea.BatchMsg:
@@ -122,6 +124,19 @@ func contains(s string) func([]byte) bool {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+func TestDrainAllowsSlowCommands(t *testing.T) {
+	a := newTestApp(t, newFake())
+	ran := false
+	drain(t, a, func() tea.Msg {
+		timer := time.NewTimer(2100 * time.Millisecond)
+		defer timer.Stop()
+		<-timer.C
+		ran = true
+		return nil
+	})
+	eq(t, ran, true)
+}
 
 type recScreen struct {
 	stubScreen

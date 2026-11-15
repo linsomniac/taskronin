@@ -37,6 +37,7 @@ type fakeAPI struct {
 	blocks      []api.Block
 	details     map[int64]api.TaskDetail
 	history     map[int64][]api.EventView
+	historyNext *string
 	hits        []api.SearchHit
 	aiPages     []api.AIChanges // page i is returned for the i-th distinct cursor ("" first)
 	aiCursors   []string
@@ -197,7 +198,7 @@ func (f *fakeAPI) TaskHistory(_ context.Context, id int64, p client.PageQuery) (
 	if err := f.record(call{Method: "TaskHistory", ID: id, Q: p}); err != nil {
 		return nil, err
 	}
-	return &api.Page[api.EventView]{Items: slices.Clone(f.history[id])}, nil
+	return &api.Page[api.EventView]{Items: slices.Clone(f.history[id]), NextCursor: f.historyNext}, nil
 }
 
 func (f *fakeAPI) ListEntries(_ context.Context, q client.EntryQuery) (*api.Page[api.Entry], error) {

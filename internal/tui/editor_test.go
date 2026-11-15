@@ -113,6 +113,9 @@ func TestEditorFailuresKeepDraft(t *testing.T) { // Review Focus 5.
 				if !strings.Contains(a.banner.text, "draft kept at "+files[0]) {
 					t.Fatal(a.banner.text)
 				}
+				if tc.wantPatch && !strings.HasSuffix(a.banner.text, " · draft kept at "+files[0]) {
+					t.Fatal("draft suffix must have one separator:", a.banner.text)
+				}
 				b, err := os.ReadFile(files[0])
 				if err != nil {
 					t.Fatal(err)
@@ -136,17 +139,22 @@ func TestEditEntry(t *testing.T) { // LIF-15 / D32 (TUI side).
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f, runs := newFake(), 0
+			var initial []byte
+			var readErr error
 			a := newTestApp(t, f, func(c *Config) {
 				c.Editor.Exec = func(cmd *exec.Cmd, cb tea.ExecCallback) tea.Cmd {
-					b, err := os.ReadFile(cmd.Args[len(cmd.Args)-1])
-					if err != nil {
-						t.Fatal(err)
+					initial, readErr = os.ReadFile(cmd.Args[len(cmd.Args)-1])
+					if readErr != nil {
+						return func() tea.Msg { return cb(readErr) }
 					}
-					eq(t, string(b), tc.initial)
 					return stubExec(tc.edited, nil, &runs)(cmd, cb)
 				}
 			})
 			drain(t, a, a.editEntry(api.Entry{ID: 9, ETag: "e-9", Kind: tc.kind, Title: "T", Notes: tc.notes}))
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			eq(t, string(initial), tc.initial)
 			eq(t, f.mustLast(t, "UpdateEntry"), call{Method: "UpdateEntry", ID: 9, Mut: client.Mut{IfMatch: "e-9"}, Req: tc.want})
 			eq(t, f.count("GetTask"), 0)
 			eq(t, runs, 1)
@@ -183,21 +191,19 @@ func TestEditorCallbackReadsBufferAndDefersDiscard(t *testing.T) { // CF08, CF13
 		f := editFixture()
 		var path string
 		var done tea.Msg
+		var args []string
+		var cancellable bool
+		var writeErr error
 		a := newTestApp(t, f, func(c *Config) {
 			c.Editor.Setting = `vi -f 'two words'`
 			c.Editor.Exec = func(cmd *exec.Cmd, cb tea.ExecCallback) tea.Cmd {
 				return func() tea.Msg {
-					eq(t, cmd.Args[:3], []string{"vi", "-f", "two words"})
-					if cmd.Cancel == nil {
-						t.Fatal("editor command has no context cancellation")
-					}
+					args, cancellable = cmd.Args, cmd.Cancel != nil
 					path = cmd.Args[len(cmd.Args)-1]
 					if changed {
-						if err := os.WriteFile(path, []byte("New\n\nn1"), 0o600); err != nil {
-							t.Fatal(err)
-						}
+						writeErr = os.WriteFile(path, []byte("New\n\nn1"), 0o600)
 					}
-					done = cb(nil)
+					done = cb(writeErr)
 					return nil // Deliver the callback message ourselves below.
 				}
 			}
@@ -206,6 +212,12 @@ func TestEditorCallbackReadsBufferAndDefersDiscard(t *testing.T) { // CF08, CF13
 		_, prepare := a.Update(read())
 		eq(t, len(draftFiles(t, a.cfg.Editor.DraftsDir)), 0)
 		drain(t, a, prepare)
+		if writeErr != nil {
+			t.Fatal(writeErr)
+		}
+		eq(t, len(args), 4)
+		eq(t, args[:3], []string{"vi", "-f", "two words"})
+		eq(t, cancellable, true)
 		// If Update reads the file, it will incorrectly save this later text.
 		if err := os.WriteFile(path, []byte("Wrong\n\nlate"), 0o600); err != nil {
 			t.Fatal(err)
@@ -259,21 +271,23 @@ func TestEditorTestDefaultsDoNotLaunchProcess(t *testing.T) { // CF07.
 func TestEditorReadFailureKeepsDraftPath(t *testing.T) {
 	f := editFixture()
 	var path string
+	var setupErr error
 	a := newTestApp(t, f, func(c *Config) {
 		c.Editor.Exec = func(cmd *exec.Cmd, cb tea.ExecCallback) tea.Cmd {
 			return func() tea.Msg {
 				path = cmd.Args[len(cmd.Args)-1]
-				if err := os.Remove(path); err != nil {
-					t.Fatal(err)
+				setupErr = os.Remove(path)
+				if setupErr == nil {
+					setupErr = os.Mkdir(path, 0o700)
 				}
-				if err := os.Mkdir(path, 0o700); err != nil {
-					t.Fatal(err)
-				}
-				return cb(nil)
+				return cb(setupErr)
 			}
 		}
 	})
 	drain(t, a, a.editTask(42))
+	if setupErr != nil {
+		t.Fatal(setupErr)
+	}
 	eq(t, f.count("UpdateTask"), 0)
 	eq(t, a.banner.text, "editor failed — draft kept at "+path)
 	if _, err := os.Stat(path); err != nil {
