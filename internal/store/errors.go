@@ -75,3 +75,10 @@ func IsCorrupt(err error) bool {
 	}
 	return false
 }
+
+// IsInterrupted reports SQLite interruption, retaining classification through
+// wrapped domain errors. Callers must check the context cause separately.
+func IsInterrupted(err error) bool {
+	var se *sqlite.Error
+	return errors.As(err, &se) && se.Code()&0xff == sqlite3.SQLITE_INTERRUPT
+}

@@ -84,7 +84,11 @@ func (s *Service) run(ctx context.Context, m Meta, spec opSpec, fn func(*op) err
 	if m.Gen != s.gen {
 		return nil, domain.Errorf(domain.CodeGenerationMismatch, "database generation does not match")
 	}
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), OpBudget)
+	budget := s.opBudget
+	if budget <= 0 {
+		budget = OpBudget
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), budget)
 	defer cancel()
 	leave, err := s.enter()
 	if err != nil {
@@ -97,11 +101,12 @@ func (s *Service) run(ctx context.Context, m Meta, spec opSpec, fn func(*op) err
 // runEntered continues an authorized, generation-checked operation under its
 // existing lifecycle registration and budget. Password preparation uses this
 // entry point so shutdown cannot reject work it already admitted (BF17).
-func (s *Service) runEntered(ctx context.Context, m Meta, spec opSpec, fn func(*op) error) (*OpResult, error) {
+func (s *Service) runEntered(ctx context.Context, m Meta, spec opSpec, fn func(*op) error) (_ *OpResult, resultErr error) {
 	tx, done, err := beginTx(ctx, s.store.Writer, nil)
 	if err != nil {
 		return nil, writerAdmissionError(err)
 	}
+	defer func() { resultErr = opBudgetError(ctx, spec.idem, resultErr) }()
 	defer done()
 	now := s.clock.Now().Truncate(time.Millisecond)
 	// AIDEV-NOTE: Idempotency lookup precedes target selection (R2-5),
@@ -369,4 +374,22 @@ func (s *Service) loadResult(ctx context.Context, r *OpResult) error {
 		}
 		return nil
 	})
+}
+
+// opBudgetError applies only after writer admission under the runner's own
+// detached budget. Admission timeouts keep writerAdmissionError's policy.
+func opBudgetError(ctx context.Context, keyed bool, err error) error {
+	// AIDEV-NOTE: S1′ is safe only for keyed operations: PutIdem commits in the
+	// same transaction as the mutation, so a retry re-executes after rollback or
+	// replays after commit (including a result-load timeout). Exempt operations
+	// are excluded: client.callExempt retries busy (internal/client/retry.go),
+	// but has no replay record; a post-commit busy could duplicate a token or
+	// settings change. Commit then result loading: service/op.go:283-296 at review.
+	if !keyed || err == nil || !errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return err
+	}
+	if errors.Is(err, context.DeadlineExceeded) || store.IsInterrupted(err) {
+		return &domain.Error{Code: domain.CodeBusy, Detail: "operation exceeded its time budget", RetryAfter: time.Second, Err: err}
+	}
+	return err
 }

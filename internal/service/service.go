@@ -30,6 +30,8 @@ type Options struct {
 	Ledger      *backup.Ledger
 	Passwords   *auth.PasswordGate
 	Logger      *slog.Logger
+	// OpBudget overrides the ordinary runner budget; zero uses the default OpBudget.
+	OpBudget time.Duration
 }
 
 // Service coordinates operations on a single database.
@@ -41,6 +43,7 @@ type Service struct {
 	dueSoonDays int
 	slipGrace   time.Duration
 	undoDepth   int
+	opBudget    time.Duration
 	backups     *backup.Manager
 	backupGate  chan struct{}
 	ledger      *backup.Ledger
@@ -90,7 +93,7 @@ func New(o Options) (*Service, error) {
 		return nil, serviceError(err)
 	}
 	return &Service{store: o.Store, clock: o.Clock, zone: o.Zone, weekStart: o.WeekStart,
-		dueSoonDays: o.DueSoonDays, slipGrace: o.SlipGrace, undoDepth: o.UndoDepth,
+		dueSoonDays: o.DueSoonDays, slipGrace: o.SlipGrace, undoDepth: o.UndoDepth, opBudget: o.OpBudget,
 		backups: o.Backups, backupGate: make(chan struct{}, 1), ledger: o.Ledger, passwords: o.Passwords, logger: o.Logger,
 		gen: domain.Generation(gen), idemHMACKey: a.IdemHMACKey,
 		usage: usage{tokens: make(map[domain.TokenID]time.Time), sessions: make(map[[32]byte]time.Time)}}, nil
