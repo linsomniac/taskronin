@@ -33,9 +33,9 @@ type testApp struct {
 	cookies map[string]string
 }
 
-func newTestApp(t *testing.T) *testApp {
+func newTestApp(t *testing.T, opts ...testutil.SvcOpt) *testApp {
 	t.Helper()
-	svc, clk := testutil.Service(t)
+	svc, clk := testutil.Service(t, opts...)
 	logs := new(bytes.Buffer)
 	a, err := web.NewApp(web.Options{Svc: svc, Clock: clk, Zone: testutil.Zone,
 		WeekStart: time.Monday, Listen: testListen,
@@ -60,6 +60,33 @@ func (ta *testApp) get(path string, hdr ...string) *httptest.ResponseRecorder {
 func (ta *testApp) post(path string, form url.Values, hdr ...string) *httptest.ResponseRecorder {
 	ta.t.Helper()
 	return ta.request(http.MethodPost, path, form, hdr...)
+}
+
+// AIDEV-NOTE: ≤5 logins per testApp: PasswordGate burst on a fake clock
+func (ta *testApp) login() *testApp {
+	ta.t.Helper()
+	w := ta.post("/ui/login", url.Values{"password": {testutil.Password}})
+	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/ui/" || ta.cookies[web.SessionCookie] == "" {
+		ta.t.Fatalf("login = %d %v %s", w.Code, w.Header(), w.Body)
+	}
+	return ta
+}
+
+func (ta *testApp) submit(pagePath, action string, overrides url.Values) *httptest.ResponseRecorder {
+	ta.t.Helper()
+	w := ta.get(pagePath)
+	if w.Code != http.StatusOK {
+		ta.t.Fatalf("GET %s = %d %s", pagePath, w.Code, w.Body)
+	}
+	form := scrapeForm(ta.t, w.Body.String(), action)
+	for key, values := range overrides {
+		if len(values) == 0 {
+			form.Del(key)
+		} else {
+			form.Set(key, values[0])
+		}
+	}
+	return ta.post(action, form)
 }
 
 func (ta *testApp) request(method, path string, form url.Values, hdr ...string) *httptest.ResponseRecorder {
@@ -193,6 +220,24 @@ func scrapeForm(t *testing.T, body, action string) url.Values {
 	return forms[0]
 }
 
+func scrapeFormWhere(t *testing.T, body, action string, match url.Values) url.Values {
+	t.Helper()
+	for _, form := range scrapeForms(t, body, action) {
+		matches := true
+		for key, values := range match {
+			if !reflect.DeepEqual(form[key], values) {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			return form
+		}
+	}
+	t.Fatalf("no form with action %q matching %v", action, match)
+	return nil
+}
+
 func assertInert(t *testing.T, body string) {
 	t.Helper()
 	for _, problem := range inertErrors(t, body) {
@@ -284,6 +329,33 @@ second</textarea><select name="priority"><option value="H">High</option><option 
 	want := []url.Values{{"tag": {"a", "b"}, "yes": {"1"}, "pick": {"b"}, "notes": {"\nfirst\nsecond"}, "priority": {"L"}}, {"id": {"42"}}}
 	if !reflect.DeepEqual(forms, want) {
 		t.Errorf("scraped forms = %#v", forms)
+	}
+	if got := scrapeFormWhere(t, body, "/ui/test", url.Values{"id": {"42"}}); !reflect.DeepEqual(got, want[1]) {
+		t.Errorf("selected form = %v, want %v", got, want[1])
+	}
+}
+
+func TestHarnessSubmitOverrides(t *testing.T) {
+	ta := newTestApp(t)
+	ta.H = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			if r.URL.Path != "/ui/page" {
+				t.Errorf("submit loaded %s", r.URL.Path)
+			}
+			_, _ = w.Write([]byte(`<form action="/ui/action"><input name="title" value="old"><input name="drop" value="x"><input name="id" value="1"><input name="id" value="2"></form>`))
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Fatal(err)
+		}
+		want := url.Values{"title": {"new"}, "id": {"1", "2"}}
+		if r.URL.Path != "/ui/action" || !reflect.DeepEqual(r.PostForm, want) {
+			t.Errorf("submit = %s %v, want /ui/action %v", r.URL.Path, r.PostForm, want)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	if w := ta.submit("/ui/page", "/ui/action", url.Values{"title": {"new", "ignored"}, "drop": {}}); w.Code != http.StatusNoContent {
+		t.Errorf("submit response = %d", w.Code)
 	}
 }
 

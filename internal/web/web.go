@@ -75,5 +75,5 @@ func newApp(o Options) (*app, error) {
 }
 
 func (a *app) handler() http.Handler {
-	return securityHeaders(a.checkHost(routeClass(a.bodyLimit(readDeadline(a.mux)))))
+	return securityHeaders(a.checkHost(routeClass(a.bodyLimit(readDeadline(a.session(a.csrf(a.mux)))))))
 }

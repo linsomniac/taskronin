@@ -8,6 +8,10 @@ import (
 
 func (a *app) routes() *http.ServeMux {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /ui/login", a.loginPage)
+	mux.HandleFunc("POST /ui/login", a.login)
+	mux.HandleFunc("POST /ui/logout", a.logout)
+	mux.HandleFunc("GET /ui/{$}", a.today)
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/ui/", http.StatusSeeOther)
 	})

@@ -232,23 +232,33 @@ func TestBodyLimit(t *testing.T) {
 func TestReadDeadline(t *testing.T) {
 	for _, method := range []string{http.MethodGet, http.MethodHead, http.MethodPost} {
 		t.Run(method, func(t *testing.T) {
-			r := httptest.NewRequestWithContext(t.Context(), method, "/ui/probe", strings.NewReader("a=1"))
+			ta := newTestApp(t).login()
+			form := scrapeForm(t, ta.get("/ui/").Body.String(), "/ui/logout")
+			form.Set("a", "1")
+			type probeKey struct{}
+			ctx := context.WithValue(t.Context(), probeKey{}, "preserved")
+			r := httptest.NewRequestWithContext(ctx, method, "/ui/probe", strings.NewReader(form.Encode()))
 			r.Host = "127.0.0.1:7878"
+			r.AddCookie(&http.Cookie{Name: web.SessionCookie, Value: ta.cookies[web.SessionCookie]})
 			r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			r.Header.Set("Origin", "http://"+testListen)
 			r.Header.Set("Authorization", "Bearer must-be-stripped")
 			var seen context.Context
-			h, err := web.NewWithProbe(web.Options{Listen: r.Host}, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			h, err := web.NewWithProbe(web.Options{Listen: r.Host, Svc: ta.Svc, Clock: ta.Clock, Zone: testutil.Zone}, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 				seen = req.Context()
 				deadline, ok := seen.Deadline()
 				if method == http.MethodPost {
-					if seen != r.Context() || ok {
-						t.Error("POST context was changed")
+					if ok {
+						t.Error("POST has a read deadline")
 					}
 					if req.PostForm.Get("a") != "1" {
 						t.Error("POST reached the mux without its parsed form")
 					}
 				} else if !ok || time.Until(deadline) <= 0 || time.Until(deadline) > 10*time.Second {
 					t.Errorf("read deadline = %v, set = %v; want a 10-second budget", deadline, ok)
+				}
+				if seen.Value(probeKey{}) != "preserved" {
+					t.Error("request context value was lost")
 				}
 				if req.Header.Get("Authorization") != "" {
 					t.Error("Authorization reached the mux")

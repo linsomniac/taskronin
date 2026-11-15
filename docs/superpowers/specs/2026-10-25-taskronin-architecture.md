@@ -2406,9 +2406,11 @@ func (g *PasswordGate) Verify(ctx context.Context, key, encoded, pw string) (boo
 - CSRF token = base64url(HMAC-SHA256(csrf_secret, "tkr-csrf-v1")); emitted in a
   hidden `_csrf` field on every form and as `hx-headers='{"X-CSRF-Token":"…"}'`
   on `<body>`. Every POST except login must carry a matching token (constant-time compare)
-  **and** pass the origin check: `Origin` is `http://` + one of the host allowlist
-  entries of §6.2 (so `[::1]` works when bound there), or `Sec-Fetch-Site:
-  same-origin`; reject when both headers are absent or either mismatches.
+  **and** pass the origin check: when `Sec-Fetch-Site` is present, `same-origin`
+  passes and any other value → 403. When it is absent, `Origin` must equal
+  `http://` + one of the host allowlist entries of §6.2 (so `[::1]` works when
+  bound there); absent or `null` → 403. A present, non-`null` Origin outside
+  that allowlist → 403 regardless of `Sec-Fetch-Site`.
 - `ChangePassword` and `passwd --reset` delete all sessions. Logout deletes the row.
 - Web form idempotency: each rendered form carries `_nonce` (128-bit hex) used as
   `Idem.Key`; `Idem.Body` = sorted, re-encoded form values minus `_csrf`/`_nonce`.

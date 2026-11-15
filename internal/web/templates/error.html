@@ -4,6 +4,8 @@
 <h1>{{.Title}}</h1>
 {{if $stale}}
 <p>This changed elsewhere since the page was loaded — <a href="{{.Return}}">reload</a>.</p>
+{{else if eq .Err.Code "unauthenticated"}}
+<p><a href="/ui/login">{{.Err.Detail}}</a></p>
 {{else}}
 <p>{{.Err.Detail}}</p>
 {{end}}
