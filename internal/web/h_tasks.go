@@ -24,7 +24,9 @@ func (a *app) mutate(w http.ResponseWriter, r *http.Request, fn func(service.Met
 		a.renderError(w, r, err)
 		return
 	}
-	a.setFlash(w, r, flashLines(res))
+	if lines := flashLines(res); len(lines) > 0 {
+		a.setFlash(w, r, lines)
+	}
 	redirectReturn(w, r)
 }
 

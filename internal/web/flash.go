@@ -100,28 +100,37 @@ func (a *app) setFlash(w http.ResponseWriter, r *http.Request, lines []string) {
 }
 
 func (a *app) readFlash(w http.ResponseWriter, r *http.Request) []string {
-	cookie, err := r.Cookie(flashCookie)
-	if err != nil {
+	cookies := r.CookiesNamed(flashCookie)
+	if len(cookies) == 0 {
 		return nil
 	}
 	setCookie(w, flashCookie, "", "/ui/", time.Time{}, -1)
 	s, ok := sessionFrom(r.Context())
-	if !ok || s.CSRF == "" || len(cookie.Value) > 2048 {
+	if !ok || s.CSRF == "" {
 		return nil
 	}
-	body, signature, ok := strings.Cut(cookie.Value, ".")
-	if !ok {
-		return nil
+	// AIDEV-NOTE: Another loopback port can plant a longer-path cookie
+	// before ours. Like authenticateSession, try at most four in wire order
+	// and use the first authenticated value; clear only our /ui/ cookie.
+	for _, cookie := range cookies[:min(len(cookies), 4)] {
+		if len(cookie.Value) > 2048 {
+			continue
+		}
+		body, signature, ok := strings.Cut(cookie.Value, ".")
+		if !ok {
+			continue
+		}
+		text, err := base64.RawURLEncoding.DecodeString(body)
+		if err != nil || len(text) == 0 || !utf8.Valid(text) {
+			continue
+		}
+		mac, err := base64.RawURLEncoding.DecodeString(signature)
+		if err != nil || !hmac.Equal(mac, flashMAC(s.CSRF, text)) {
+			continue
+		}
+		return strings.Split(string(text), "\n")
 	}
-	text, err := base64.RawURLEncoding.DecodeString(body)
-	if err != nil || len(text) == 0 || !utf8.Valid(text) {
-		return nil
-	}
-	mac, err := base64.RawURLEncoding.DecodeString(signature)
-	if err != nil || !hmac.Equal(mac, flashMAC(s.CSRF, text)) {
-		return nil
-	}
-	return strings.Split(string(text), "\n")
+	return nil
 }
 
 func flashMAC(csrf string, text []byte) []byte {

@@ -164,7 +164,7 @@ func TestAddTaskValidation(t *testing.T) {
 				t.Fatalf("validation = %d %s", w.Code, w.Body)
 			}
 			assertErrorCode(t, w.Body.String(), "validation")
-			requireText(t, w.Body.String(), tc.field)
+			requireFieldErrors(t, w.Body.String(), tc.field)
 			if len(ta.opKinds()) != 0 {
 				t.Error("validation created an operation")
 			}
@@ -182,6 +182,7 @@ func TestValidationKeepsInput(t *testing.T) {
 	if w.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("validation = %d %s", w.Code, w.Body)
 	}
+	requireFieldErrors(t, w.Body.String(), "due")
 	form := scrapeForm(t, w.Body.String(), "/ui/tasks")
 	if form.Get("title") != "Long one" || form.Get("notes") != "para 1\n\npara 2" || form.Get("due") != "someday" {
 		t.Fatalf("lost input: %v", form)
@@ -254,7 +255,7 @@ func TestDue(t *testing.T) {
 			t.Fatalf("due %q = %d %s", due, w.Code, w.Body)
 		}
 		assertErrorCode(t, w.Body.String(), "validation")
-		requireText(t, w.Body.String(), "due")
+		requireFieldErrors(t, w.Body.String(), "due")
 	}
 }
 
@@ -291,6 +292,7 @@ func TestAddTaskDeferResubmitRoundTrip(t *testing.T) {
 	if w.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("validation = %d %s", w.Code, w.Body)
 	}
+	requireFieldErrors(t, w.Body.String(), "title")
 	form := scrapeForm(t, w.Body.String(), "/ui/tasks")
 	parsed, err := ta.App.FormMoment(form, "defer", datespec.Future)
 	if err != nil || parsed == nil || *parsed != testutil.Moment("10-30 09:00") {
@@ -406,6 +408,7 @@ func TestEditTaskPreconditions(t *testing.T) {
 	if w.Code != http.StatusUnprocessableEntity || !reflect.DeepEqual(before, ta.opKinds()) {
 		t.Errorf("bad edit priority = %d, ops = %v", w.Code, ta.opKinds())
 	}
+	requireFieldErrors(t, w.Body.String(), "priority")
 }
 
 func responseCookie(t *testing.T, w *httptest.ResponseRecorder, name string) *http.Cookie {

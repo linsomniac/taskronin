@@ -29,6 +29,7 @@ var (
 	FormMinute    = formMinute
 	SplitTags     = splitTags
 	WithSession   = withSession
+	FlashLines    = flashLines
 )
 
 func (a *App) Handler() http.Handler { return a.handler() }
@@ -51,6 +52,10 @@ func (a *App) RenderError(w http.ResponseWriter, r *http.Request, err error) {
 }
 
 func (a *App) Meta(r *http.Request) (service.Meta, error) { return a.meta(r) }
+
+func (a *App) Mutate(w http.ResponseWriter, r *http.Request, fn func(service.Meta, url.Values) (*service.OpResult, error)) {
+	a.mutate(w, r, fn)
+}
 
 func (a *App) Expect(form url.Values, key string) (domain.Expect, error) {
 	return a.expect(form, key)

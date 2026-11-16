@@ -289,6 +289,53 @@ func assertInert(t *testing.T, body string) {
 	}
 }
 
+// requireFieldErrors checks only the error list, never resubmit labels or values.
+// Shared by action tests so field-name regressions cannot hide in saved input.
+func requireFieldErrors(t *testing.T, body string, want ...string) {
+	t.Helper()
+	var got []string
+	found := false
+	walkHTML(parseHTML(t, body), func(n *html.Node) {
+		if n.Type != html.ElementNode || n.Data != "section" || !slices.Contains(strings.Fields(attr(n, "class")), "error") {
+			return
+		}
+		found = true
+		for list := n.FirstChild; list != nil; list = list.NextSibling {
+			if list.Type != html.ElementNode || list.Data != "ul" {
+				continue
+			}
+			for item := list.FirstChild; item != nil; item = item.NextSibling {
+				if item.Type != html.ElementNode || item.Data != "li" {
+					continue
+				}
+				if field, _, ok := strings.Cut(nodeText(item), ":"); ok {
+					got = append(got, strings.TrimSpace(field))
+				}
+			}
+		}
+	})
+	if !found {
+		t.Fatal("missing error section")
+	}
+	want = slices.Clone(want)
+	slices.Sort(want)
+	slices.Sort(got)
+	got, want = slices.Compact(got), slices.Compact(want)
+	if !slices.Equal(got, want) {
+		t.Errorf("error fields = %v, want %v", got, want)
+	}
+}
+
+func TestRequireFieldErrorsScoping(t *testing.T) {
+	const input = `<section class="flash"><ul><li>place: unrelated</li></ul></section>
+<section class="error">
+<ul><li>priority: invalid</li><li>due: bad date: someday</li><li>due: another error</li></ul>
+<form><label>title</label><label>place</label><label>defer</label><input name="due" value="someday"></form>
+</section>`
+	requireFieldErrors(t, input, "due", "priority")
+	requireFieldErrors(t, `<section class="error"><form><label>due</label><ul><li>due: saved input</li></ul></form></section>`)
+}
+
 func inertErrors(t *testing.T, body string) []string {
 	t.Helper()
 	var problems []string
