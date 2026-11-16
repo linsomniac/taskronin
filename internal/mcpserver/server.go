@@ -4,6 +4,7 @@
 package mcpserver
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -11,11 +12,14 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"reflect"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/jsonschema-go/jsonschema"
+	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"taskronin/internal/api"
@@ -82,8 +86,172 @@ func Run(ctx context.Context, o Options) error {
 	if err != nil {
 		return err
 	}
-	return s.Run(ctx, &mcp.StdioTransport{})
+	return runDraining(ctx, s, os.Stdin, os.Stdout, 30*time.Second)
 }
+
+// AIDEV-NOTE: go-sdk v1.8.0 cancels calls on EOF, and ServerSession.Close
+// rejects their response writes. Delay EOF instead. Register calls before
+// feeding each stdio frame to the SDK: middleware alone misses queued calls.
+// Wait for both handlers and response writes, while keeping the SDK's actual
+// connection (and its private protocol-negotiation hooks) intact.
+func runDraining(ctx context.Context, s *mcp.Server, in io.ReadCloser, out io.Writer, timeout time.Duration) error {
+	d := &stdioDrain{pending: make(map[jsonrpc.ID]int), changed: make(chan struct{}, 1)}
+	r := &drainingReader{source: in, drain: d, eof: make(chan struct{}), closed: make(chan struct{})}
+	r.scanner = bufio.NewScanner(in)
+	r.scanner.Buffer(make([]byte, 4096), mcp.DefaultMaxLineLength)
+	defer r.Close()
+	s.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
+		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+			d.update(func() { d.active++ })
+			defer d.update(func() { d.active-- })
+			return next(ctx, method, req)
+		}
+	})
+	ss, err := s.Connect(ctx, &mcp.IOTransport{Reader: r, Writer: &drainingWriter{Writer: out, drain: d}}, nil)
+	if err != nil {
+		return err
+	}
+	done := make(chan error, 1)
+	go func() { done <- ss.Wait() }()
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-r.eof:
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+type stdioDrain struct {
+	mu      sync.Mutex
+	pending map[jsonrpc.ID]int
+	active  int
+	changed chan struct{}
+}
+
+func (d *stdioDrain) update(f func()) {
+	d.mu.Lock()
+	f()
+	d.mu.Unlock()
+	select {
+	case d.changed <- struct{}{}:
+	default:
+	}
+}
+
+func (d *stdioDrain) idle() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.active == 0 && len(d.pending) == 0
+}
+
+// observe counts requests before dispatch and replies only after writing them.
+// The SDK still owns decoding, validation and errors, including legacy batches.
+func (d *stdioDrain) observe(frame []byte, incoming bool) {
+	var batch []json.RawMessage
+	if json.Unmarshal(frame, &batch) == nil {
+		for _, item := range batch {
+			d.observe(item, incoming)
+		}
+		return
+	}
+	msg, err := jsonrpc.DecodeMessage(frame)
+	if err != nil {
+		return
+	}
+	d.update(func() {
+		switch msg := msg.(type) {
+		case *jsonrpc.Request:
+			if incoming && msg.IsCall() {
+				d.pending[msg.ID]++
+			}
+		case *jsonrpc.Response:
+			if !incoming {
+				if d.pending[msg.ID] > 1 {
+					d.pending[msg.ID]--
+				} else {
+					delete(d.pending, msg.ID)
+				}
+			}
+		}
+	})
+}
+
+type drainingReader struct {
+	source      io.ReadCloser
+	scanner     *bufio.Scanner
+	drain       *stdioDrain
+	frame       []byte
+	eof, closed chan struct{}
+	closeOnce   sync.Once
+	closeErr    error
+	ended       bool
+}
+
+func (r *drainingReader) Read(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	if r.ended {
+		return 0, io.EOF
+	}
+	if len(r.frame) == 0 {
+		if r.scanner.Scan() {
+			r.frame = append(r.scanner.Bytes(), '\n')
+			r.drain.observe(r.frame, true)
+		} else {
+			r.ended = true
+			if err := r.scanner.Err(); err != nil {
+				return 0, err
+			}
+			close(r.eof)
+			for !r.drain.idle() {
+				select {
+				case <-r.closed:
+					return 0, io.EOF
+				case <-r.drain.changed:
+				}
+			}
+			return 0, io.EOF
+		}
+	}
+	n := copy(p, r.frame)
+	r.frame = r.frame[n:]
+	return n, nil
+}
+
+func (r *drainingReader) Close() error {
+	r.closeOnce.Do(func() {
+		close(r.closed)
+		r.closeErr = r.source.Close()
+	})
+	return r.closeErr
+}
+
+type drainingWriter struct {
+	io.Writer
+	drain *stdioDrain
+}
+
+func (w *drainingWriter) Write(p []byte) (int, error) {
+	n, err := w.Writer.Write(p)
+	if err == nil && n == len(p) {
+		w.drain.observe(p, false)
+	}
+	return n, err
+}
+
+func (*drainingWriter) Close() error { return nil }
 
 func ptr[T any](v T) *T { return &v }
 
