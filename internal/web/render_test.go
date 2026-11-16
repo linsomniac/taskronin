@@ -352,6 +352,13 @@ func TestRenderErrorServerRetryKeepsNonce(t *testing.T) {
 					r.Header.Set("HX-Request", hx)
 					w := httptest.NewRecorder()
 					ta.App.RenderError(w, r, domain.Errorf(code, "failed"))
+					wantStatus := web.StatusFor(code)
+					if hx == "true" {
+						wantStatus = http.StatusOK
+					}
+					if w.Code != wantStatus {
+						t.Errorf("server retry status = %d, want %d", w.Code, wantStatus)
+					}
 					got := scrapeForm(t, resubmitBody(t, w.Body.String()), path)
 					if !reflect.DeepEqual(got["_nonce"], []string{nonce}) {
 						t.Errorf("retry nonce = %v, want submitted key", got["_nonce"])
@@ -403,19 +410,52 @@ func TestRenderErrorRetryFreshNonce(t *testing.T) {
 				r.URL.Path = path
 				w := httptest.NewRecorder()
 				ta.App.RenderError(w, r, domain.Errorf(tc.code, "failed"))
+				if tc.code == domain.CodeIdemMismatch && !strings.Contains(nodeText(parseHTML(t, w.Body.String())), "earlier attempt may have been saved") {
+					t.Error("idempotency mismatch must warn about the earlier attempt")
+				}
+				if web.StatusFor(tc.code) < 500 && path != "/ui/tasks" {
+					if len(scrapeForms(t, resubmitBody(t, w.Body.String()), path)) != 0 {
+						t.Errorf("%s 4xx offers a fresh-key retry form", path)
+					}
+					continue
+				}
 				got := scrapeForm(t, resubmitBody(t, w.Body.String()), path)
 				if len(got["_nonce"]) != 1 || !regexp.MustCompile(`^[0-9a-f]{32}$`).MatchString(got.Get("_nonce")) || got.Get("_nonce") == tc.nonce {
 					t.Errorf("%s nonce = %v, want fresh lowercase hex", path, got["_nonce"])
 				}
-				wantButton := web.StatusFor(tc.code) < 500 || path == "/ui/tasks"
+				wantButton := path == "/ui/tasks"
 				if resubmitHasButton(t, w.Body.String(), path) != wantButton {
 					t.Errorf("%s retry button present, want %v", path, wantButton)
 				}
-				if tc.code == domain.CodeIdemMismatch && !strings.Contains(nodeText(parseHTML(t, w.Body.String())), "earlier attempt may have been saved") {
-					t.Error("idempotency mismatch must warn about the earlier attempt")
-				}
 			}
 		})
+	}
+}
+
+func TestRenderErrorUndoRedoClientErrorsNeverRetry(t *testing.T) {
+	ta := newTestApp(t)
+	for _, path := range []string{"/ui/undo", "/ui/redo"} {
+		for _, code := range []domain.Code{
+			domain.CodeMalformed, domain.CodeUnauthenticated, domain.CodeForbidden, domain.CodeNotFound,
+			domain.CodeNothingToUndo, domain.CodeNothingToRedo, domain.CodeRevertConflict,
+			domain.CodePrecondition, domain.CodeGenerationMismatch, domain.CodeTooLarge,
+			domain.CodeUnsupportedMedia, domain.CodeValidation, domain.CodeIdemMismatch,
+			domain.CodePreconditionReq, domain.CodeIdemRequired, domain.CodeRateLimited,
+		} {
+			for _, hx := range []string{"", "true"} {
+				t.Run(path+"/"+string(code)+"/hx="+hx, func(t *testing.T) {
+					r := errorPost(t, url.Values{"_nonce": {strings.Repeat("a", 32)}, "_gen": {string(ta.Svc.Generation())}})
+					r.URL.Path = path
+					r.Header.Set("HX-Request", hx)
+					w := httptest.NewRecorder()
+					ta.App.RenderError(w, r, domain.Errorf(code, "failed"))
+					assertErrorCode(t, w.Body.String(), string(code))
+					if resubmitHasButton(t, w.Body.String(), path) {
+						t.Error("4xx stack error offers Try again")
+					}
+				})
+			}
+		}
 	}
 }
 

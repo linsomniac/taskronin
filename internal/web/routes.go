@@ -8,6 +8,15 @@ import (
 
 func (a *app) routes() *http.ServeMux {
 	mux := http.NewServeMux()
+	a.registerRoutes(mux)
+	return mux
+}
+
+// AIDEV-NOTE: Keep all registrations here so the SCP-07/PRG-18 test recorder
+// checks the same patterns that construct the real mux.
+func (a *app) registerRoutes(mux interface {
+	HandleFunc(string, func(http.ResponseWriter, *http.Request))
+}) {
 	mux.HandleFunc("GET /ui/login", a.loginPage)
 	mux.HandleFunc("POST /ui/login", a.login)
 	mux.HandleFunc("POST /ui/logout", a.logout)
@@ -81,5 +90,4 @@ func (a *app) routes() *http.ServeMux {
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		http.ServeContent(w, r, r.PathValue("name"), time.Time{}, bytes.NewReader(b))
 	})
-	return mux
 }

@@ -15,6 +15,7 @@ import (
 	"taskronin/internal/domain"
 	"taskronin/internal/service"
 	"taskronin/internal/testutil"
+	"taskronin/internal/web"
 )
 
 func TestFocusSetAndClear(t *testing.T) {
@@ -84,6 +85,59 @@ func TestFocusInvalidTaskID(t *testing.T) {
 	}
 }
 
+func TestFocusInterruptRequiresOne(t *testing.T) {
+	ta := newTestApp(t).login()
+	ta.addTask(service.AddTaskIn{Title: "First focus"})
+	ta.addTask(service.AddTaskIn{Title: "Second focus"})
+	for _, interrupt := range []string{"", "on", "1"} {
+		ta.mustOp(ta.Svc.SetFocus(t.Context(), ta.meta(), service.SetFocusIn{
+			TaskID: sql.Null[domain.TaskID]{V: 1, Valid: true}}))
+		forms := scrapeForms(t, ta.viewBody("/ui/"), "/ui/focus")
+		form := forms[len(forms)-1] // Today's set form follows the explicit clear form.
+		if form.Has("interrupt") {
+			t.Fatal("unchecked checkbox submitted a value")
+		}
+		form.Set("task_id", "2")
+		if interrupt != "" {
+			form.Set("interrupt", interrupt)
+		}
+		assertRedirect(t, ta.post("/ui/focus", form), "/ui/")
+		today, err := ta.Svc.Today(t.Context(), testutil.Owner())
+		want := 0
+		if interrupt == "1" {
+			want = 1
+		}
+		if err != nil || today.Focus == nil || today.Focus.ID != 2 || len(today.Interruptions) != want {
+			t.Errorf("interrupt=%q: focus=%+v interruptions=%d, want focus #2 and %d interruptions; err=%v",
+				interrupt, today.Focus, len(today.Interruptions), want, err)
+		}
+	}
+}
+
+func TestFocusTaskIDRequired(t *testing.T) {
+	ta := newTestApp(t).login()
+	ta.addTask(service.AddTaskIn{Title: "Keep focused"})
+	assertRedirect(t, ta.submit("/ui/tasks/1", "/ui/focus", nil), "/ui/tasks/1")
+	before := ta.opKinds()
+	w := ta.submit("/ui/", "/ui/focus", url.Values{"task_id": {}})
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("missing task_id = %d, want 400", w.Code)
+	} else {
+		assertErrorCode(t, w.Body.String(), "malformed")
+		requireFieldErrors(t, w.Body.String(), "task_id")
+	}
+	today, err := ta.Svc.Today(t.Context(), testutil.Owner())
+	if err != nil || today.Focus == nil || today.Focus.ID != 1 || !slices.Equal(before, ta.opKinds()) {
+		t.Fatalf("missing task_id changed focus or history: focus=%+v err=%v", today.Focus, err)
+	}
+	clearForm := scrapeFormWhere(t, ta.viewBody("/ui/"), "/ui/focus", url.Values{"task_id": {""}})
+	assertRedirect(t, ta.post("/ui/focus", clearForm), "/ui/")
+	today, err = ta.Svc.Today(t.Context(), testutil.Owner())
+	if err != nil || today.Focus != nil || len(ta.opKinds()) != len(before)+1 {
+		t.Errorf("explicit clear failed: focus=%+v err=%v", today.Focus, err)
+	}
+}
+
 func TestUND19_WebUndoRevertsCLIOp(t *testing.T) {
 	ta := newTestApp(t).login()
 	ta.addTask(service.AddTaskIn{Title: "CLI task"})
@@ -109,6 +163,12 @@ func TestUndoEmptyStack(t *testing.T) {
 			t.Fatalf("%s empty = %d", action, w.Code)
 		}
 		assertErrorCode(t, w.Body.String(), "nothing_to_"+action)
+		if len(scrapeForms(t, resubmitBody(t, w.Body.String()), "/ui/"+action)) != 0 {
+			t.Errorf("empty %s stack offers a retry form", action)
+		}
+		if len(scrapeForms(t, w.Body.String(), "/ui/"+action)) != 1 {
+			t.Errorf("expected only the explicit nav %s form", action)
+		}
 	}
 }
 
@@ -387,6 +447,22 @@ func TestPRG18_NoWebPurge(t *testing.T) {
 				t.Errorf("%s exposes purge form", path)
 			}
 		})
+	}
+}
+
+func TestSCP07_PRG18_RegisteredRoutePatterns(t *testing.T) {
+	patterns := web.RoutePatterns()
+	for _, required := range []string{"GET /ui/{$}", "POST /ui/focus", "POST /ui/undo", "POST /ui/redo", "GET /static/{name}"} {
+		if !slices.Contains(patterns, required) {
+			t.Errorf("route inventory missing %s", required)
+		}
+	}
+	for _, pattern := range patterns {
+		for _, forbidden := range []string{"token", "setting", "password", "backup", "export", "import", "restore", "purge", "admin"} {
+			if strings.Contains(strings.ToLower(pattern), forbidden) {
+				t.Errorf("forbidden route pattern %q contains %q", pattern, forbidden)
+			}
+		}
 	}
 }
 

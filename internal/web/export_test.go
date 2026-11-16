@@ -34,6 +34,19 @@ var (
 
 func (a *App) Handler() http.Handler { return a.handler() }
 
+// RoutePatterns records the same registrations used to construct the real mux.
+func RoutePatterns() []string {
+	var patterns routePatterns
+	new(app).registerRoutes(&patterns)
+	return patterns
+}
+
+type routePatterns []string
+
+func (p *routePatterns) HandleFunc(pattern string, _ func(http.ResponseWriter, *http.Request)) {
+	*p = append(*p, pattern)
+}
+
 func (a *App) BodyLimit(next http.Handler) http.Handler { return a.bodyLimit(next) }
 
 func (a *App) NewPage(r *http.Request, title, tab string, data any) Page {

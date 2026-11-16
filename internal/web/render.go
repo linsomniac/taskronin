@@ -201,7 +201,12 @@ func (a *app) renderError(w http.ResponseWriter, r *http.Request, err error) {
 	if hasSession && r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/ui/") &&
 		r.URL.Path != "/ui/login" && r.URL.Path != "/ui/logout" &&
 		de.Code != domain.CodeUnauthenticated && de.Code != domain.CodeForbidden {
-		p.Resubmit = submittedInput(r, status)
+		input := submittedInput(r, status)
+		// Stack 4xx errors need no retry form; retain stale preconditions for
+		// read-only diagnostics (DF09), and the existing 5xx recovery display.
+		if input.CanRetry || status == http.StatusPreconditionFailed || status >= http.StatusInternalServerError {
+			p.Resubmit = input
+		}
 	}
 	// AIDEV-NOTE: The fixed htmx config does not swap 4xx/5xx bodies. Return
 	// a visible error page with 200 for boosted requests, without changing history.
@@ -227,9 +232,12 @@ func submittedInput(r *http.Request, status int) *resubmit {
 		if _, err := domain.ParseOpID(nonce); err == nil {
 			input.Nonce = nonce
 		}
-		if input.Nonce == "" && (r.URL.Path == "/ui/undo" || r.URL.Path == "/ui/redo") {
-			input.CanRetry = false
-		}
+	}
+	if r.URL.Path == "/ui/undo" || r.URL.Path == "/ui/redo" {
+		// AIDEV-NOTE: DF26: a fresh-key retry after a 4xx can act on the next
+		// stack operation. The nav supplies explicit Undo/Redo actions; only
+		// a same-key retry after a 5xx is safe (DF25).
+		input.CanRetry = status >= http.StatusInternalServerError && input.Nonce != ""
 	}
 	keys := make([]string, 0, len(r.PostForm))
 	for key := range r.PostForm {

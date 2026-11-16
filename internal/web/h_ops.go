@@ -11,6 +11,10 @@ import (
 
 func (a *app) setFocus(w http.ResponseWriter, r *http.Request) {
 	a.mutate(w, r, func(m service.Meta, form url.Values) (*service.OpResult, error) {
+		if !form.Has("task_id") {
+			return nil, &domain.Error{Code: domain.CodeMalformed, Detail: "missing task_id",
+				Fields: []domain.FieldError{{Field: "task_id", Message: "required (use an empty value to clear focus)"}}}
+		}
 		in := service.SetFocusIn{Interrupt: form.Get("interrupt") == "1"}
 		if form.Get("task_id") != "" {
 			id, err := formInt(form, "task_id")
