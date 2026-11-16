@@ -118,6 +118,25 @@ func TestDAT14_Clock(t *testing.T) {
 
 func TestREC06_TodayETagStable(t *testing.T) {
 	srv := testutil.StartServer(t)
+	// AIDEV-NOTE: Health readiness precedes the asynchronous startup backup.
+	// Wait for its warning to clear before comparing aggregates: even two equal
+	// early reads can be followed by backup completion before the conditional GET.
+	settleCtx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	for {
+		status, _, _, err := srv.Client.Status(settleCtx, "")
+		if err != nil {
+			t.Fatalf("waiting for startup backup: %v", err)
+		}
+		if !status.BackupWarn {
+			break
+		}
+		select {
+		case <-settleCtx.Done():
+			t.Fatalf("startup backup did not settle: %v; status: %+v", settleCtx.Err(), status)
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
 	for _, path := range []string{"/today", "/status"} {
 		t.Run(path, func(t *testing.T) {
 			code, headers, body := readAPI(t, srv, path, "")
