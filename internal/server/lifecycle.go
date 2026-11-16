@@ -181,28 +181,33 @@ func Run(ctx context.Context, cfg *config.Server, deps Deps) (err error) {
 			deps.Logger.Warn(textsafe.SanitizeLine(gateErr.Error()))
 		} else {
 			addr, _ := cfg.WebAddr()
-			ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", addr.String())
-			if err != nil {
-				return err
+			// AIDEV-NOTE: DF27: the optional web UI must never prevent the
+			// unix-socket API from starting. Bind/handler failures disable only web.
+			ln, webErr := (&net.ListenConfig{}).Listen(ctx, "tcp", addr.String())
+			if webErr == nil {
+				var h http.Handler
+				h, webErr = newWebHandler(svc, deps.Clock, zone, weekStart, ln.Addr().String(), deps.Logger)
+				if webErr != nil {
+					_ = ln.Close()
+				} else {
+					defer func() { _ = ln.Close() }()
+					webServer := httpServer(adapter.recoverer(adapter.requestID(adapter.accessLog(h))), deps.Logger)
+					// AIDEV-NOTE: DF24: OPTIONS * must pass through web security
+					// headers and Host validation instead of net/http's bare 200.
+					webServer.DisableGeneralOptionsHandler = true
+					servers = append(servers, webServer)
+					listeners = append(listeners, ln)
+					startup.WebAddr = ln.Addr().String()
+					accounts, accountErr := config.OtherHumanAccounts("/etc/passwd", os.Getuid())
+					if accountErr != nil {
+						deps.Logger.Warn("web account check failed", "error", textsafe.SanitizeLine(accountErr.Error()))
+					} else if len(accounts) != 0 {
+						deps.Logger.Warn("plain HTTP web listener enabled on a host with other human accounts", "accounts", textsafe.SanitizeLine(fmt.Sprint(accounts)))
+					}
+				}
 			}
-			defer func() { _ = ln.Close() }()
-			h, err := newWebHandler(svc, deps.Clock, zone, weekStart, ln.Addr().String(), deps.Logger)
-			if err != nil {
-				return err
-			}
-			webServer := httpServer(adapter.recoverer(adapter.requestID(adapter.accessLog(h))), deps.Logger)
-			// AIDEV-NOTE: DF24: OPTIONS * must pass through web security
-			// headers and Host validation instead of net/http's bare 200.
-			webServer.DisableGeneralOptionsHandler = true
-			servers = append(servers, webServer)
-			listeners = append(listeners, ln)
-			startup.WebAddr = ln.Addr().String()
-			accounts, err := config.OtherHumanAccounts("/etc/passwd", os.Getuid())
-			if err != nil {
-				return err
-			}
-			if len(accounts) != 0 {
-				deps.Logger.Warn("plain HTTP web listener enabled on a host with other human accounts", "accounts", textsafe.SanitizeLine(fmt.Sprint(accounts)))
+			if webErr != nil {
+				deps.Logger.Warn("web UI disabled", "error", textsafe.SanitizeLine(webErr.Error()))
 			}
 		}
 	}

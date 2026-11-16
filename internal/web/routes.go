@@ -3,7 +3,10 @@ package web
 import (
 	"bytes"
 	"net/http"
+	"strings"
 	"time"
+
+	"taskronin/internal/domain"
 )
 
 func (a *app) routes() *http.ServeMux {
@@ -90,4 +93,16 @@ func (a *app) registerRoutes(mux interface {
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		http.ServeContent(w, r, r.PathValue("name"), time.Time{}, bytes.NewReader(b))
 	})
+}
+
+func (a *app) dispatch(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("HX-Request") == "true" && strings.HasPrefix(r.URL.Path, "/ui/") {
+		if _, pattern := a.mux.Handler(r); pattern == "" {
+			// Like the API adapter, both absent method/path pairs use not_found;
+			// the domain vocabulary has no method-not-allowed code.
+			a.renderError(w, r, domain.Errorf(domain.CodeNotFound, "route not found"))
+			return
+		}
+	}
+	a.mux.ServeHTTP(w, r)
 }

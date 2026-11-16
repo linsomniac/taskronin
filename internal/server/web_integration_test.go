@@ -333,3 +333,45 @@ func webNodeText(n *html.Node) string {
 	})
 	return text.String()
 }
+
+func TestWebAccessLogRouteAndActor(t *testing.T) {
+	srv := testutil.StartServer(t, testutil.WithWeb(), testutil.WithClock("2099-10-28 10:00"))
+	browser := newWebBrowser(t, srv.WebURL)
+	resp, _ := browser.request(http.MethodGet, "/ui/login", nil)
+	loginID := resp.header.Get("X-Request-ID")
+	browser.request(http.MethodPost, "/ui/login", url.Values{"password": {testutil.Password}})
+	resp, _ = browser.request(http.MethodGet, "/ui/tasks/987?secret=not-for-logs", nil)
+	taskID := resp.header.Get("X-Request-ID")
+	// Stop joins all serving goroutines before inspecting their access-log records.
+	srv.Stop()
+	found := map[string]bool{}
+	for line := range strings.SplitSeq(srv.Log.String(), "\n") {
+		var record struct {
+			Message      string `json:"msg"`
+			ID           string `json:"request_id"`
+			Route, Actor string
+		}
+		if json.Unmarshal([]byte(line), &record) != nil || record.Message != "HTTP request" {
+			continue
+		}
+		var route, actor string
+		switch record.ID {
+		case loginID:
+			route = "GET /ui/login"
+		case taskID:
+			route, actor = "GET /ui/tasks/{id}", "owner"
+		default:
+			continue
+		}
+		found[record.ID] = true
+		if record.Route != route || record.Actor != actor {
+			t.Errorf("access log = %+v, want %s / %s", record, route, actor)
+		}
+	}
+	if !found[loginID] || !found[taskID] {
+		t.Error("missing access records")
+	}
+	if strings.Contains(srv.Log.String(), "not-for-logs") {
+		t.Error("query leaked into access log")
+	}
+}

@@ -137,7 +137,11 @@ func (a *app) renderPage(w http.ResponseWriter, r *http.Request, status int, nam
 	w.Header().Set("Cache-Control", "no-store")
 	if err != nil {
 		a.logError(w, r, err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		// A broken error template cannot safely recurse through renderError.
+		// This constant HTML still uses the shared htmx status/header rule.
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(errorStatus(w, r, http.StatusInternalServerError))
+		_, _ = w.Write([]byte(`<!doctype html><html lang="en"><title>Internal Server Error</title><body><section class="error" data-code="internal"><h1>Internal Server Error</h1><p>internal error</p></section></body></html>`))
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -208,6 +212,10 @@ func (a *app) renderError(w http.ResponseWriter, r *http.Request, err error) {
 			p.Resubmit = input
 		}
 	}
+	a.renderPage(w, r, errorStatus(w, r, status), "error", p)
+}
+
+func errorStatus(w http.ResponseWriter, r *http.Request, status int) int {
 	// AIDEV-NOTE: The fixed htmx config does not swap 4xx/5xx bodies. Return
 	// a visible error page with 200 for boosted requests, without changing history.
 	if r.Header.Get("HX-Request") == "true" {
@@ -216,7 +224,7 @@ func (a *app) renderError(w http.ResponseWriter, r *http.Request, err error) {
 		w.Header().Set("HX-Retarget", "body")
 		w.Header().Set("HX-Reswap", "innerHTML")
 	}
-	a.renderPage(w, r, status, "error", p)
+	return status
 }
 
 func submittedInput(r *http.Request, status int) *resubmit {

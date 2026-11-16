@@ -10,6 +10,15 @@ import (
 
 func (a *app) session(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var actor domain.Actor
+		defer func() {
+			if a.o.Observe != nil {
+				// AIDEV-NOTE: A§6.2: report the mux pattern, never user text or
+				// query strings, including requests refused before dispatch.
+				_, pattern := a.mux.Handler(r)
+				a.o.Observe(r.Context(), pattern, actor)
+			}
+		}()
 		path := r.URL.Path
 		loginPost := path == "/ui/login" && r.Method == http.MethodPost
 		if (path == "/ui/login" && !loginPost) || (path != "/ui" && !strings.HasPrefix(path, "/ui/")) {
@@ -34,6 +43,7 @@ func (a *app) session(next http.Handler) http.Handler {
 			return
 		}
 		if s.Cookie != "" {
+			actor = s.Actor
 			r = r.WithContext(withSession(r.Context(), s))
 		}
 		if loginPost || s.Cookie != "" {

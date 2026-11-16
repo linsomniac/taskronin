@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -308,18 +309,94 @@ func TestNewPageAndHiddenInputs(t *testing.T) {
 
 func TestRenderPageFailureIsBuffered(t *testing.T) {
 	ta := newTestApp(t)
-	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/ui/", nil)
-	// A nil Err fails after layout has already produced its head into the buffer.
-	p := ta.App.NewPage(r, "title", "", nil)
-	for _, name := range []string{"error", "missing"} {
-		w := httptest.NewRecorder()
-		ta.App.RenderPage(w, r, http.StatusOK, name, p)
-		if w.Code != http.StatusInternalServerError || w.Body.String() != "internal error\n" || w.Header().Get("Content-Type") != "text/plain; charset=utf-8" || w.Header().Get("Cache-Control") != "no-store" {
-			t.Fatalf("failed render = %d %v %s", w.Code, w.Header(), w.Body)
+	for _, hx := range []string{"", "true"} {
+		for _, name := range []string{"error", "missing"} {
+			r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/ui/", nil)
+			r.Header.Set("HX-Request", hx)
+			// A nil Err fails after the layout has written its head to the buffer.
+			p := ta.App.NewPage(r, "private partial title", "", nil)
+			w := httptest.NewRecorder()
+			ta.App.RenderPage(w, r, http.StatusOK, name, p)
+			want := http.StatusInternalServerError
+			if hx == "true" {
+				want = http.StatusOK
+				assertHTMXError(t, w, domain.CodeInternal)
+			}
+			if w.Code != want || w.Header().Get("Content-Type") != "text/html; charset=utf-8" || w.Header().Get("Cache-Control") != "no-store" {
+				t.Errorf("failed render = %d %v", w.Code, w.Header())
+			}
+			assertErrorCode(t, w.Body.String(), "internal")
+			if strings.Contains(w.Body.String(), "private partial title") {
+				t.Error("partial template leaked")
+			}
 		}
 	}
 	if !strings.Contains(ta.Logs.String(), "error") || !strings.Contains(ta.Logs.String(), "missing") {
-		t.Errorf("missing render diagnostics: %s", ta.Logs)
+		t.Error("missing render diagnostics")
+	}
+}
+
+func TestRecoverHTML(t *testing.T) {
+	ta := newTestApp(t).login()
+	var err error
+	ta.H, err = web.NewWithProbe(web.Options{Svc: ta.Svc, Clock: ta.Clock, Zone: testutil.Zone, Listen: testListen,
+		Logger: slog.New(slog.NewTextHandler(ta.Logs, nil))}, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		panic("panic diagnostic\n\x1b pw-SECRET-zz9")
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, hx := range []string{"", "true"} {
+		t.Run("hx="+hx, func(t *testing.T) {
+			defer func() {
+				if p := recover(); p != nil {
+					t.Errorf("panic escaped web chain: %v", p)
+				}
+			}()
+			form := scrapeForm(t, ta.get("/ui/").Body.String(), "/ui/logout")
+			form.Set("password", "pw-SECRET-zz9")
+			form.Set("title", "Keep this typed title")
+			w := ta.post("/ui/probe", form, "HX-Request", hx)
+			want := http.StatusInternalServerError
+			if hx == "true" {
+				want = http.StatusOK
+				assertHTMXError(t, w, domain.CodeInternal)
+			}
+			if w.Code != want || w.Header().Get("Content-Type") != "text/html; charset=utf-8" || w.Header().Get("Content-Security-Policy") != web.CSP {
+				t.Errorf("panic response = %d %v", w.Code, w.Header())
+			}
+			assertErrorCode(t, w.Body.String(), "internal")
+			retry := scrapeForm(t, w.Body.String(), "/ui/probe")
+			if retry.Get("title") != form.Get("title") || retry.Get("_nonce") != form.Get("_nonce") {
+				t.Error("panic lost typed input or same-key retry")
+			}
+			if strings.Contains(w.Body.String(), "panic diagnostic") || strings.Contains(ta.Logs.String(), "pw-SECRET-zz9") {
+				t.Error("private panic leaked")
+			}
+			if !strings.Contains(ta.Logs.String(), "panic diagnostic�� [redacted]") {
+				t.Error("missing sanitized panic log")
+			}
+		})
+	}
+}
+
+func TestMuxErrorsHTMX(t *testing.T) {
+	ta := newTestApp(t).login()
+	for _, tc := range []struct {
+		method, path string
+		status       int
+	}{
+		{http.MethodGet, "/ui/missing", http.StatusNotFound},
+		{http.MethodPut, "/ui/tasks/1", http.StatusMethodNotAllowed},
+	} {
+		for _, hx := range []string{"", "true"} {
+			w := ta.request(tc.method, tc.path, nil, "HX-Request", hx)
+			if hx == "true" {
+				assertHTMXError(t, w, domain.CodeNotFound)
+			} else if w.Code != tc.status {
+				t.Errorf("mux status = %d, want %d", w.Code, tc.status)
+			}
+		}
 	}
 }
 
@@ -514,5 +591,32 @@ func TestRenderErrorWithoutSessionOmitsResubmit(t *testing.T) {
 	ta.App.RenderError(w, r, domain.Errorf(domain.CodeBusy, "busy"))
 	if len(scrapeForms(t, w.Body.String(), "/ui/tasks")) != 0 {
 		t.Error("sessionless error must not offer a resubmit form")
+	}
+}
+
+func TestRecoverHTMLAbortsCommittedResponse(t *testing.T) {
+	ta := newTestApp(t).login()
+	for _, committed := range []bool{false, true} {
+		h, err := web.NewWithProbe(web.Options{Svc: ta.Svc, Clock: ta.Clock, Zone: testutil.Zone, Listen: testListen, Logger: slog.New(slog.NewTextHandler(ta.Logs, nil))}, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			if committed {
+				_, _ = w.Write([]byte("partial"))
+				panic("after write")
+			}
+			panic(http.ErrAbortHandler)
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		ta.H = h
+		func() {
+			defer func() {
+				p := recover()
+				if err, ok := p.(error); !ok || !errors.Is(err, http.ErrAbortHandler) {
+					t.Errorf("abort = %v", p)
+				}
+			}()
+			ta.get("/ui/probe")
+			t.Error("expected abort")
+		}()
 	}
 }

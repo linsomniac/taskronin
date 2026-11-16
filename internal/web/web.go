@@ -2,6 +2,7 @@
 package web
 
 import (
+	"context"
 	"embed"
 	"html/template"
 	"log/slog"
@@ -10,6 +11,7 @@ import (
 
 	"taskronin/internal/civil"
 	"taskronin/internal/clock"
+	"taskronin/internal/domain"
 	"taskronin/internal/service"
 )
 
@@ -36,6 +38,8 @@ type Options struct {
 	WeekStart time.Weekday
 	Listen    string
 	Logger    *slog.Logger
+	// Observe reports the matched pattern and authenticated actor for access logs.
+	Observe func(context.Context, string, domain.Actor)
 }
 
 type app struct {
@@ -75,5 +79,7 @@ func newApp(o Options) (*app, error) {
 }
 
 func (a *app) handler() http.Handler {
-	return securityHeaders(a.checkHost(routeClass(a.bodyLimit(readDeadline(a.session(a.csrf(a.mux)))))))
+	// Recovery receives the authenticated context and parsed form so a handler
+	// panic keeps the normal same-key retry behavior (DF25).
+	return securityHeaders(a.checkHost(routeClass(a.bodyLimit(readDeadline(a.session(a.recoverHTML(a.csrf(http.HandlerFunc(a.dispatch)))))))))
 }

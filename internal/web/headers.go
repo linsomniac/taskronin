@@ -8,6 +8,7 @@ import (
 	"mime"
 	"net"
 	"net/http"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -144,5 +145,45 @@ func readDeadline(next http.Handler) http.Handler {
 			r = r.WithContext(ctx)
 		}
 		next.ServeHTTP(w, r)
+	})
+}
+
+// htmlWriter tracks committed responses while preserving ResponseController.
+type htmlWriter struct {
+	http.ResponseWriter
+	written bool
+}
+
+func (w *htmlWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+func (w *htmlWriter) WriteHeader(status int) {
+	if status >= 200 {
+		w.written = true
+	}
+	w.ResponseWriter.WriteHeader(status)
+}
+func (w *htmlWriter) Write(b []byte) (int, error) {
+	w.written = true
+	return w.ResponseWriter.Write(b)
+}
+
+func (a *app) recoverHTML(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writer := &htmlWriter{ResponseWriter: w}
+		defer func() {
+			if p := recover(); p != nil {
+				if err, ok := p.(error); ok && errors.Is(err, http.ErrAbortHandler) {
+					panic(http.ErrAbortHandler)
+				}
+				// AIDEV-NOTE: Keep web failures HTML (including the htmx rule).
+				// logError sanitizes the panic/stack and redacts submitted passwords.
+				err := fmt.Errorf("web panic: %v; stack: %s", p, debug.Stack())
+				if writer.written {
+					a.logError(w, r, err)
+					panic(http.ErrAbortHandler)
+				}
+				a.renderError(w, r, &domain.Error{Code: domain.CodeInternal, Err: err})
+			}
+		}()
+		next.ServeHTTP(writer, r)
 	})
 }

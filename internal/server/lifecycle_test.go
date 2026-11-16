@@ -759,3 +759,36 @@ func writeLifecycleFile(t *testing.T, path, content string) {
 		t.Fatal(err)
 	}
 }
+
+func TestWebFailureKeepsAPI(t *testing.T) {
+	for _, failure := range []string{"busy port", "handler"} {
+		t.Run(failure, func(t *testing.T) {
+			ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer ln.Close()
+			opts := []testutil.ServerOpt{testutil.WithWeb()}
+			if failure == "busy port" {
+				opts = append(opts, testutil.WithConfig(func(c *config.Server) { c.Web.Listen = ln.Addr().String() }))
+			} else {
+				restore := server.SetWebHandler(func(_ *service.Service, _ clock.Clock, _ civil.Zone, _ time.Weekday, _ string, _ *slog.Logger) (http.Handler, error) {
+					return nil, errors.New("handler failure\n\x1b")
+				})
+				defer restore()
+			}
+			s := testutil.StartServer(t, opts...)
+			if s.WebURL != "" {
+				t.Errorf("web address = %q", s.WebURL)
+			}
+			if _, err := s.Client.WhoAmI(t.Context()); err != nil {
+				t.Fatalf("socket API: %v", err)
+			}
+			if log := s.Log.String(); !strings.Contains(log, `"level":"WARN"`) || !strings.Contains(log, "web UI disabled") {
+				t.Errorf("missing warning: %s", log)
+			} else if failure == "handler" && !strings.Contains(log, "handler failure��") {
+				t.Errorf("unsanitized diagnostic: %s", log)
+			}
+		})
+	}
+}
