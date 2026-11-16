@@ -5,6 +5,8 @@ due work must be consciously cleared), daily focus (time blocks, a "now working
 on" focus, a morning plan and evening recap loop) and a work log linked to
 tasks. It ships as one Go binary, `tkr`, over a single SQLite database.
 
+New here? The [quickstart](docs/quickstart.md) shows a five-minute tour.
+
 ## Install
 
 Taskronin needs Go (see `go.mod` for the toolchain) and runs on Linux.
