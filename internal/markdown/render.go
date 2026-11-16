@@ -3,8 +3,11 @@ package markdown
 
 import (
 	"bytes"
+	"html"
 	"html/template"
 	"net/url"
+	"regexp"
+	"strings"
 
 	"github.com/microcosm-cc/bluemonday"
 	"github.com/yuin/goldmark"
@@ -29,7 +32,9 @@ var policy = func() *bluemonday.Policy {
 		"pre", "code", "em", "strong", "del", "ul", "ol", "li")
 	p.AllowAttrs("start").Matching(bluemonday.Integer).OnElements("ol")
 	p.AllowAttrs("href").OnElements("a")
-	hostRequired := func(u *url.URL) bool { return u.Host != "" }
+	p.AllowAttrs("class").Matching(regexp.MustCompile(`^notes-plain$`)).OnElements("pre")
+	p.AllowAttrs("class").Matching(regexp.MustCompile(`^muted$`)).OnElements("p")
+	hostRequired := func(u *url.URL) bool { return u.Hostname() != "" }
 	p.AllowURLSchemeWithCustomPolicy("http", hostRequired)
 	p.AllowURLSchemeWithCustomPolicy("https", hostRequired)
 	p.AllowURLSchemeWithCustomPolicy("mailto", func(u *url.URL) bool { return u.Opaque != "" })
@@ -65,9 +70,138 @@ func (imageAsLink) render(w util.BufWriter, _ []byte, node ast.Node, entering bo
 
 // Render converts Markdown notes to HTML using the notes allowlist.
 func Render(src string) (template.HTML, error) {
-	var buf bytes.Buffer
-	if err := converter.Convert([]byte(src), &buf); err != nil {
-		return "", err
+	var rendered []byte
+	plain := tooComplex(src)
+	if !plain {
+		var buf bytes.Buffer
+		if err := converter.Convert([]byte(src), &buf); err != nil {
+			return "", err
+		}
+		rendered = policy.SanitizeBytes(buf.Bytes())
 	}
-	return template.HTML(policy.SanitizeBytes(buf.Bytes())), nil //nolint:gosec // G203: bluemonday-sanitized output
+	if plain || len(rendered) > 512<<10 {
+		// A leading newline in pre is consumed by the HTML parser.
+		rendered = policy.SanitizeBytes([]byte("<pre class=\"notes-plain\">\n" + html.EscapeString(src) +
+			"</pre><p class=\"muted\">Shown as plain text — too complex to format.</p>"))
+	}
+	return template.HTML(rendered), nil //nolint:gosec // G203: bluemonday-sanitized output
+}
+
+// AIDEV-NOTE: DF28: scan in linear time before goldmark. Its repeated container,
+// link, emphasis, strike and backtick parsing can be quadratic. Allow at most
+// 16 potential nested openers per line and 2048 inline delimiter bytes overall;
+// cap sanitized Markdown at 512 KiB. The plain fallback stays escaped and
+// sanitized (at most six times the service's 64 KiB notes limit). The 10 s GET
+// deadline cancels service calls, not template rendering or goldmark.
+func tooComplex(src string) bool {
+	delimiters := 0
+	for line := range strings.SplitSeq(src, "\n") {
+		containers := containerDepth(line)
+		if containers > 16 {
+			return true
+		}
+		brackets, parens := 0, 0
+		var emphasis []byte
+		for i := 0; i < len(line); i++ {
+			c := line[i]
+			if strings.ContainsRune("*_~`[]", rune(c)) {
+				delimiters++
+				if delimiters > 2048 {
+					return true
+				}
+			}
+			switch c {
+			case '[':
+				brackets++
+			case ']':
+				brackets = max(0, brackets-1)
+			case '(':
+				if parens > 0 || (i > 0 && line[i-1] == ']') {
+					parens++
+				}
+			case ')':
+				parens = max(0, parens-1)
+			case '*', '_', '~':
+				// A run can produce nested strong/emphasis nodes. Prefer matching
+				// closers; ambiguous runs also have the global delimiter budget.
+				end := i + 1
+				for end < len(line) && line[end] == c {
+					end++
+				}
+				delimiters += end - i - 1
+				if delimiters > 2048 {
+					return true
+				}
+				levels := (end - i + 1) / 2
+				if i > 0 && !markdownSpace(line[i-1]) {
+					for levels > 0 && len(emphasis) > 0 && emphasis[len(emphasis)-1] == c {
+						emphasis = emphasis[:len(emphasis)-1]
+						levels--
+					}
+				}
+				if end < len(line) && !markdownSpace(line[end]) {
+					if containers+brackets+parens+len(emphasis)+levels > 16 {
+						return true
+					}
+					for range levels {
+						emphasis = append(emphasis, c)
+					}
+				}
+				i = end - 1
+			}
+			if containers+brackets+parens+len(emphasis) > 16 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func markdownSpace(c byte) bool { return c == ' ' || c == '\t' || c == '\r' }
+
+func containerDepth(line string) int {
+	depth, indent := 0, 0
+	for i := 0; i < len(line); {
+		if markdownSpace(line[i]) {
+			if depth == 0 {
+				indent++
+				if line[i] == '\t' {
+					indent += 3
+				}
+			}
+			i++
+			continue
+		}
+		end := i
+		switch line[i] {
+		case '>':
+			end++
+		case '-', '+', '*':
+			if i+1 == len(line) || markdownSpace(line[i+1]) {
+				end++
+			}
+		default:
+			for end < len(line) && end-i < 9 && line[end] >= '0' && line[end] <= '9' {
+				end++
+			}
+			if end == i || end == len(line) || (line[end] != '.' && line[end] != ')') ||
+				(end+1 < len(line) && !markdownSpace(line[end+1])) {
+				return depth
+			}
+			end++
+		}
+		if end == i {
+			return depth
+		}
+		// Two spaces is the minimum indentation for a nested list item.
+		if depth == 0 && line[i] != '>' {
+			depth += indent / 2
+		}
+		depth++
+		if depth > 16 {
+			return depth
+		}
+		i = end
+	}
+	return depth
 }

@@ -58,3 +58,13 @@ textarea {
     padding: 2rem;
   }
 }
+
+.notes-plain {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.muted {
+  color: #5f6368;
+  font-size: 0.875rem;
+}

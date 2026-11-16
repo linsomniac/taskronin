@@ -31,6 +31,12 @@ var renderCases = []struct {
 	{"https empty host", "[d](https:)", nil, []string{"href"}},
 	{"https opaque host", "[d](https:example.com)", nil, []string{"href"}},
 	{"http missing host", "[x](http:/ui/backlog)", nil, []string{"href"}},
+	{"http empty hostname", "[x](http://:80/x)", nil, []string{"href"}},
+	{"https empty hostname", "[x](https://:443/x)", nil, []string{"href"}},
+	{"entity scheme", "[x](jav&#x61;script:alert(1))", nil, []string{"href"}},
+	{"entity colon", "[x](javascript&#58;alert(1))", nil, []string{"href"}},
+	{"network relative", "[x](//example.com/x)", nil, []string{"href"}},
+	{"http opaque", "[x](http:foo)", nil, []string{"href"}},
 	{"mailto empty address", "[m](mailto:)", nil, []string{"href"}},
 }
 
@@ -41,6 +47,9 @@ func TestRender(t *testing.T) {
 			got, err := Render(tc.in)
 			if err != nil {
 				t.Fatalf("Render(%q): %v", tc.in, err)
+			}
+			if strings.Contains(string(got), `class="notes-plain"`) {
+				t.Error("ordinary notes took the plain-text fallback")
 			}
 			for _, want := range tc.want {
 				if !strings.Contains(string(got), want) {
@@ -57,6 +66,7 @@ func TestRender(t *testing.T) {
 }
 
 func FuzzRender(f *testing.F) {
+	f.Add(strings.Repeat(">", 17) + "\n<img src=x onerror=x>\n")
 	for _, tc := range renderCases {
 		f.Add(tc.in)
 	}
@@ -65,43 +75,117 @@ func FuzzRender(f *testing.F) {
 		if err != nil {
 			t.Fatalf("Render(%q): %v", src, err)
 		}
-		doc, err := html.Parse(strings.NewReader(string(got)))
-		if err != nil {
-			t.Fatalf("parse rendered HTML: %v", err)
-		}
-		var walk func(*html.Node)
-		walk = func(n *html.Node) {
-			// Check parsed markup only: ordinary text may contain words such
-			// as "javascript:" and "onload" without being dangerous.
-			if n.Type == html.ElementNode {
-				switch n.Data {
-				case "html", "head", "body", // Added by html.Parse.
-					"p", "br", "hr", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote",
-					"pre", "code", "em", "strong", "del", "ul", "ol", "li", "a":
-				default:
-					t.Fatalf("disallowed element %q in %q", n.Data, got)
-				}
-				for _, attr := range n.Attr {
-					if strings.HasPrefix(attr.Key, "on") {
-						t.Fatalf("event attribute %q in %q", attr.Key, got)
-					}
-					switch attr.Key {
-					case "href", "rel", "target", "start":
-					default:
-						t.Fatalf("disallowed attribute %q in %q", attr.Key, got)
-					}
-					if attr.Key == "href" &&
-						!strings.HasPrefix(attr.Val, "http://") &&
-						!strings.HasPrefix(attr.Val, "https://") &&
-						!strings.HasPrefix(attr.Val, "mailto:") {
-						t.Fatalf("disallowed href %q in %q", attr.Val, got)
-					}
-				}
-			}
-			for child := n.FirstChild; child != nil; child = child.NextSibling {
-				walk(child)
-			}
-		}
-		walk(doc)
+		assertInert(t, string(got))
 	})
+}
+
+func assertInert(t *testing.T, got string) {
+	t.Helper()
+	doc, err := html.Parse(strings.NewReader(got))
+	if err != nil {
+		t.Fatalf("parse rendered HTML: %v", err)
+	}
+	var walk func(*html.Node)
+	walk = func(n *html.Node) {
+		// Check parsed markup only: ordinary text may contain words such
+		// as "javascript:" and "onload" without being dangerous.
+		if n.Type == html.ElementNode {
+			switch n.Data {
+			case "html", "head", "body", // Added by html.Parse.
+				"p", "br", "hr", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote",
+				"pre", "code", "em", "strong", "del", "ul", "ol", "li", "a":
+			default:
+				t.Fatalf("disallowed element %q in %q", n.Data, got)
+			}
+			for _, attr := range n.Attr {
+				if strings.HasPrefix(attr.Key, "on") {
+					t.Fatalf("event attribute %q in %q", attr.Key, got)
+				}
+				switch attr.Key {
+				case "class":
+					if (n.Data != "pre" || attr.Val != "notes-plain") && (n.Data != "p" || attr.Val != "muted") {
+						t.Fatalf("disallowed class %q", attr.Val)
+					}
+				case "href", "rel", "target", "start":
+				default:
+					t.Fatalf("disallowed attribute %q in %q", attr.Key, got)
+				}
+				if attr.Key == "href" &&
+					!strings.HasPrefix(attr.Val, "http://") &&
+					!strings.HasPrefix(attr.Val, "https://") &&
+					!strings.HasPrefix(attr.Val, "mailto:") {
+					t.Fatalf("disallowed href %q in %q", attr.Val, got)
+				}
+			}
+		}
+		for child := n.FirstChild; child != nil; child = child.NextSibling {
+			walk(child)
+		}
+	}
+	walk(doc)
+}
+
+func TestRenderComplexityFallback(t *testing.T) {
+	for _, seed := range []string{">", "[a](", "*a", "1. ", "~~a", "`a``"} {
+		t.Run(seed, func(t *testing.T) {
+			src := strings.Repeat(seed, (64<<10)/len(seed))
+			assertPlainNotes(t, src)
+		})
+	}
+	for _, src := range []string{
+		strings.Repeat(">", 17), strings.Repeat("1. ", 17),
+		strings.Repeat("- ", 17), strings.Repeat("[", 17) + "text",
+		strings.Repeat("*", 34) + "a" + strings.Repeat("*", 34), strings.Repeat("_", 34) + "a" + strings.Repeat("_", 34),
+		strings.Repeat("*a ", 17), strings.Repeat("*a*\n", 1025),
+		strings.Repeat(">", 17) + "\n<script>alert(1)</script><img src=x onerror=x>&",
+	} {
+		assertPlainNotes(t, src)
+	}
+}
+
+func assertPlainNotes(t *testing.T, src string) {
+	t.Helper()
+	got, err := Render(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertInert(t, string(got))
+	doc, err := html.Parse(strings.NewReader(string(got)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pre, notice bool
+	var walk func(*html.Node)
+	walk = func(n *html.Node) {
+		if n.Type == html.ElementNode && n.Data == "pre" {
+			pre = len(n.Attr) == 1 && n.Attr[0].Key == "class" && n.Attr[0].Val == "notes-plain" && n.FirstChild != nil && n.FirstChild.Type == html.TextNode && n.FirstChild.Data == src
+		}
+		if n.Type == html.ElementNode && n.Data == "p" && n.FirstChild != nil && n.FirstChild.Data == "Shown as plain text — too complex to format." {
+			notice = len(n.Attr) == 1 && n.Attr[0].Val == "muted"
+		}
+		for child := n.FirstChild; child != nil; child = child.NextSibling {
+			walk(child)
+		}
+	}
+	walk(doc)
+	if !pre || !notice {
+		t.Errorf("missing escaped plain notes or notice (input %d bytes)", len(src))
+	}
+}
+
+func TestRenderOutputBound(t *testing.T) {
+	// No delimiter/container complexity: force the post-sanitization size guard.
+	assertPlainNotes(t, strings.Repeat("x\n\n", (512<<10)/8+1))
+}
+
+func TestRenderOrdinaryLargeNotes(t *testing.T) {
+	for _, src := range []string{"", strings.Repeat("*", 32) + "a" + strings.Repeat("*", 32), strings.Repeat("ordinary notes\n", 4096), strings.Repeat(">", 16) + " quote", strings.Repeat("*a*\n", 1024)} {
+		got, err := Render(src)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(got), `class="notes-plain"`) {
+			t.Errorf("ordinary notes took fallback (input %d bytes)", len(src))
+		}
+	}
 }
