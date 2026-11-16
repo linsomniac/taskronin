@@ -1,6 +1,7 @@
 package datespec
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -99,6 +100,54 @@ func TestDAT12(t *testing.T) {
 				t.Errorf("Parse(%q, %d) succeeded", in, mode)
 			}
 		}
+	}
+}
+
+func TestUnrecognisedDateMessages(t *testing.T) {
+	const help = ": use today, yesterday, tomorrow, a weekday (mon…sun), +Nd/-Nd, +Nw/-Nw, or YYYY-MM-DD"
+	for _, tc := range []struct{ in, want string }{
+		{"next monday", `unrecognised date "next"` + help},
+		{"next monday 13:00", `unrecognised date "next"` + help},
+		{"nxt", `unrecognised date "nxt"` + help},
+		{"2026-13-45", `invalid date "2026-13-45": no such calendar day`},
+		{"2026-02-29", `invalid date "2026-02-29": no such calendar day`},
+		{"2026-2-03", `unrecognised date "2026-2-03"` + help},
+		{"13:00 tomorrow", `unrecognised date "13:00"` + help},
+		{"today 13:00 extra", `invalid date specification "today 13:00 extra": expected a date, a clock, or a date followed by a clock`},
+	} {
+		for _, mode := range []Mode{Past, Future} {
+			t.Run(fmt.Sprintf("%s/%d", tc.in, mode), func(t *testing.T) {
+				_, err := Parse(tc.in, mode, ref)
+				if err == nil || err.Error() != tc.want {
+					t.Fatalf("Parse(%q) error = %v; want %s", tc.in, err, tc.want)
+				}
+				if strings.Contains(err.Error(), "civil:") {
+					t.Fatalf("internal package leaked: %v", err)
+				}
+			})
+		}
+	}
+}
+
+func TestUnrecognisedSpanDateMessages(t *testing.T) {
+	const help = ": use today, yesterday, tomorrow, a weekday (mon…sun), +Nd/-Nd, +Nw/-Nw, or YYYY-MM-DD"
+	for _, tc := range []struct{ in, want string }{
+		{"next monday", `unrecognised date "next"` + help},
+		{"next monday 13:00-14:00", `unrecognised date "next"` + help},
+		{"nxt 13:00-14:00", `unrecognised date "nxt"` + help},
+		{"2026-13-45 13:00-14:00", `invalid date "2026-13-45": no such calendar day`},
+		{"13:00 tomorrow", `unrecognised date "13:00"` + help},
+		{"today 13:00 - 14:00", `invalid block span "today 13:00 - 14:00": expected [date] start-end without spaces around the hyphen`},
+	} {
+		t.Run(tc.in, func(t *testing.T) {
+			_, err := ParseSpan(tc.in, Future, ref)
+			if err == nil || err.Error() != tc.want {
+				t.Fatalf("ParseSpan(%q) error = %v; want %s", tc.in, err, tc.want)
+			}
+			if strings.Contains(err.Error(), "civil:") {
+				t.Fatalf("internal package leaked: %v", err)
+			}
+		})
 	}
 }
 

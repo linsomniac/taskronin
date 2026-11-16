@@ -645,6 +645,23 @@ func TestFormParseErrorSendsNothing(t *testing.T) {
 	eq(t, fm.waiting, false)
 }
 
+func TestFormUnrecognisedDateMessage(t *testing.T) {
+	f := newFake()
+	a := newTestApp(t, f)
+	a.Update(tea.WindowSizeMsg{Width: 180, Height: 40})
+	drain(t, a, a.openForm("Defer", "date", "next monday", func(a *App, value string) (string, sendFunc, error) {
+		_, err := a.parseMoment(value, datespec.Future)
+		return "", nil, err
+	}, nil).focus())
+	press(t, a, "enter")
+	want := `unrecognised date "next": use today, yesterday, tomorrow, a weekday (mon…sun), +Nd/-Nd, +Nw/-Nw, or YYYY-MM-DD`
+	eq(t, a.form.(*form).errText, want)
+	if !strings.Contains(viewText(a), want) {
+		t.Fatalf("date error missing from form: %s", viewText(a))
+	}
+	eq(t, f.count("Generation"), 0)
+}
+
 func TestFormAfterHookRunsOnSuccessOnly(t *testing.T) {
 	for _, fail := range []bool{false, true} {
 		f := newFake()

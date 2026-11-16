@@ -79,6 +79,15 @@ func TestAddVariants(t *testing.T) {
 	}
 }
 
+func TestAddUnrecognisedDateMessage(t *testing.T) {
+	_, sys := captureServer(t)
+	out, stderr, code := runCLI(t, sys, "", "add", "X", "--defer", "next monday")
+	want := "tkr: --defer: unrecognised date \"next\": use today, yesterday, tomorrow, a weekday (mon…sun), +Nd/-Nd, +Nw/-Nw, or YYYY-MM-DD\n"
+	if code != 2 || out != "" || stderr != want {
+		t.Fatalf("exit=%d stdout=%q stderr=%q; want exit 2 and %q", code, out, stderr, want)
+	}
+}
+
 func TestTRI09_OnePlacementFlag(t *testing.T) {
 	srv, sys := captureServer(t)
 	for _, args := range [][]string{{"add", "x", "--top", "--bottom"}, {"add", "x", "--defer", "tomorrow", "--now"}} {

@@ -181,3 +181,17 @@ func TestFormDecoders(t *testing.T) {
 		t.Errorf("SplitTags = %v", got)
 	}
 }
+
+func TestFormUnrecognisedDateMessage(t *testing.T) {
+	ta := newTestApp(t)
+	ta.login()
+	w := ta.submit("/ui/triage", "/ui/tasks", url.Values{"title": {"X"}, "due": {"next monday"}})
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d: %s", w.Code, w.Body)
+	}
+	want := `unrecognised date "next": use today, yesterday, tomorrow, a weekday (mon…sun), +Nd/-Nd, +Nw/-Nw, or YYYY-MM-DD`
+	requireFieldErrors(t, w.Body.String(), "due")
+	if !strings.Contains(nodeText(parseHTML(t, w.Body.String())), want) {
+		t.Fatalf("date field error missing: %s", w.Body)
+	}
+}

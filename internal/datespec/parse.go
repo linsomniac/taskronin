@@ -5,6 +5,7 @@ package datespec
 import (
 	"database/sql"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -42,6 +43,11 @@ func Parse(s string, m Mode, r Ref) (domain.Moment, error) {
 	case 2:
 		date, clock = fields[0], fields[1]
 	default:
+		if len(fields) > 2 {
+			if _, err := parseDate(fields[0], m, r); err != nil {
+				return domain.Moment{}, err
+			}
+		}
 		return domain.Moment{}, fmt.Errorf("invalid date specification %q: expected a date, a clock, or a date followed by a clock", s)
 	}
 	d, err := parseDate(date, m, r)
@@ -72,6 +78,11 @@ func ParseSpan(s string, m Mode, r Ref) (domain.BlockSpan, error) {
 	case 2:
 		date, clocks = fields[0], fields[1]
 	default:
+		if len(fields) > 2 {
+			if _, err := parseDate(fields[0], m, r); err != nil {
+				return domain.BlockSpan{}, err
+			}
+		}
 		return domain.BlockSpan{}, fmt.Errorf("invalid block span %q: expected [date] start-end without spaces around the hyphen", s)
 	}
 	d, err := parseDate(date, m, r)
@@ -102,6 +113,8 @@ func ParseClock(s string, allow2400 bool) (civil.Minute, error) {
 	return civil.ParseHHMM(strings.TrimSpace(s), allow2400)
 }
 
+var isoDatePattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
+
 func parseDate(s string, m Mode, r Ref) (civil.Date, error) {
 	if m != Past && m != Future {
 		return civil.Date{}, fmt.Errorf("invalid date direction %d: expected Past or Future", m)
@@ -127,7 +140,14 @@ func parseDate(s string, m Mode, r Ref) (civil.Date, error) {
 		} else if days, ok := relativeDays(s); ok {
 			offset = days
 		} else {
-			return civil.ParseDate(s)
+			if !isoDatePattern.MatchString(s) {
+				return civil.Date{}, fmt.Errorf("unrecognised date %q: use today, yesterday, tomorrow, a weekday (mon…sun), +Nd/-Nd, +Nw/-Nw, or YYYY-MM-DD", s)
+			}
+			d, err := civil.ParseDate(s)
+			if err != nil {
+				return civil.Date{}, fmt.Errorf("invalid date %q: no such calendar day", s)
+			}
+			return d, nil
 		}
 	}
 	if r.Today.IsZero() {
