@@ -94,6 +94,12 @@ func Run(ctx context.Context, o Options) error {
 // feeding each stdio frame to the SDK: middleware alone misses queued calls.
 // Wait for both handlers and response writes, while keeping the SDK's actual
 // connection (and its private protocol-negotiation hooks) intact.
+// AIDEV-NOTE: the cancel and drain-timeout paths deliberately do NOT call
+// ss.Close(). In go-sdk v1.8.0 it waits for in-flight handlers without
+// cancelling them (jsonrpc2 Connection.Close), so a stalled handler would hang
+// shutdown past the 30 s bound. The deferred r.Close() makes Read return EOF,
+// which cancels handler contexts in jsonrpc2's readIncoming; the process exits
+// right after Run returns.
 func runDraining(ctx context.Context, s *mcp.Server, in io.ReadCloser, out io.Writer, timeout time.Duration) error {
 	d := &stdioDrain{pending: make(map[jsonrpc.ID]int), changed: make(chan struct{}, 1)}
 	r := &drainingReader{source: in, drain: d, eof: make(chan struct{}), closed: make(chan struct{})}
