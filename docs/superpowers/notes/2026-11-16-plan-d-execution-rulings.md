@@ -95,3 +95,13 @@ The controller made every ruling below on the owner's behalf. Each one lists wha
 1. **DF27:** keep serving the API when the web port is busy, or refuse to start?
 2. **DF28:** how should over-complex notes be presented? The default is escaped plain text with a one-line explanation.
 3. **DF17 vs the TUI:** in the web UI you can mark AI changes reviewed only from the oldest unreviewed page. The TUI instead loads all pages first.
+
+## Follow-ups after the end-to-end run (2026-11-16)
+
+- **Clearer date errors** (87282e1): date parsing no longer leaks `civil: "next" is not YYYY-MM-DD`. Unrecognised dates now list the accepted forms, and ISO-shaped invalid dates say "no such calendar day".
+- **MCP end-of-input drain** (7fb248a): `tkr mcp` answers requests already in flight before exiting on stdin EOF, bounded at 30 s.
+  - Ruling (e9ef7ba): the cancel and timeout paths deliberately do not call `ss.Close()`. In go-sdk v1.8.0 it waits for in-flight handlers without cancelling them, which would break the 30 s bound. The reasoning is recorded in an AIDEV-NOTE.
+- **TUI Today and Log** (f549549):
+  - The Today tab shows the AI-changes notice once.
+  - Completion entries carry ✓ in Today and in the Log tab.
+- **Flaky `TestREC06_TodayETagStable`** (5d2b0e7). Root cause: a fresh server's first backup runs in the background after startup and flips `backup_warning` between the test's reads. The test now waits for that backup to finish before checking ETag stability; production code is unchanged.
