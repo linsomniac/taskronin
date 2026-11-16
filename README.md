@@ -72,6 +72,23 @@ set -g status-right '#(tkr status --short --ascii)'
 `tkr status --short` is built to be prompt-safe: it prints nothing and exits 0
 when the server is down or slow.
 
+## Web UI
+
+Enable `web.enabled` in `~/.config/taskronin/server.toml` and opt into plain
+loopback HTTP only on a single-user host:
+
+```toml
+[web]
+enabled = true
+listen = "127.0.0.1:7878"
+allow_plain_loopback = true
+```
+
+Restart the server (`systemctl --user restart taskronin.service` when using
+systemd), open <http://127.0.0.1:7878/ui/>, and log in with the owner password
+set by `tkr init`. The UI shares tasks with the CLI and TUI. Remote access is
+not supported in v1.
+
 ## MCP
 
 Create a dedicated token for the MCP client and keep the secret out of the

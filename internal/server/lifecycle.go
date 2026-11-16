@@ -39,7 +39,7 @@ type Startup struct {
 	WebAddr string
 }
 
-// AIDEV-TODO: Plan D's internal/server/web.go assigns this in init() to an
+// AIDEV-NOTE: internal/server/web.go assigns this in init() to an
 // adapter over web.New (architecture §6.2 web chain).
 var newWebHandler func(svc *service.Service, clk clock.Clock, zone civil.Zone, weekStart time.Weekday, listen string, log *slog.Logger) (http.Handler, error)
 
@@ -190,7 +190,11 @@ func Run(ctx context.Context, cfg *config.Server, deps Deps) (err error) {
 			if err != nil {
 				return err
 			}
-			servers = append(servers, httpServer(adapter.recoverer(adapter.requestID(adapter.accessLog(h))), deps.Logger))
+			webServer := httpServer(adapter.recoverer(adapter.requestID(adapter.accessLog(h))), deps.Logger)
+			// AIDEV-NOTE: DF24: OPTIONS * must pass through web security
+			// headers and Host validation instead of net/http's bare 200.
+			webServer.DisableGeneralOptionsHandler = true
+			servers = append(servers, webServer)
 			listeners = append(listeners, ln)
 			startup.WebAddr = ln.Addr().String()
 			accounts, err := config.OtherHumanAccounts("/etc/passwd", os.Getuid())
