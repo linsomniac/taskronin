@@ -166,12 +166,15 @@ func TestTaskDetailDoneAndDeleted(t *testing.T) {
 				t.Errorf("undelete ETag = %v", form)
 			}
 			walkHTML(parseHTML(t, body), func(n *html.Node) {
-				if n.Data == "form" && attr(n, "method") == "post" {
-					action := attr(n, "action")
-					if action != "/ui/logout" && action != "/ui/tasks/1/undelete" {
-						t.Errorf("deleted task exposes mutation %s", action)
-					}
+				if n.Type != html.ElementNode || n.Data != "main" {
+					return
 				}
+				// Global navigation actions remain available on deleted task pages.
+				walkHTML(n, func(form *html.Node) {
+					if form.Data == "form" && attr(form, "method") == "post" && attr(form, "action") != "/ui/tasks/1/undelete" {
+						t.Errorf("deleted task exposes mutation %s", attr(form, "action"))
+					}
+				})
 			})
 		})
 	}

@@ -23,13 +23,14 @@
 {{if .Data.More}}<a href="{{.Data.More}}">More</a>{{end}}
 {{if .Data.Review}}
 {{template "aireview" .Data.Review}}
-{{else}}<p>older unreviewed changes continue on the next page</p>{{end}}
+{{end}}
+{{if and .Data.More (not .Data.IncludeReviewed)}}<p>older unreviewed changes continue on the next page</p>{{end}}
 {{end}}
 
 {{define "aireview"}}
 <form method="post" action="/ui/ai-changes/review">
 {{template "hidden" $}}
 <input type="hidden" name="through" value="{{.Data}}">
-<button type="submit">Mark reviewed</button>
+<button type="submit">Mark the changes on this page reviewed</button>
 </form>
 {{end}}

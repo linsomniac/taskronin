@@ -44,6 +44,11 @@ func (a *app) routes() *http.ServeMux {
 	mux.HandleFunc("POST /ui/blocks/{id}/reblock", a.reblock)
 	mux.HandleFunc("POST /ui/blocks/{id}/unblock", a.unblock)
 	mux.HandleFunc("POST /ui/blocks/{id}/outcome", a.setOutcome)
+	mux.HandleFunc("POST /ui/focus", a.setFocus)
+	mux.HandleFunc("POST /ui/undo", a.undo)
+	mux.HandleFunc("POST /ui/redo", a.redo)
+	mux.HandleFunc("POST /ui/ops/{op}/revert", a.revert)
+	mux.HandleFunc("POST /ui/ai-changes/review", a.markAIReviewed)
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/ui/", http.StatusSeeOther)
 	})

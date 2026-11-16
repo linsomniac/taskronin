@@ -19,6 +19,14 @@
 <a href="/ui/report"{{if eq .Tab "report"}} aria-current="page"{{end}}>Report</a>
 <a href="/ui/search"{{if eq .Tab "search"}} aria-current="page"{{end}}>Search</a>
 <a href="/ui/ai-changes"{{if eq .Tab "ai"}} aria-current="page"{{end}}>AI changes</a>
+<form method="post" action="/ui/undo">
+{{template "hidden" $}}
+<button type="submit">Undo</button>
+</form>
+<form method="post" action="/ui/redo">
+{{template "hidden" $}}
+<button type="submit">Redo</button>
+</form>
 <form method="post" action="/ui/logout" hx-boost="false">
 {{template "hidden" $}}
 <button type="submit">Log out</button>

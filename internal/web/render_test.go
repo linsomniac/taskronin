@@ -352,7 +352,7 @@ func TestRenderErrorServerRetryKeepsNonce(t *testing.T) {
 					r.Header.Set("HX-Request", hx)
 					w := httptest.NewRecorder()
 					ta.App.RenderError(w, r, domain.Errorf(code, "failed"))
-					got := scrapeForm(t, w.Body.String(), path)
+					got := scrapeForm(t, resubmitBody(t, w.Body.String()), path)
 					if !reflect.DeepEqual(got["_nonce"], []string{nonce}) {
 						t.Errorf("retry nonce = %v, want submitted key", got["_nonce"])
 					}
@@ -403,7 +403,7 @@ func TestRenderErrorRetryFreshNonce(t *testing.T) {
 				r.URL.Path = path
 				w := httptest.NewRecorder()
 				ta.App.RenderError(w, r, domain.Errorf(tc.code, "failed"))
-				got := scrapeForm(t, w.Body.String(), path)
+				got := scrapeForm(t, resubmitBody(t, w.Body.String()), path)
 				if len(got["_nonce"]) != 1 || !regexp.MustCompile(`^[0-9a-f]{32}$`).MatchString(got.Get("_nonce")) || got.Get("_nonce") == tc.nonce {
 					t.Errorf("%s nonce = %v, want fresh lowercase hex", path, got["_nonce"])
 				}
@@ -419,10 +419,27 @@ func TestRenderErrorRetryFreshNonce(t *testing.T) {
 	}
 }
 
+// The nav also has undo/redo forms; retry assertions must inspect the error section.
+func resubmitBody(t *testing.T, body string) string {
+	t.Helper()
+	var buf strings.Builder
+	walkHTML(parseHTML(t, body), func(n *html.Node) {
+		if n.Type == html.ElementNode && n.Data == "section" && hasAttr(n, "data-code") {
+			if err := html.Render(&buf, n); err != nil {
+				t.Fatal(err)
+			}
+		}
+	})
+	if buf.Len() == 0 {
+		t.Fatal("missing error section")
+	}
+	return buf.String()
+}
+
 func resubmitHasButton(t *testing.T, body, action string) bool {
 	t.Helper()
 	found := false
-	walkHTML(parseHTML(t, body), func(n *html.Node) {
+	walkHTML(parseHTML(t, resubmitBody(t, body)), func(n *html.Node) {
 		if n.Type == html.ElementNode && n.Data == "form" && attr(n, "action") == action {
 			walkHTML(n, func(control *html.Node) {
 				if control.Type == html.ElementNode && control.Data == "button" && attr(control, "type") == "submit" {
