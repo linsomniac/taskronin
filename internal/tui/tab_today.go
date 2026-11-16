@@ -249,6 +249,9 @@ func (s *todayScreen) view(a *App, w, h int) string {
 		if e.Time != nil {
 			text += " " + hhmm(int(*e.Time))
 		}
+		if e.Kind == "complete" {
+			text += " ✓"
+		}
 		text += " " + e.Title
 		if e.TaskID != nil {
 			text += fmt.Sprintf(" [#%d]", *e.TaskID)
@@ -284,6 +287,9 @@ func (s *todayScreen) view(a *App, w, h int) string {
 	}
 	lines = append(lines, a.line(health, w))
 	for _, b := range td.Banners {
+		if b.Kind == "ai_changes" {
+			continue // The dedicated AI notice above includes the review shortcut.
+		}
 		lines = append(lines, a.line(b.Message, w))
 	}
 	// Keep the selected row visible even when the dashboard exceeds the frame.

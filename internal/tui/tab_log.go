@@ -161,6 +161,9 @@ func (s *logScreen) view(a *App, w, h int) string {
 		if e.Time != nil {
 			text += " " + hhmm(int(*e.Time))
 		}
+		if e.Kind == "complete" {
+			text += " ✓"
+		}
 		text += " " + e.Title
 		if e.TaskID != nil {
 			text += fmt.Sprintf("  [#%d]", *e.TaskID)

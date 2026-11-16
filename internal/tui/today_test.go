@@ -63,6 +63,53 @@ func TestTodayRender(t *testing.T) { // BLK-48, BLK-17/RCP-06, INT-08 (TUI side)
 	}
 }
 
+func TestTodayAIChangesNoticeOnce(t *testing.T) {
+	td := todayFixture()
+	td.Banners = []api.Banner{
+		{Kind: "ai_changes", Message: "2 unreviewed AI changes."},
+		{Kind: "backup_failed", Message: "disk full"},
+		{Kind: "tz_changed", Message: "timezone changed"},
+	}
+	a := newTestApp(t, fakeWithToday(td))
+	body := a.current().view(a, 120, 40)
+	want := "AI changes: 2 unreviewed — A to review"
+	if strings.Count(body, "unreviewed") != 1 || !strings.Contains(body, want) {
+		t.Fatalf("want exactly one AI notice %q: %s", want, body)
+	}
+	for _, text := range []string{"disk full", "timezone changed"} {
+		if !strings.Contains(body, text) {
+			t.Errorf("lost other banner %q: %s", text, body)
+		}
+	}
+	if !strings.Contains(a.header(120), "ai 2") {
+		t.Fatal("header lost AI count")
+	}
+}
+
+func TestCompletionEntryMarkers(t *testing.T) {
+	for _, tab := range []Tab{TabToday, TabLog} {
+		t.Run(fmt.Sprint(tab), func(t *testing.T) {
+			f := newFake()
+			entries := []api.Entry{
+				{ID: 7, Kind: "complete", Title: "Finished task", WorkDate: f.clock.Today, Time: ptr(civil.Minute(620)), TaskID: ptr(int64(42))},
+				{ID: 8, Kind: "work", Title: "Progress", WorkDate: f.clock.Today},
+			}
+			f.today.Entries = entries
+			f.entries = entries
+			a := newTestApp(t, f, func(c *Config) { c.StartTab = tab })
+			body := a.current().view(a, 120, 40)
+			for _, want := range []string{"e7 10:20 ✓ Finished task", "[#42]", "e8 Progress"} {
+				if !strings.Contains(body, want) {
+					t.Errorf("missing %q: %s", want, body)
+				}
+			}
+			if strings.Count(body, "✓") != 1 {
+				t.Fatalf("only completion entries should be marked: %s", body)
+			}
+		})
+	}
+}
+
 func TestTodayNoFocusCurrentBlock(t *testing.T) {
 	td := todayFixture()
 	td.Focus = nil
