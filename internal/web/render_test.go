@@ -4,12 +4,16 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"reflect"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -22,18 +26,100 @@ import (
 )
 
 func TestStatusForEveryCode(t *testing.T) {
-	for code, want := range map[domain.Code]int{
-		domain.CodeMalformed: 400, domain.CodeUnauthenticated: 401,
-		domain.CodeForbidden: 403, domain.CodePeerRejected: 403, domain.CodePasswordRequired: 403, domain.CodePasswordInvalid: 403,
-		domain.CodeNotFound: 404, domain.CodeDeleted: 409, domain.CodeConflict: 409, domain.CodeRevertConflict: 409,
-		domain.CodeNotRevertible: 409, domain.CodeNothingToUndo: 409, domain.CodeNothingToRedo: 409,
-		domain.CodePrecondition: 412, domain.CodeGenerationMismatch: 412, domain.CodeTooLarge: 413, domain.CodeUnsupportedMedia: 415,
-		domain.CodeValidation: 422, domain.CodeIdemMismatch: 422, domain.CodePreconditionReq: 428, domain.CodeIdemRequired: 428,
-		domain.CodeRateLimited: 429, domain.CodeInternal: 500, domain.CodeBusy: 503, domain.Code("zzz"): 500,
-	} {
-		if got := web.StatusFor(code); got != want {
-			t.Errorf("StatusFor(%s) = %d, want %d", code, got, want)
+	// Read the actual server switch, since web cannot import server and a
+	// dependency's export_test.go is unavailable to this external test package.
+	codes := make(map[domain.Code]string)
+	file, err := parser.ParseFile(token.NewFileSet(), "../domain/errors.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ast.Inspect(file, func(node ast.Node) bool {
+		v, ok := node.(*ast.ValueSpec)
+		if !ok {
+			return true
 		}
+		typ, ok := v.Type.(*ast.Ident)
+		if !ok || typ.Name != "Code" {
+			return true
+		}
+		for i, name := range v.Names {
+			lit, ok := v.Values[i].(*ast.BasicLit)
+			if !ok {
+				t.Fatalf("nonliteral error code %s", name.Name)
+			}
+			value, err := strconv.Unquote(lit.Value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			codes[domain.Code(value)] = name.Name
+		}
+		return false
+	})
+	if len(codes) != len(domain.ErrorCodes()) {
+		t.Fatalf("ErrorCodes has %d entries, declarations have %d", len(domain.ErrorCodes()), len(codes))
+	}
+	file, err = parser.ParseFile(token.NewFileSet(), "../server/respond.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	statuses := map[string]int{
+		"StatusBadRequest": http.StatusBadRequest, "StatusUnauthorized": http.StatusUnauthorized,
+		"StatusForbidden": http.StatusForbidden, "StatusNotFound": http.StatusNotFound,
+		"StatusConflict": http.StatusConflict, "StatusPreconditionFailed": http.StatusPreconditionFailed,
+		"StatusRequestEntityTooLarge": http.StatusRequestEntityTooLarge, "StatusUnsupportedMediaType": http.StatusUnsupportedMediaType,
+		"StatusUnprocessableEntity": http.StatusUnprocessableEntity, "StatusPreconditionRequired": http.StatusPreconditionRequired,
+		"StatusTooManyRequests": http.StatusTooManyRequests, "StatusInternalServerError": http.StatusInternalServerError,
+		"StatusServiceUnavailable": http.StatusServiceUnavailable,
+	}
+	serverMapping := make(map[string]int)
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Name.Name != "statusFor" {
+			continue
+		}
+		ast.Inspect(fn.Body, func(node ast.Node) bool {
+			clause, ok := node.(*ast.CaseClause)
+			if !ok {
+				return true
+			}
+			ret, ok := clause.Body[0].(*ast.ReturnStmt)
+			if !ok {
+				t.Fatal("server statusFor case must return a status")
+			}
+			value, ok := ret.Results[0].(*ast.SelectorExpr)
+			if !ok {
+				t.Fatal("server statusFor must return an HTTP constant")
+			}
+			status, ok := statuses[value.Sel.Name]
+			if !ok {
+				t.Fatalf("add HTTP constant %s to status test", value.Sel.Name)
+			}
+			for _, expr := range clause.List {
+				code, ok := expr.(*ast.SelectorExpr)
+				if !ok {
+					t.Fatal("server statusFor must switch on domain codes")
+				}
+				serverMapping[code.Sel.Name] = status
+			}
+			return false
+		})
+	}
+	for _, code := range domain.ErrorCodes() {
+		name, ok := codes[code]
+		if !ok {
+			t.Fatalf("duplicate or undeclared ErrorCodes entry %s", code)
+		}
+		delete(codes, code)
+		want, ok := serverMapping[name]
+		if !ok {
+			t.Fatalf("server has no explicit mapping for %s", name)
+		}
+		if got := web.StatusFor(code); got != want {
+			t.Errorf("StatusFor(%s) = %d; server = %d", code, got, want)
+		}
+	}
+	if got := web.StatusFor(domain.Code("unknown")); got != http.StatusInternalServerError {
+		t.Errorf("unknown status = %d", got)
 	}
 }
 
@@ -158,27 +244,12 @@ func TestRenderErrorStaleInputReadOnly(t *testing.T) {
 		if w.Code != http.StatusPreconditionFailed || !strings.Contains(nodeText(parseHTML(t, w.Body.String())), "Your input — reload, then paste") {
 			t.Fatalf("stale response = %d %s", w.Code, w.Body)
 		}
-		got := scrapeForm(t, w.Body.String(), "/ui/tasks")
+		got := readOnlyInput(t, resubmitBody(t, w.Body.String()))
 		for key, values := range form {
 			if !reflect.DeepEqual(got[key], values) {
 				t.Errorf("stale %s = %v", key, got[key])
 			}
 		}
-		walkHTML(parseHTML(t, w.Body.String()), func(n *html.Node) {
-			if n.Type != html.ElementNode || n.Data != "form" || attr(n, "action") != "/ui/tasks" {
-				return
-			}
-			walkHTML(n, func(n *html.Node) {
-				if n.Data == "button" || (n.Data == "input" && attr(n, "type") == "submit") {
-					t.Error("stale form has a submit control")
-				}
-				if (n.Data == "input" && attr(n, "type") != "hidden") || n.Data == "textarea" {
-					if !hasAttr(n, "readonly") {
-						t.Error("stale input is editable")
-					}
-				}
-			})
-		})
 	}
 }
 
@@ -527,6 +598,9 @@ func TestRenderErrorUndoRedoClientErrorsNeverRetry(t *testing.T) {
 					w := httptest.NewRecorder()
 					ta.App.RenderError(w, r, domain.Errorf(code, "failed"))
 					assertErrorCode(t, w.Body.String(), string(code))
+					if strings.Contains(nodeText(parseHTML(t, resubmitBody(t, w.Body.String()))), "Your input") {
+						t.Error("empty input heading")
+					}
 					if resubmitHasButton(t, w.Body.String(), path) {
 						t.Error("4xx stack error offers Try again")
 					}
@@ -619,4 +693,34 @@ func TestRecoverHTMLAbortsCommittedResponse(t *testing.T) {
 			t.Error("expected abort")
 		}()
 	}
+}
+
+// Check actual DOM ancestry so Enter cannot implicitly submit a saved input.
+func readOnlyInput(t *testing.T, body string) url.Values {
+	t.Helper()
+	values := make(url.Values)
+	walkHTML(parseHTML(t, body), func(n *html.Node) {
+		if n.Type != html.ElementNode {
+			return
+		}
+		if n.Data == "form" || n.Data == "button" || (n.Data == "input" && attr(n, "type") == "submit") {
+			t.Error("read-only input can submit")
+		}
+		if n.Data != "input" && n.Data != "textarea" {
+			return
+		}
+		name := attr(n, "name")
+		if name == "password" || name == "_csrf" || name == "_nonce" {
+			t.Error("read-only credential field")
+		}
+		if attr(n, "type") != "hidden" && !hasAttr(n, "readonly") {
+			t.Errorf("editable saved %s", name)
+		}
+		value := attr(n, "value")
+		if n.Data == "textarea" {
+			value = nodeText(n)
+		}
+		values.Add(name, value)
+	})
+	return values
 }

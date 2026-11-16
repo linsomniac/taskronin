@@ -649,3 +649,9 @@ func TestCapturePrintOpPreservesError(t *testing.T) {
 		t.Fatalf("writes=%d; want no more writes after the first failure", out.writes)
 	}
 }
+
+func TestReviewedEffect(t *testing.T) {
+	if got := effectLine(api.Effect{Kind: "reviewed", To: "123"}); got != "AI changes reviewed through #123" {
+		t.Errorf("review effect = %q", got)
+	}
+}

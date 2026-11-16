@@ -71,6 +71,8 @@ func effectLine(effect service.Effect) string {
 		return fmt.Sprintf("#%d retitled '%s' → '%s'", id, effect.From, effect.To)
 	case service.EffEntryLogged, service.EffEntryUpdated, service.EffEntryRelinked, service.EffEntryDeleted, service.EffEntryRestored:
 		return fmt.Sprintf("e%d %s", effect.EntryID, strings.TrimPrefix(string(effect.Kind), "entry_"))
+	case service.EffReviewed:
+		return "AI changes reviewed through #" + effect.To
 	case service.EffReverted:
 		return "reverted op " + effect.From
 	default:

@@ -182,7 +182,7 @@ func TestTriagePage(t *testing.T) {
 	if got := dataIDs(t, body, "data-task"); !reflect.DeepEqual(got, []string{"1", "3"}) {
 		t.Errorf("triage rows = %v", got)
 	}
-	requireText(t, body, "new", "writing", "Docs", "H", "0/0")
+	requireText(t, body, "new", "writing", "Docs", "H", "0/0", "Accept the new tasks on this page at bottom")
 	form := scrapeForm(t, body, "/ui/tasks")
 	for _, key := range []string{"title", "notes", "due", "tags", "project", "priority", "place", "ref", "defer", "span"} {
 		if !form.Has(key) {
@@ -574,5 +574,43 @@ func TestLogPageDefaultRangeAndPastDatespec(t *testing.T) {
 	body = ta.viewBody("/ui/log?from=yesterday&to=yesterday")
 	if got := dataIDs(t, body, "data-entry"); !reflect.DeepEqual(got, []string{"3"}) {
 		t.Errorf("past datespec = %v", got)
+	}
+}
+
+func TestOneSidedDateFilters(t *testing.T) {
+	ta := newTestApp(t).login()
+	for _, tc := range []struct{ path, from, to string }{
+		{"/ui/log?to=2026-10-01", "2026-09-18", "2026-10-01"},
+		{"/ui/log?from=2026-09-01", "2026-09-01", "2026-09-14"},
+		{"/ui/log?from=2026-10-27", "2026-10-27", "2026-10-28"},
+		{"/ui/report?to=2026-10-01", "2026-09-28", "2026-10-01"},
+		{"/ui/report?from=2025-01-01", "2025-01-01", "2026-01-01"},
+		{"/ui/report?from=2026-10-27", "2026-10-27", "2026-10-28"},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			w := ta.get(tc.path)
+			if w.Code != http.StatusOK {
+				t.Fatalf("date filters = %d", w.Code)
+			}
+			path, _, _ := strings.Cut(tc.path, "?")
+			f := scrapeForm(t, w.Body.String(), path)
+			if f.Get("from") != tc.from || f.Get("to") != tc.to {
+				t.Errorf("date range = %s..%s, want %s..%s", f.Get("from"), f.Get("to"), tc.from, tc.to)
+			}
+		})
+	}
+	for _, path := range []string{"/ui/log", "/ui/report"} {
+		for _, tc := range []struct{ query, field string }{
+			{"from=garbage", "from"}, {"to=garbage", "to"},
+			{"from=2026-11-01", "from"}, {"to=1000-01-01", "to"},
+			{"from=2026-10-28&to=2026-10-27", "to"},
+		} {
+			w := ta.get(path + "?" + tc.query)
+			if w.Code != http.StatusUnprocessableEntity {
+				t.Errorf("%s?%s = %d", path, tc.query, w.Code)
+			} else {
+				requireFieldErrors(t, w.Body.String(), tc.field)
+			}
+		}
 	}
 }

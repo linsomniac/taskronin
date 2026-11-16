@@ -33,8 +33,15 @@ func (a *app) csrf(next http.Handler) http.Handler {
 		if token == "" {
 			token = r.Header.Get("X-CSRF-Token")
 		}
-		if !a.checkOrigin(r) || token == "" || subtle.ConstantTimeCompare([]byte(token), []byte(s.CSRF)) != 1 {
+		if !a.checkOrigin(r) {
 			a.renderError(w, r, domain.Errorf(domain.CodeForbidden, "cross-site request refused"))
+			return
+		}
+		if token == "" || subtle.ConstantTimeCompare([]byte(token), []byte(s.CSRF)) != 1 {
+			// AIDEV-NOTE: DF29: only a same-origin token mismatch may echo
+			// typed input, read-only. Cross-site refusals never preserve it.
+			a.renderErrorWithInput(w, r, domain.Errorf(domain.CodeForbidden,
+				"Your session changed (you logged in again) — reload, then paste"), true)
 			return
 		}
 		next.ServeHTTP(w, r)

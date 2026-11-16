@@ -320,7 +320,7 @@ func TestMarkAIReviewedBound(t *testing.T) {
 	r := s.Must(s.Svc.MarkAIReviewed(s.Ctx(), m, service.MarkAIReviewedIn{Through: seq}))
 	op := s.Op(r.OpID)
 	if op.Kind != "ai.review" || op.Revertible || op.Scopes != domain.ScopeWrite || op.Actor != "owner" || r.NoChange ||
-		!reflect.DeepEqual(r.Effects, []service.Effect{{Kind: service.EffReviewed}}) {
+		!reflect.DeepEqual(r.Effects, []service.Effect{{Kind: service.EffReviewed, To: strconv.FormatInt(int64(seq), 10)}}) {
 		t.Fatalf("review = %+v / %+v", r, op)
 	}
 	events := s.Events(r.OpID)
@@ -345,7 +345,7 @@ func TestMarkAIReviewedBound(t *testing.T) {
 		t.Fatal(v)
 	}
 	replay := s.Must(s.Svc.MarkAIReviewed(s.Ctx(), m, service.MarkAIReviewedIn{Through: seq}))
-	if !replay.Replayed || replay.OpID != r.OpID || s.OpCount() != count+1 {
+	if !replay.Replayed || replay.OpID != r.OpID || s.OpCount() != count+1 || !reflect.DeepEqual(replay.Effects, r.Effects) {
 		t.Fatal(replay)
 	}
 	for _, through := range []domain.OpSeq{seq, seq - 1} {

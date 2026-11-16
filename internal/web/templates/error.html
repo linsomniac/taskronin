@@ -19,7 +19,20 @@
 <ul>{{range .Err.Conflicts}}<li>{{short .OpID}} — {{.Kind}}</li>{{end}}</ul>
 {{end}}
 {{with .Resubmit}}
-<h2>{{if $stale}}Your input — reload, then paste{{else}}Your input{{end}}</h2>
+{{if .Fields}}<h2>{{if .ReadOnly}}Your input — reload, then paste{{else}}Your input{{end}}</h2>{{end}}
+{{if .ReadOnly}}
+<div class="saved-input">
+{{range $key, $values := .Keep}}{{range $values}}
+<input type="hidden" name="{{$key}}" value="{{.}}">
+{{end}}{{end}}
+{{range .Fields}}
+<p><label>{{.Name}}
+{{if .Long}}<textarea name="{{.Name}}" readonly>
+{{.Value}}</textarea>{{else}}<input type="text" name="{{.Name}}" value="{{.Value}}" readonly>{{end}}
+</label></p>
+{{end}}
+</div>
+{{else}}
 {{if .Nonce}}<p>Try again resends the same request — if it was already saved, it will not be saved twice.</p>{{end}}
 <form method="post" action="{{.Action}}">
 {{if .Nonce}}
@@ -33,12 +46,13 @@
 {{end}}{{end}}
 {{range .Fields}}
 <p><label>{{.Name}}
-{{if .Long}}<textarea name="{{.Name}}"{{if $stale}} readonly{{end}}>
-{{.Value}}</textarea>{{else}}<input type="text" name="{{.Name}}" value="{{.Value}}"{{if $stale}} readonly{{end}}>{{end}}
+{{if .Long}}<textarea name="{{.Name}}">
+{{.Value}}</textarea>{{else}}<input type="text" name="{{.Name}}" value="{{.Value}}">{{end}}
 </label></p>
 {{end}}
-{{if and (not $stale) .CanRetry}}<button type="submit">Try again</button>{{end}}
+{{if .CanRetry}}<button type="submit">Try again</button>{{end}}
 </form>
+{{end}}
 {{end}}
 </section>
 {{end}}

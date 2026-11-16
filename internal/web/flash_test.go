@@ -82,7 +82,7 @@ func TestFlashLinesEveryEffectKind(t *testing.T) {
 		{service.EffDeleted, "", "", "#42 deleted"},
 		{service.EffUndeleted, "", "", "#42 undeleted"},
 		{service.EffReverted, "abcdef12", "", "reverted op abcdef12"},
-		{service.EffReviewed, "", "", "#42 reviewed"},
+		{service.EffReviewed, "", "123", "AI changes reviewed through #123"},
 		{service.EffPurged, "", "", "#42 purged"},
 	} {
 		t.Run(string(tc.kind), func(t *testing.T) {

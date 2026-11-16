@@ -74,8 +74,9 @@ when the server is down or slow.
 
 ## Web UI
 
-Enable `web.enabled` in `~/.config/taskronin/server.toml` and opt into plain
-loopback HTTP only on a single-user host:
+The web UI is enabled by default. On single-user hosts, `tkr init` records
+consent for plain loopback HTTP, so the UI starts automatically with the server.
+The default settings in `~/.config/taskronin/server.toml` after that consent are:
 
 ```toml
 [web]
@@ -84,10 +85,14 @@ listen = "127.0.0.1:7878"
 allow_plain_loopback = true
 ```
 
-Restart the server (`systemctl --user restart taskronin.service` when using
-systemd), open <http://127.0.0.1:7878/ui/>, and log in with the owner password
-set by `tkr init`. The UI shares tasks with the CLI and TUI. Remote access is
-not supported in v1.
+Set `enabled = false` in `[web]` to turn the UI off. If its port is busy or the
+web handler cannot start, the server logs a warning and continues serving the
+unix-socket API without the web UI.
+
+After changing settings, restart the server (`systemctl --user restart
+taskronin.service` when using systemd). Open <http://127.0.0.1:7878/ui/>, and log in
+with the owner password set by `tkr init`. The UI shares tasks with the CLI and
+TUI. Remote access is not supported in v1.
 
 ## MCP
 

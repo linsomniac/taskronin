@@ -130,11 +130,13 @@
 </form>
 {{end}}
 
+{{if eq .Status "open"}}
 <form method="post" action="/ui/tasks/{{.ID}}/drop" hx-confirm="Drop #{{.ID}} {{.Title}}?">
 {{template "hidden" $}}
 <input type="hidden" name="etag" value="{{etag $.Gen .Version}}">
 <button type="submit">Drop</button>
 </form>
+{{end}}
 <form method="post" action="/ui/tasks/{{.ID}}/delete" hx-confirm="Delete #{{.ID}} {{.Title}}?">
 {{template "hidden" $}}
 <input type="hidden" name="etag" value="{{etag $.Gen .Version}}">

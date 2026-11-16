@@ -191,6 +191,8 @@ func effectLine(effect api.Effect) string {
 		return fmt.Sprintf("#%d retitled '%s' → '%s'", id, effect.From, effect.To)
 	case "entry_logged", "entry_updated", "entry_relinked", "entry_deleted", "entry_restored":
 		return fmt.Sprintf("e%d %s", effect.EntryID, strings.TrimPrefix(effect.Kind, "entry_"))
+	case "reviewed":
+		return "AI changes reviewed through #" + effect.To
 	case "reverted":
 		return "reverted op " + effect.From
 	default:

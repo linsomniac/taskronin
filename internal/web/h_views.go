@@ -117,11 +117,17 @@ func (a *app) log(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	today := a.o.Zone.DateOf(a.o.Clock.Now())
-	if from.IsZero() {
-		from = today.AddDays(-13)
-	}
-	if to.IsZero() {
-		to = today
+	// Derive a missing bound from the supplied date, preserving a 14-day window.
+	switch {
+	case from.IsZero() && to.IsZero():
+		from, to = today.AddDays(-13), today
+	case from.IsZero():
+		from = to.AddDays(-13)
+	case to.IsZero():
+		to = from.AddDays(13)
+		if to.After(today) {
+			to = today
+		}
 	}
 	s, _ := sessionFrom(r.Context())
 	p := logPage{From: from, To: to, IncludeDeleted: q.Get("include_deleted") == "1"}
@@ -129,7 +135,7 @@ func (a *app) log(w http.ResponseWriter, r *http.Request) {
 		From: from, To: to, IncludeDeleted: p.IncludeDeleted, Limit: 100, Cursor: q.Get("cursor"),
 	})
 	if err != nil {
-		a.renderError(w, r, err)
+		a.renderError(w, r, suppliedRangeError(err, q))
 		return
 	}
 	for _, entry := range list.Items {

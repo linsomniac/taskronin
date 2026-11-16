@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
@@ -168,4 +169,29 @@ func formMinute(form url.Values, key string) (sql.Null[civil.Minute], error) {
 
 func splitTags(s string) []string {
 	return strings.FieldsFunc(s, func(r rune) bool { return r == ',' || unicode.IsSpace(r) })
+}
+
+// AIDEV-NOTE: Date defaults can underflow the supported calendar or make a
+// future start later than today. Keep service validation authoritative, but
+// attribute errors on derived bounds to the date the user actually supplied.
+func suppliedRangeError(err error, q url.Values) error {
+	de, ok := domain.AsError(err)
+	if !ok || de.Code != domain.CodeValidation {
+		return err
+	}
+	copyError := *de
+	copyError.Fields = slices.Clone(de.Fields)
+	for i, field := range copyError.Fields {
+		other := ""
+		switch field.Field {
+		case "from":
+			other = "to"
+		case "to":
+			other = "from"
+		}
+		if other != "" && q.Get(field.Field) == "" && q.Get(other) != "" {
+			copyError.Fields[i] = domain.FieldError{Field: other, Message: "cannot derive a valid date range from this date"}
+		}
+	}
+	return &copyError
 }

@@ -78,8 +78,8 @@ func TestEffectsFromEvents(t *testing.T) {
 		}
 	})
 	t.Run("review once", func(t *testing.T) {
-		got := service.EffectsFromEventsForTest(domain.OpRecord{Kind: domain.OpAIReview}, []domain.Event{{Entity: domain.EntSetting}, {Entity: domain.EntSetting}})
-		if !reflect.DeepEqual(got, []service.Effect{{Kind: service.EffReviewed}}) {
+		got := service.EffectsFromEventsForTest(domain.OpRecord{Kind: domain.OpAIReview}, []domain.Event{{Entity: domain.EntSetting}, {Entity: domain.EntSetting, Action: domain.ActUpdate, After: json.RawMessage(`{"key":"ai_reviewed_through","value":"123"}`)}})
+		if !reflect.DeepEqual(got, []service.Effect{{Kind: service.EffReviewed, To: "123"}}) {
 			t.Fatalf("effects = %+v", got)
 		}
 	})

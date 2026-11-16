@@ -324,6 +324,9 @@ func TestMarkAIReviewed(t *testing.T) {
 		t.Fatal("invalid review advanced watermark")
 	}
 	assertRedirect(t, ta.submit("/ui/ai-changes", "/ui/ai-changes/review", nil), "/ui/ai-changes")
+	if got := flashText(t, ta.viewBody("/ui/")); got != fmt.Sprintf("AI changes reviewed through #%d", changes.Ops[0].Seq) {
+		t.Errorf("review flash = %q", got)
+	}
 	if aiChanges(t, ta).Unreviewed != 0 || slices.Contains(dataIDs(t, ta.viewBody("/ui/"), "data-banner"), "ai_changes") {
 		t.Error("review did not clear AI changes and banner")
 	}

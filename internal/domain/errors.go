@@ -60,6 +60,37 @@ const (
 	CodeBusy Code = "busy"
 )
 
+// ErrorCodes returns every defined service error code. Adapter drift tests also
+// check this catalog against the declarations so additions cannot be omitted.
+func ErrorCodes() []Code {
+	return []Code{
+		CodeMalformed,
+		CodeUnauthenticated,
+		CodeForbidden,
+		CodePeerRejected,
+		CodePasswordRequired,
+		CodePasswordInvalid,
+		CodeNotFound,
+		CodeDeleted,
+		CodeConflict,
+		CodeRevertConflict,
+		CodeNotRevertible,
+		CodePrecondition,
+		CodeTooLarge,
+		CodeUnsupportedMedia,
+		CodeValidation,
+		CodeIdemMismatch,
+		CodeNothingToUndo,
+		CodeNothingToRedo,
+		CodePreconditionReq,
+		CodeIdemRequired,
+		CodeGenerationMismatch,
+		CodeRateLimited,
+		CodeInternal,
+		CodeBusy,
+	}
+}
+
 // Error carries a service error's safe detail, structured context, and private cause.
 type Error struct {
 	Code       Code

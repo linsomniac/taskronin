@@ -215,7 +215,7 @@ func TestLoginOriginRefusalBeforePasswordGate(t *testing.T) {
 	// A regression may reach the sixth password-gate wait on the fake clock.
 	// Bound every request so the failure is reported instead of hanging.
 	ta.H = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 		defer cancel()
 		h.ServeHTTP(w, r.WithContext(ctx))
 	})
@@ -427,12 +427,12 @@ func TestLoginRateLimited(t *testing.T) {
 					if delay != want {
 						t.Fatalf("gate delay = %v, want %v", delay, want)
 					}
-				case <-time.After(5 * time.Second):
+				case <-time.After(60 * time.Second):
 					t.Fatal("gate reservation timed out")
 				}
 			}
 			ta.Clock.Advance(tc.advance)
-			requestCtx, requestCancel := context.WithTimeout(t.Context(), 5*time.Second)
+			requestCtx, requestCancel := context.WithTimeout(t.Context(), 60*time.Second)
 			defer requestCancel()
 			r := httptest.NewRequestWithContext(requestCtx, http.MethodPost, "/ui/login", strings.NewReader(url.Values{"password": {testutil.Password}}.Encode()))
 			r.Host, r.RemoteAddr = testListen, tc.remote

@@ -38,6 +38,7 @@ type resubmit struct {
 	Action   string
 	Nonce    string // A valid submitted key reused only after a server error.
 	CanRetry bool
+	ReadOnly bool
 	Keep     url.Values
 	Fields   []resubmitField
 }
@@ -198,17 +199,23 @@ func (a *app) viewError(w http.ResponseWriter, r *http.Request, err error) (*dom
 }
 
 func (a *app) renderError(w http.ResponseWriter, r *http.Request, err error) {
+	a.renderErrorWithInput(w, r, err, false)
+}
+
+// sessionChanged is set only after CSRF's same-origin check (DF29).
+func (a *app) renderErrorWithInput(w http.ResponseWriter, r *http.Request, err error, sessionChanged bool) {
 	de, status := a.viewError(w, r, err)
 	p := a.newPage(r, http.StatusText(status), "", nil)
 	p.Err = de
 	_, hasSession := sessionFrom(r.Context())
 	if hasSession && r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/ui/") &&
 		r.URL.Path != "/ui/login" && r.URL.Path != "/ui/logout" &&
-		de.Code != domain.CodeUnauthenticated && de.Code != domain.CodeForbidden {
+		de.Code != domain.CodeUnauthenticated && (de.Code != domain.CodeForbidden || sessionChanged) {
 		input := submittedInput(r, status)
+		input.ReadOnly = input.ReadOnly || sessionChanged
 		// Stack 4xx errors need no retry form; retain stale preconditions for
 		// read-only diagnostics (DF09), and the existing 5xx recovery display.
-		if input.CanRetry || status == http.StatusPreconditionFailed || status >= http.StatusInternalServerError {
+		if input.CanRetry || input.ReadOnly || status >= http.StatusInternalServerError {
 			p.Resubmit = input
 		}
 	}
@@ -229,11 +236,12 @@ func errorStatus(w http.ResponseWriter, r *http.Request, status int) int {
 
 func submittedInput(r *http.Request, status int) *resubmit {
 	// AIDEV-NOTE: Never lose typed text on an error. Preserve original gen/ETags
-	// for stale detection; stale input is copyable/read-only, never offered to retry.
+	// for stale detection; DF09/DF29 input is copyable/read-only outside any form,
+	// never offered to retry. Empty input gets no heading (including stack errors).
 	// DF25: a 5xx can follow commit (service/op.go), so reuse a valid nonce to
 	// replay rather than duplicate the op. Without it, do not offer undo/redo retry.
 	// 4xx/invalid keys get fresh nonces; passwords and old CSRF are never echoed.
-	input := &resubmit{Action: r.URL.EscapedPath(), CanRetry: true, Keep: make(url.Values)}
+	input := &resubmit{Action: r.URL.EscapedPath(), CanRetry: true, ReadOnly: status == http.StatusPreconditionFailed, Keep: make(url.Values)}
 	if status >= http.StatusInternalServerError {
 		nonce := r.PostForm.Get("_nonce")
 		// OpID's codec accepts exactly the nonce format: 32 lowercase hex.

@@ -57,12 +57,18 @@ func (a *app) report(w http.ResponseWriter, r *http.Request) {
 		a.renderError(w, r, err)
 		return
 	}
-	weekFrom, weekTo := datespec.Week(a.ref())
-	if from.IsZero() {
-		from = weekFrom
-	}
-	if to.IsZero() {
-		to = weekTo
+	ref := a.ref()
+	switch {
+	case from.IsZero() && to.IsZero():
+		from, to = datespec.Week(ref)
+	case from.IsZero():
+		ref.Today = to
+		from, _ = datespec.Week(ref)
+	case to.IsZero():
+		to = from.AddDays(366 - 1)
+		if to.After(ref.Today) {
+			to = ref.Today
+		}
 	}
 	s, _ := sessionFrom(r.Context())
 	view, err := a.o.Svc.Report(r.Context(), s.Actor, service.ReportIn{
@@ -70,7 +76,7 @@ func (a *app) report(w http.ResponseWriter, r *http.Request) {
 		Todo: q.Get("todo") == "1", Upcoming: q.Get("upcoming") == "1",
 	})
 	if err != nil {
-		a.renderError(w, r, err)
+		a.renderError(w, r, suppliedRangeError(err, q))
 		return
 	}
 	p := reportPage{Report: view, FirstEntries: make(map[domain.TaskID]domain.EntryID), IncludeUpcoming: q.Get("upcoming") == "1"}

@@ -152,7 +152,7 @@ func TestTaskDetailDoneAndDeleted(t *testing.T) {
 					})
 				}
 			})
-			if !checkbox || len(scrapeForms(t, body, "/ui/tasks/1/complete")) != 0 {
+			if !checkbox || len(scrapeForms(t, body, "/ui/tasks/1/complete")) != 0 || len(scrapeForms(t, body, "/ui/tasks/1/drop")) != 0 {
 				t.Error("closed task lacks remove-entry checkbox or offers completion")
 			}
 			ta.mustOp(ta.Svc.Delete(t.Context(), ta.meta(), service.TaskRef{ID: id, Expect: ta.taskExpect(id)}))

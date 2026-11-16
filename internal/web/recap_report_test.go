@@ -248,7 +248,7 @@ func TestRecapReportDates(t *testing.T) {
 	}
 	for _, tc := range []struct{ path, from, to string }{
 		{"/ui/report", "2026-11-01", "2026-11-07"},
-		{"/ui/report?from=yesterday", "2026-10-31", "2026-11-07"},
+		{"/ui/report?from=yesterday", "2026-10-31", "2026-11-01"},
 		{"/ui/report?to=today", "2026-11-01", "2026-11-01"},
 		{"/ui/report?from=mon&to=today", "2026-10-26", "2026-11-01"},
 	} {

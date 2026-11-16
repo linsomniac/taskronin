@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"golang.org/x/net/html"
@@ -304,9 +305,14 @@ func TestStaleETagShowsReloadError(t *testing.T) {
 				}
 				body := w.Body.String()
 				assertErrorCode(t, body, "precondition_failed")
-				requireText(t, body, "changed elsewhere", "reload", "Your input — reload, then paste")
+				requireText(t, body, "changed elsewhere", "reload")
+				if action == "complete" {
+					requireText(t, body, "Your input — reload, then paste")
+				} else if strings.Contains(body, "Your input") {
+					t.Error("button-only action shows empty input heading")
+				}
 				assertInert(t, body)
-				saved := scrapeForm(t, body, path)
+				saved := readOnlyInput(t, resubmitBody(t, body))
 				for key, values := range form {
 					if key != "_csrf" && key != "_nonce" && !slices.Equal(saved[key], values) {
 						t.Errorf("lost stale input %s: %v, want %v", key, saved[key], values)
@@ -321,21 +327,8 @@ func TestStaleETagShowsReloadError(t *testing.T) {
 					if n.Data == "a" && nodeText(n) == "reload" && attr(n, "href") == pagePath {
 						reload = true
 					}
-					if n.Data == "form" && attr(n, "action") == path {
-						walkHTML(n, func(field *html.Node) {
-							if field.Type != html.ElementNode {
-								return
-							}
-							if field.Data == "button" || (field.Data == "input" && attr(field, "type") == "submit") {
-								t.Error("stale form offers submission")
-							}
-							if (field.Data == "textarea" || (field.Data == "input" && attr(field, "type") != "hidden")) && !hasAttr(field, "readonly") {
-								t.Errorf("stale %s is editable", attr(field, "name"))
-							}
-							if hasAttr(field, "readonly") {
-								readonly[attr(field, "name")] = field.Data + ":" + attr(field, "type")
-							}
-						})
+					if hasAttr(n, "readonly") {
+						readonly[attr(n, "name")] = n.Data + ":" + attr(n, "type")
 					}
 				})
 				if !reload {

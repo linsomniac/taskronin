@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"golang.org/x/net/html"
+
 	"taskronin/internal/domain"
 	"taskronin/internal/web"
 )
@@ -122,6 +124,83 @@ func TestCSRFPresentEmptyHeaders(t *testing.T) {
 			ta.H.ServeHTTP(w, r)
 			if w.Code != http.StatusForbidden {
 				t.Errorf("present empty %s = %d, want 403", name, w.Code)
+			}
+		})
+	}
+}
+
+func TestStaleSessionInput(t *testing.T) {
+	ta := newTestApp(t).login()
+	form := scrapeForm(t, ta.get("/ui/").Body.String(), "/ui/tasks")
+	form.Set("title", `Typed <script>alert(1)</script>`)
+	form.Set("notes", "\nTyped notes\n<script>x</script>")
+	form.Set("password", "pw-SECRET-zz9")
+	ta.login()
+	for _, origin := range []string{"http://" + testListen, "http://evil.example"} {
+		for _, hx := range []string{"", "true"} {
+			w := ta.post("/ui/tasks", form, "Origin", origin, "HX-Request", hx)
+			if hx == "true" {
+				assertHTMXError(t, w, domain.CodeForbidden)
+			} else if w.Code != http.StatusForbidden {
+				t.Fatalf("CSRF = %d", w.Code)
+			}
+			body := resubmitBody(t, w.Body.String())
+			if origin == "http://"+testListen {
+				requireText(t, body, "Your session changed (you logged in again) — reload, then paste")
+				saved := readOnlyInput(t, body)
+				if saved.Get("title") != form.Get("title") || saved.Get("notes") != form.Get("notes") {
+					t.Error("stale session lost typed text")
+				}
+			} else {
+				requireText(t, body, "cross-site request refused")
+				walkHTML(parseHTML(t, body), func(n *html.Node) {
+					if n.Type == html.ElementNode && (n.Data == "input" || n.Data == "textarea") {
+						t.Error("cross-site request echoed input")
+					}
+				})
+			}
+			for _, secret := range []string{form.Get("_csrf"), form.Get("_nonce"), "pw-SECRET-zz9"} {
+				if strings.Contains(body, secret) || strings.Contains(ta.Logs.String(), secret) {
+					t.Error("stale credential echoed or logged")
+				}
+			}
+			assertInert(t, w.Body.String())
+		}
+	}
+	if len(ta.opKinds()) != 0 {
+		t.Error("stale CSRF performed an operation")
+	}
+}
+
+func TestRouteTableSessionAndCSRF(t *testing.T) {
+	ta := newTestApp(t)
+	public := map[string]bool{"GET /ui/login": true, "POST /ui/login": true, "GET /{$}": true, "GET /healthz": true, "GET /static/{name}": true}
+	pathFor := func(pattern string) string {
+		_, path, ok := strings.Cut(pattern, " ")
+		if !ok {
+			t.Fatalf("route lacks method: %s", pattern)
+		}
+		return strings.NewReplacer("{$}", "", "{id}", "1", "{op}", strings.Repeat("a", 32), "{name}", "app.css").Replace(path)
+	}
+	for _, pattern := range web.RoutePatterns() {
+		if public[pattern] {
+			continue
+		}
+		path := pathFor(pattern)
+		t.Run("session/"+pattern, func(t *testing.T) {
+			assertRedirect(t, ta.get(path), "/ui/login")
+			assertSessionExpired(t, ta.post(path, nil))
+		})
+	}
+	ta.login()
+	for _, pattern := range web.RoutePatterns() {
+		if !strings.HasPrefix(pattern, "POST ") || pattern == "POST /ui/login" {
+			continue
+		}
+		t.Run("csrf/"+pattern, func(t *testing.T) {
+			w := ta.post(pathFor(pattern), nil)
+			if w.Code != http.StatusForbidden {
+				t.Errorf("missing CSRF = %d, want 403", w.Code)
 			}
 		})
 	}

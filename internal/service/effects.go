@@ -197,7 +197,15 @@ func effectsFromEvents(rec domain.OpRecord, evs []domain.Event) []Effect {
 		}
 	}
 	if rec.Kind == domain.OpAIReview {
-		effects = append(effects, Effect{Kind: EffReviewed})
+		// AIDEV-NOTE: The acknowledged watermark is the persisted setting,
+		// not this review operation's sequence. Preserve it on replay too.
+		for _, ev := range evs {
+			after := effectImage(ev.After)
+			if ev.Entity == domain.EntSetting && after.text("key") == "ai_reviewed_through" {
+				effects = append(effects, Effect{Kind: EffReviewed, To: after.text("value")})
+				break
+			}
+		}
 	}
 	return effects
 }
