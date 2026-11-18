@@ -105,3 +105,39 @@ The controller made every ruling below on the owner's behalf. Each one lists wha
   - The Today tab shows the AI-changes notice once.
   - Completion entries carry ✓ in Today and in the Log tab.
 - **Flaky `TestREC06_TodayETagStable`** (5d2b0e7). Root cause: a fresh server's first backup runs in the background after startup and flips `backup_warning` between the test's reads. The test now waits for that backup to finish before checking ETag stability; production code is unchanged.
+
+## Parked minors completed (2026-11-18)
+
+Codex fixed the parked findings above in two batches:
+- service and server: f492b86, 72b9d1e, 08fb1b0 and 13f99f2, reviewed by Opus;
+- web and markdown: 3b0ad38, 2d9d350, 54857cf and fad51f7, reviewed by Opus for markdown and Sonnet for web.
+
+The controller made a small follow-up commit for review notes. Neither review found anything Critical or Important.
+
+New rulings, made by the controller:
+- **History of an unknown task returns not_found** (API 404, CLI exit 5, web 404 page). Deleted and purged tasks keep their rows, so their history still lists (PRG-17). Cost if wrong: callers that relied on an empty 200 now get a 404.
+- **DF30 — search query cap.** A query over 1024 bytes or over 64 terms is a validation error on `query`. This applies to every client.
+- **DF31 — accept-new pair limit.** More than 100 id/etag pairs is malformed, and no op runs. The forms render at most one page of 100.
+- **DF32 — per-page markdown budget.** Once 256 KiB of note input has gone to goldmark while rendering a page, the remaining notes on that page use the DF28 plain-text fallback. A note that would cross the limit also goes plain, so goldmark sees at most 256 KiB per page. Cost if wrong: on very note-heavy pages some notes show unformatted.
+- **Toolchain go1.27.4.** On 2026-11-18 govulncheck began reporting GO-2026-6859 (an HTTP/1 server crash from a MaxBytesReader header race in net/http) against this host's Go 1.27.3. With `GOTOOLCHAIN=auto`, a go.mod toolchain line older than the local Go is ignored, so the only fix is go1.27.4 or later. go.mod and A§ line 23 now say `toolchain go1.27.4`; the language version stays `go 1.26.0`. This is a separate commit under the BF35 rule. Cost if wrong: revert one commit.
+- **POST /healthz is 403, not 405.** csrf runs before routing (A§6.2), so every non-login POST without a session token is refused before the mux. A test pins this.
+
+Also done:
+- **Robustness:**
+  - A keyed op whose own budget expires at commit maps to busy.
+  - A runtime web `Serve` error now logs a warning and the API keeps serving (extends DF27).
+  - `service.EffectKinds()` makes the CLI and web wording tests fail when a new effect kind has no wording.
+- **Markdown:**
+  - The DF28 pre-scan skips confirmed top-level code fences. An unclosed or mismatched fence keeps every bound. Opus fuzzed 400k documents against goldmark v1.8.6 and found no bypass.
+- **Web fixes:**
+  - The report marks deleted tasks.
+  - A whitespace-only `task_id` counts as standalone.
+  - The empty-date messages are shared.
+- **Spec and doc edits:**
+  - The A§6.2 middleware list now matches the code.
+  - The MarkAIReviewed effect row now says `reviewed` appears only when the watermark advances.
+- **Tests:**
+  - New pins: header and Host rows, the 367-day range, empty states, and the 428/412 table for all nine task actions. The end-to-end check is scoped to the Triage section.
+  - testutil readiness waits were raised to 60 s, test-only.
+
+No change, as ruled: the NewWithProbe seam, more than 4 stray session cookies, revert deduplication per page, log headings repeating across pages, and `until=none` as an exact match.

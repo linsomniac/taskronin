@@ -77,3 +77,35 @@ Every ruling below was made by the controller on the owner's behalf; each lists 
 1. **Upcoming keep key:** `K` (CF10). Change it if you prefer another key.
 2. **Today `x`/`B` with a selected row:** they act on the selected row, including block and triage rows, rather than only on the focus task (A§11.1 says "done focus task"). Rows start unselected, so `x` with no selection still completes the focus task.
 3. **AI review in the TUI (M7):** `A` marks every loaded row reviewed, including rows the user never scrolled to. It never covers unloaded ops. A confirmation prompt plus an "n of N" header would make this explicit.
+
+## Parked minors completed (2026-11-18)
+
+Codex fixed every parked TUI finding above except the three No-change items, in a21bf8c, e8d5910 and 5038d7f. A Sonnet review approved them with no Critical or Important findings.
+
+- **Polling:**
+  - A separate poll baseline means a non-poll Today fetch can no longer hide the next poll's reload.
+  - A midnight rollover alone reloads the visible tab.
+  - A poll reply that arrives after a tab switch is discarded.
+  - Polls never mark overlays dirty (CF02).
+- **Banners:** read-error banners now have an owner. A later successful read of the same target, closing the overlay or exiting the mode clears them.
+- **Lists and cards:**
+  - Upcoming has a nil guard.
+  - The truncation banner clears after a complete reload.
+  - The card denominator excludes cards that were bulk-accepted but never shown.
+  - Free-slot text wraps.
+  - Today `k` lands on the last row.
+- **Retry snapshot:** a parse error after a text edit keeps the original retry snapshot. Restoring the text resends under the original key.
+- **CLI and tests:**
+  - A bad `--date` names the flag.
+  - golden.go checks that the reused `update` flag is a bool.
+  - The test fake deep-copies its responses.
+  - The recap tests are split by feature.
+- **No change, as ruled:**
+  - the Log row's per-row day prefix;
+  - `x` on a focus task that has scrolled off screen;
+  - accept-new on off-screen new-only cards.
+- **Follow-up (3004963):** the new exact-message `--date` test failed whenever `NO_COLOR` was unset, because a TTY stdout adds ANSI color. The test now sets `NO_COLOR`.
+- **Residual minors, not fixed:**
+  - a duplicate Today read when a refresh reply discovers midnight;
+  - the banner owner is an optional argument;
+  - only esc clears a form-owned banner.
