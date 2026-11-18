@@ -10,12 +10,23 @@ import (
 	"testing"
 )
 
-func init() {
+func init() { registerUpdateFlag(flag.CommandLine) }
+
+func registerUpdateFlag(flags *flag.FlagSet) {
 	// AIDEV-NOTE: teatest's golden helper also registers -update. Reuse its
 	// boolean flag when both helpers are linked into the TUI end-to-end tests.
-	if flag.Lookup("update") == nil {
-		flag.Bool("update", false, "update testdata/golden files")
+	// Import-path order initializes x/exp/golden's package variable before testutil.init.
+	existing := flags.Lookup("update")
+	if existing == nil {
+		flags.Bool("update", false, "update testdata/golden files")
+		return
 	}
+	if getter, ok := existing.Value.(flag.Getter); ok {
+		if _, ok := getter.Get().(bool); ok {
+			return
+		}
+	}
+	panic("testutil: existing -update flag must be a bool")
 }
 
 // Golden compares got with testdata/golden/<name>.golden, relative to the

@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"io"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -52,6 +53,9 @@ func runTUI(cmd *cobra.Command, req TUIRequest) error {
 		In:     tuiInput(e.in), Out: e.out,
 	})
 	if errors.Is(err, tui.ErrUsage) {
+		if req.Mode == "recap" && req.RecapDate != "" {
+			return usagef("--date: %s", strings.TrimPrefix(err.Error(), tui.ErrUsage.Error()+": "))
+		}
 		return usagef("%v", err)
 	}
 	return err

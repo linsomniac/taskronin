@@ -35,10 +35,14 @@ func TestTUIHookInstalled(t *testing.T) {
 func TestTUIHookRecapUsage(t *testing.T) {
 	testutil.StartServer(t)
 	sys := sysDeps{StdinTTY: true, StdoutTTY: true, Getenv: os.Getenv}
-	for _, spec := range []string{"nextweek", "tue 10:00"} {
+	for _, tc := range []struct{ spec, message string }{
+		{"nextweek", `tkr: --date: unrecognised date "nextweek": use today, yesterday, tomorrow, a weekday (mon…sun), +Nd/-Nd, +Nw/-Nw, or YYYY-MM-DD`},
+		{"tue 10:00", "tkr: --date: expected a date without a time"},
+	} {
+		spec := tc.spec
 		out, stderr, code := runCLI(t, sys, "", "recap", "--date", spec)
-		if code != 2 || out != "" || !strings.Contains(stderr, "usage:") {
-			t.Fatalf("date %q: code=%d stdout=%q stderr=%q", spec, code, out, stderr)
+		if code != 2 || out != "" || strings.TrimSpace(stderr) != tc.message {
+			t.Errorf("date %q: code=%d stdout=%q stderr=%q", spec, code, out, stderr)
 		}
 	}
 }
