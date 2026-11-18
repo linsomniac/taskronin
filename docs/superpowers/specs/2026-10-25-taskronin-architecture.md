@@ -787,7 +787,7 @@ type AddPlacement struct {
 | `Undo` | — | scopes of the popped op | ✓ | §4.6; `via="undo"`; never pushed. Empty stack: §3.9. |
 | `Redo` | — | scopes of the popped op | ✓ | §4.6; `via="redo"`; never pushed. Empty stack: §3.9. |
 | `ListAIChanges` (read) | `IncludeReviewed bool; Cursor; Limit` → `AIChanges{ReviewedThrough OpSeq; Unreviewed int; Ops []OpSummary; NextCursor string}` | read | — | Ops with `actor LIKE 'token:%'` plus any `settings.retention_lowered` op; newest first. |
-| `MarkAIReviewed` | `Through OpSeq` | write + **`ActorOwner` only** (R-a) | ✓ | `Through ≥ o.rec.Seq` (i.e. beyond the latest op committed before this one) → `validation`. setting:update `ai_reviewed_through = max(current, Through)`. Not revertible. |
+| `MarkAIReviewed` | `Through OpSeq` | write + **`ActorOwner` only** (R-a) | ✓ | `Through ≥ o.rec.Seq` (i.e. beyond the latest op committed before this one) → `validation`. When `Through > current`, update `ai_reviewed_through` to `Through` and emit `reviewed`. Otherwise return no change with no effects. Not revertible. |
 
 ### 3.7 Reads and aggregates
 

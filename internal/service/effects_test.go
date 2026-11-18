@@ -3,12 +3,54 @@ package service_test
 import (
 	"database/sql"
 	"encoding/json"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"reflect"
+	"strconv"
 	"testing"
 
 	"taskronin/internal/domain"
 	"taskronin/internal/service"
 )
+
+func TestEffectKindsMatchDeclarations(t *testing.T) {
+	file, err := parser.ParseFile(token.NewFileSet(), "effects.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	declared := make(map[service.EffectKind]bool)
+	for node := range ast.Preorder(file) {
+		spec, ok := node.(*ast.ValueSpec)
+		if !ok {
+			continue
+		}
+		typ, ok := spec.Type.(*ast.Ident)
+		if !ok || typ.Name != "EffectKind" {
+			continue
+		}
+		for _, expr := range spec.Values {
+			lit, ok := expr.(*ast.BasicLit)
+			if !ok {
+				t.Fatal("expected string literal for EffectKind", spec.Names)
+			}
+			value, err := strconv.Unquote(lit.Value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			declared[service.EffectKind(value)] = true
+		}
+	}
+	for _, kind := range service.EffectKinds() {
+		if !declared[kind] {
+			t.Fatalf("duplicate or undeclared EffectKind %q", kind)
+		}
+		delete(declared, kind)
+	}
+	if len(declared) != 0 {
+		t.Errorf("EffectKinds is missing %v", declared)
+	}
+}
 
 func TestEffectsFromEvents(t *testing.T) {
 	id := domain.NewOpID()

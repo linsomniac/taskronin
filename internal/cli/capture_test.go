@@ -14,6 +14,7 @@ import (
 	"taskronin/internal/api"
 	"taskronin/internal/civil"
 	"taskronin/internal/client"
+	"taskronin/internal/service"
 	"taskronin/internal/testutil"
 )
 
@@ -573,8 +574,28 @@ func TestCaptureEffects(t *testing.T) {
 		{Kind: "entry_deleted", EntryID: 9},
 		{Kind: "entry_restored", EntryID: 9},
 		{Kind: "reverted", From: "abcdef12"},
-		{Kind: "future_kind", TaskID: 42},
+		{Kind: "created", TaskID: 42},
+		{Kind: "updated", TaskID: 42},
+		{Kind: "placed", TaskID: 42},
+		{Kind: "moved", TaskID: 42},
+		{Kind: "completed", TaskID: 42},
+		{Kind: "reopened", TaskID: 42},
+		{Kind: "dropped", TaskID: 42},
+		{Kind: "deleted", TaskID: 42},
+		{Kind: "undeleted", TaskID: 42},
+		{Kind: "reviewed", To: "123"},
+		{Kind: "purged", TaskID: 42},
 	}}
+	covered := make(map[service.EffectKind]bool)
+	for _, effect := range res.Effects {
+		covered[service.EffectKind(effect.Kind)] = true
+	}
+	for _, kind := range service.EffectKinds() {
+		if !covered[kind] {
+			t.Errorf("missing CLI wording for %q", kind)
+		}
+	}
+	res.Effects = append(res.Effects, api.Effect{Kind: "future_kind", TaskID: 42})
 	e.printOp(res, "Effects")
 	testutil.Golden(t, "effects", out.Bytes())
 }
@@ -656,11 +677,5 @@ func TestCapturePrintOpPreservesError(t *testing.T) {
 	}
 	if out.writes != 1 {
 		t.Fatalf("writes=%d; want no more writes after the first failure", out.writes)
-	}
-}
-
-func TestReviewedEffect(t *testing.T) {
-	if got := effectLine(api.Effect{Kind: "reviewed", To: "123"}); got != "AI changes reviewed through #123" {
-		t.Errorf("review effect = %q", got)
 	}
 }

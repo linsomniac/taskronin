@@ -356,7 +356,7 @@ func TestMarkAIReviewedBound(t *testing.T) {
 	}
 	for _, through := range []domain.OpSeq{seq, seq - 1} {
 		noop := s.Must(s.Svc.MarkAIReviewed(s.Ctx(), s.Meta(), service.MarkAIReviewedIn{Through: through}))
-		if !noop.NoChange || noop.OpID != (domain.OpID{}) || s.OpCount() != count+1 {
+		if !noop.NoChange || len(noop.Effects) != 0 || noop.OpID != (domain.OpID{}) || s.OpCount() != count+1 {
 			t.Fatal(noop)
 		}
 	}

@@ -46,48 +46,52 @@ func TestFlashDuplicateCookies(t *testing.T) {
 func TestFlashLinesEveryEffectKind(t *testing.T) {
 	// DF21: literals pin the wording copied from internal/cli/effects.go.
 	// Include every service.EffectKind, even kinds using the default wording.
-	for _, tc := range []struct {
-		kind           service.EffectKind
+	cases := map[service.EffectKind]struct {
 		from, to, want string
 	}{
-		{service.EffCreated, "", "", "#42 created"},
-		{service.EffUpdated, "", "", "#42 updated"},
-		{service.EffRetitled, "Old", "New", "#42 retitled 'Old' → 'New'"},
-		{service.EffPlaced, "", "", "#42 placed"},
-		{service.EffMoved, "", "", "#42 moved"},
-		{service.EffDeferred, "", "2026-10-30 09:00", "#42 deferred to 2026-10-30 09:00"},
-		{service.EffUndeferred, "", "", "#42 no longer deferred"},
-		{service.EffDueSet, "", "2026-10-30", "#42 due 2026-10-30"},
-		{service.EffDueCleared, "", "", "#42 due cleared"},
-		{service.EffBlocked, "", "2026-10-28 13:00-15:00", "b7 blocked 2026-10-28 13:00-15:00"},
-		{service.EffBlockMoved, "13:00-15:00", "15:00-17:00", "b7 moved 13:00-15:00 → 15:00-17:00"},
-		{service.EffBlockCancelled, "", "user", "b7 cancelled (user)"},
-		{service.EffBlockResolved, "", "missed", "b7 resolved missed"},
-		{service.EffOutcomeSet, "", "worked", "b7 outcome worked"},
-		{service.EffSlipped, "", "", "b7 slipped"},
-		{service.EffUnslipped, "", "", "b7 no longer counts as slipped"},
-		{service.EffReasonAdded, "", "", "#42 +slipped"},
-		{service.EffReasonRemoved, "", "", "#42 −slipped"},
-		{service.EffFocusSet, "", "", "focus → #42"},
-		{service.EffFocusCleared, "", "", "focus cleared"},
-		{service.EffInterrupted, "17", "", "interrupted #17"},
-		{service.EffEntryLogged, "", "", "e9 logged"},
-		{service.EffEntryUpdated, "", "", "e9 updated"},
-		{service.EffEntryRelinked, "", "", "e9 relinked"},
-		{service.EffEntryDeleted, "", "", "e9 deleted"},
-		{service.EffEntryRestored, "", "", "e9 restored"},
-		{service.EffCompleted, "", "", "#42 completed"},
-		{service.EffReopened, "", "", "#42 reopened"},
-		{service.EffDropped, "", "", "#42 dropped"},
-		{service.EffDeleted, "", "", "#42 deleted"},
-		{service.EffUndeleted, "", "", "#42 undeleted"},
-		{service.EffReverted, "abcdef12", "", "reverted op abcdef12"},
-		{service.EffReviewed, "", "123", "AI changes reviewed through #123"},
-		{service.EffPurged, "", "", "#42 purged"},
-	} {
-		t.Run(string(tc.kind), func(t *testing.T) {
+		service.EffCreated:        {"", "", "#42 created"},
+		service.EffUpdated:        {"", "", "#42 updated"},
+		service.EffRetitled:       {"Old", "New", "#42 retitled 'Old' → 'New'"},
+		service.EffPlaced:         {"", "", "#42 placed"},
+		service.EffMoved:          {"", "", "#42 moved"},
+		service.EffDeferred:       {"", "2026-10-30 09:00", "#42 deferred to 2026-10-30 09:00"},
+		service.EffUndeferred:     {"", "", "#42 no longer deferred"},
+		service.EffDueSet:         {"", "2026-10-30", "#42 due 2026-10-30"},
+		service.EffDueCleared:     {"", "", "#42 due cleared"},
+		service.EffBlocked:        {"", "2026-10-28 13:00-15:00", "b7 blocked 2026-10-28 13:00-15:00"},
+		service.EffBlockMoved:     {"13:00-15:00", "15:00-17:00", "b7 moved 13:00-15:00 → 15:00-17:00"},
+		service.EffBlockCancelled: {"", "user", "b7 cancelled (user)"},
+		service.EffBlockResolved:  {"", "missed", "b7 resolved missed"},
+		service.EffOutcomeSet:     {"", "worked", "b7 outcome worked"},
+		service.EffSlipped:        {"", "", "b7 slipped"},
+		service.EffUnslipped:      {"", "", "b7 no longer counts as slipped"},
+		service.EffReasonAdded:    {"", "", "#42 +slipped"},
+		service.EffReasonRemoved:  {"", "", "#42 −slipped"},
+		service.EffFocusSet:       {"", "", "focus → #42"},
+		service.EffFocusCleared:   {"", "", "focus cleared"},
+		service.EffInterrupted:    {"17", "", "interrupted #17"},
+		service.EffEntryLogged:    {"", "", "e9 logged"},
+		service.EffEntryUpdated:   {"", "", "e9 updated"},
+		service.EffEntryRelinked:  {"", "", "e9 relinked"},
+		service.EffEntryDeleted:   {"", "", "e9 deleted"},
+		service.EffEntryRestored:  {"", "", "e9 restored"},
+		service.EffCompleted:      {"", "", "#42 completed"},
+		service.EffReopened:       {"", "", "#42 reopened"},
+		service.EffDropped:        {"", "", "#42 dropped"},
+		service.EffDeleted:        {"", "", "#42 deleted"},
+		service.EffUndeleted:      {"", "", "#42 undeleted"},
+		service.EffReverted:       {"abcdef12", "", "reverted op abcdef12"},
+		service.EffReviewed:       {"", "123", "AI changes reviewed through #123"},
+		service.EffPurged:         {"", "", "#42 purged"},
+	}
+	for _, kind := range service.EffectKinds() {
+		t.Run(string(kind), func(t *testing.T) {
+			tc, ok := cases[kind]
+			if !ok {
+				t.Fatalf("missing flash wording for %q", kind)
+			}
 			got := web.FlashLines(&service.OpResult{Effects: []service.Effect{{
-				Kind: tc.kind, TaskID: 42, BlockID: 7, EntryID: 9, Reason: domain.ReasonSlipped, From: tc.from, To: tc.to,
+				Kind: kind, TaskID: 42, BlockID: 7, EntryID: 9, Reason: domain.ReasonSlipped, From: tc.from, To: tc.to,
 			}}})
 			if !slices.Equal(got, []string{tc.want}) {
 				t.Errorf("flash lines = %q, want [%q]", got, tc.want)

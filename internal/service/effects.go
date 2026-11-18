@@ -93,6 +93,46 @@ const (
 	EffPurged EffectKind = "purged"
 )
 
+// EffectKinds returns every defined operation effect kind.
+func EffectKinds() []EffectKind {
+	return []EffectKind{
+		EffCreated,
+		EffUpdated,
+		EffRetitled,
+		EffPlaced,
+		EffMoved,
+		EffDeferred,
+		EffUndeferred,
+		EffDueSet,
+		EffDueCleared,
+		EffBlocked,
+		EffBlockMoved,
+		EffBlockCancelled,
+		EffBlockResolved,
+		EffOutcomeSet,
+		EffSlipped,
+		EffUnslipped,
+		EffReasonAdded,
+		EffReasonRemoved,
+		EffFocusSet,
+		EffFocusCleared,
+		EffInterrupted,
+		EffEntryLogged,
+		EffEntryUpdated,
+		EffEntryRelinked,
+		EffEntryDeleted,
+		EffEntryRestored,
+		EffCompleted,
+		EffReopened,
+		EffDropped,
+		EffDeleted,
+		EffUndeleted,
+		EffReverted,
+		EffReviewed,
+		EffPurged,
+	}
+}
+
 func effectsFromEvents(rec domain.OpRecord, evs []domain.Event) []Effect {
 	effects := make([]Effect, 0)
 	if len(evs) == 0 {
