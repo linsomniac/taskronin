@@ -381,14 +381,15 @@ func (s *Service) loadResult(ctx context.Context, r *OpResult) error {
 func opBudgetError(ctx context.Context, keyed bool, err error) error {
 	// AIDEV-NOTE: S1′ is safe only for keyed operations: PutIdem commits in the
 	// same transaction as the mutation, so a retry re-executes after rollback or
-	// replays after commit (including a result-load timeout). Exempt operations
+	// replays after commit (including a result-load timeout). ErrTxDone from
+	// Commit after a budget-expired rollback is safe to retry. Exempt operations
 	// are excluded: client.callExempt retries busy (internal/client/retry.go),
 	// but has no replay record; a post-commit busy could duplicate a token or
-	// settings change. Commit then result loading: service/op.go:283-296 at review.
+	// settings change.
 	if !keyed || err == nil || !errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 		return err
 	}
-	if errors.Is(err, context.DeadlineExceeded) || store.IsInterrupted(err) {
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, sql.ErrTxDone) || store.IsInterrupted(err) {
 		return &domain.Error{Code: domain.CodeBusy, Detail: "operation exceeded its time budget", RetryAfter: time.Second, Err: err}
 	}
 	return err

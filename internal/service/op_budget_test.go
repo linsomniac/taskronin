@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"testing"
@@ -46,6 +47,45 @@ func TestFinalKeyedBudgetBeforeCommit(t *testing.T) {
 				t.Fatal("failed operation committed idempotency state", count)
 			}
 		})
+	}
+}
+
+func TestCommitBudgetErrTxDone(t *testing.T) {
+	s, m := runnerFixture(t)
+	s.opBudget = 2 * time.Second
+	spec := opSpec{class: classForward, kind: "test.commit", idem: true}
+	_, err := s.run(t.Context(), m, spec, func(o *op) error {
+		liveFailure := &domain.Error{Code: domain.CodeInternal, Err: sql.ErrTxDone}
+		requireRunnerCode(t, opBudgetError(o.ctx, true, liveFailure), domain.CodeInternal)
+		<-o.ctx.Done()
+		// Roll back explicitly: beginTx detaches database/sql's automatic rollback.
+		if err := o.tx.Rollback(); err != nil {
+			t.Fatal(err)
+		}
+		commitErr := o.tx.Commit()
+		if !errors.Is(commitErr, sql.ErrTxDone) {
+			t.Fatalf("commit after rollback = %v", commitErr)
+		}
+		failure := &domain.Error{Code: domain.CodeInternal, Err: commitErr}
+		requireRunnerCode(t, opBudgetError(o.ctx, false, failure), domain.CodeInternal)
+		// Isolate the Commit result from errors produced by savepoint cleanup.
+		got := opBudgetError(o.ctx, true, failure)
+		requireRunnerCode(t, got, domain.CodeBusy)
+		de, _ := domain.AsError(got)
+		if de.RetryAfter <= 0 || !errors.Is(got, sql.ErrTxDone) {
+			t.Fatal("missing retry delay or commit cause", got)
+		}
+		return commitErr
+	})
+	requireRunnerCode(t, err, domain.CodeBusy)
+	s.opBudget = 0
+	executed := false
+	result, err := s.run(t.Context(), m, spec, func(*op) error {
+		executed = true
+		return nil
+	})
+	if err != nil || result.Replayed || !executed {
+		t.Fatalf("same-key retry = %+v, %v", result, err)
 	}
 }
 
