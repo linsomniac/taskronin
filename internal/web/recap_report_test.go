@@ -339,3 +339,32 @@ func sectionText(t *testing.T, body, label string) string {
 	})
 	return text
 }
+
+func TestPageMarkdownBudget(t *testing.T) {
+	ta := newTestApp(t).login()
+	for i := range 6 {
+		marker := fmt.Sprintf("**note %d**", i)
+		ta.mustOp(ta.Svc.AddEntry(t.Context(), ta.meta(), service.AddEntryIn{
+			Title: "Work", Notes: marker + strings.Repeat("x", (64<<10)-len(marker)),
+			At: sql.Null[civil.Minute]{V: civil.Minute(i), Valid: true},
+		}))
+	}
+	// Recap renders the newest entry first via a row partial. Report renders oldest first.
+	for _, path := range []string{"/ui/recap", "/ui/report", "/ui/recap"} {
+		body := ta.viewBody(path)
+		for i := range 6 {
+			marker := fmt.Sprintf("note %d", i)
+			formatted := i < 4
+			if path == "/ui/recap" {
+				formatted = i >= 2
+			}
+			if strings.Contains(body, "<strong>"+marker+"</strong>") != formatted ||
+				strings.Contains(body, "<pre class=\"notes-plain\">\n**"+marker+"**") == formatted {
+				t.Errorf("%s: wrong format for %s", path, marker)
+			}
+		}
+		if got := strings.Count(body, "Shown as plain text — too complex to format."); got != 2 {
+			t.Errorf("%s: got %d fallback notices, want 2", path, got)
+		}
+	}
+}

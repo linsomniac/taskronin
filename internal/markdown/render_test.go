@@ -175,7 +175,7 @@ func assertPlainNotes(t *testing.T, src string) {
 
 func TestRenderOutputBound(t *testing.T) {
 	// No delimiter/container complexity: force the post-sanitization size guard.
-	assertPlainNotes(t, strings.Repeat("x\n\n", (512<<10)/8+1))
+	assertPlainNotes(t, strings.Repeat("www.a.co ", 7200))
 }
 
 func TestRenderOrdinaryLargeNotes(t *testing.T) {
@@ -187,5 +187,33 @@ func TestRenderOrdinaryLargeNotes(t *testing.T) {
 		if strings.Contains(string(got), `class="notes-plain"`) {
 			t.Errorf("ordinary notes took fallback (input %d bytes)", len(src))
 		}
+	}
+}
+
+func TestRenderFencedDelimiters(t *testing.T) {
+	for _, fence := range []string{"```", "~~~~"} {
+		src := "Before\n\n  " + fence + "text\n" + strings.Repeat("*_[()]", 500) + "\n " + fence + fence + "\t\n\n**after**"
+		got, err := Render(src)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(got), "<pre><code>") || !strings.Contains(string(got), "<strong>after</strong>") {
+			t.Errorf("%q fence lost code or following markdown", fence)
+		}
+	}
+}
+
+func TestRenderFenceBounds(t *testing.T) {
+	delimiters := strings.Repeat("*a*\n", 1025)
+	for name, src := range map[string]string{
+		"unclosed":              "```\n" + delimiters,
+		"oversize unclosed":     "```\n" + strings.Repeat("x", 64<<10),
+		"after closer":          "~~~~\n~~~\ncode\n~~~~~\n" + delimiters,
+		"invalid backtick info": "```lang`info\n" + delimiters + "```",
+		"list continuation":     "- list\n  ```\n  code\n" + delimiters + "```",
+		"quote":                 "> ```\n> code\n" + strings.Repeat(">", 17) + "\n```",
+		"raw HTML":              "<!--\n```\n-->\n" + delimiters + "```",
+	} {
+		t.Run(name, func(t *testing.T) { assertPlainNotes(t, src) })
 	}
 }

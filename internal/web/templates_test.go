@@ -114,7 +114,7 @@ func TestTemplateHelpersAndRowContext(t *testing.T) {
 <p id="day">{{day .Today}}</p><p id="start">{{hhmm .Data.Start}}</p><p id="end">{{hhmm .Data.End}}</p>
 <p id="wall">{{wall .Data.When}}</p><p id="short">{{short .Data.OpID}}</p>
 <p id="json">{{jsontext .Data.JSON}}</p><p id="niljson">{{jsontext .Data.NilJSON}}</p>
-<div id="markdown">{{md .Data.Notes}}</div>{{end}}`)
+<div id="markdown">{{md $.MD .Data.Notes}}</div>{{end}}`)
 	if err != nil {
 		t.Fatal(err)
 	}

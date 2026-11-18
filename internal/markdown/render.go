@@ -68,10 +68,33 @@ func (imageAsLink) render(w util.BufWriter, _ []byte, node ast.Node, entering bo
 	return ast.WalkContinue, nil
 }
 
+// Budget bounds markdown conversion for one page. Its zero value is ready to use.
+type Budget struct {
+	used int
+}
+
+const pageNoteBytes = 256 << 10
+
 // Render converts Markdown notes to HTML using the notes allowlist.
 func Render(src string) (template.HTML, error) {
+	return (*Budget)(nil).Render(src)
+}
+
+// Render uses the DF28 fallback once the page's markdown input budget is spent.
+func (b *Budget) Render(src string) (template.HTML, error) {
+	// Mirror the service's 64 KiB input limit for direct callers, too.
 	var rendered []byte
-	plain := tooComplex(src)
+	plain := len(src) > 64<<10 || (b != nil && b.used == pageNoteBytes) || tooComplex(src)
+	if !plain && b != nil {
+		// AIDEV-NOTE: DF32 charges bytes sent to goldmark, even if its output
+		// trips the size guard. A note that won't fit exhausts the page budget.
+		if len(src) > pageNoteBytes-b.used {
+			b.used = pageNoteBytes
+			plain = true
+		} else {
+			b.used += len(src)
+		}
+	}
 	if !plain {
 		var buf bytes.Buffer
 		if err := converter.Convert([]byte(src), &buf); err != nil {
@@ -90,13 +113,35 @@ func Render(src string) (template.HTML, error) {
 // AIDEV-NOTE: DF28: scan in linear time before goldmark. Its repeated container,
 // link, emphasis, strike and backtick parsing can be quadratic. Allow at most
 // 16 potential nested openers per line and 2048 inline delimiter bytes overall;
-// cap sanitized Markdown at 512 KiB. The plain fallback stays escaped and
+// exclude confirmed fence contents and cap sanitized Markdown at 512 KiB. The plain fallback stays escaped and
 // sanitized (at most six times the service's 64 KiB notes limit). The 10 s GET
 // deadline cancels service calls, not template rendering or goldmark.
 func tooComplex(src string) bool {
 	delimiters := 0
-	for line := range strings.SplitSeq(src, "\n") {
+	// Only exempt confirmed top-level fences. An HTML block can consume an
+	// apparent opener, and a fence indented inside a list can end on dedent.
+	// In ambiguous context, keep the original checks for the rest of the note.
+	checkFences, sawContainer := true, false
+	for src != "" {
+		line, rest, _ := strings.Cut(src, "\n")
+		src = rest
 		containers := containerDepth(line)
+		if checkFences {
+			sawContainer = sawContainer || containers > 0
+			trimmed := strings.TrimLeft(line, " ")
+			if strings.HasPrefix(trimmed, "<") {
+				checkFences = false
+			} else if marker, info := fenceMarker(line); marker != "" && (marker[0] == '~' || !strings.Contains(info, "`")) {
+				if line == trimmed || !sawContainer {
+					if after, closed := afterFence(src, marker); closed {
+						src, sawContainer = after, false
+						continue
+					}
+				}
+				// Do not search again through an unclosed or ambiguous suffix.
+				checkFences = false
+			}
+		}
 		if containers > 16 {
 			return true
 		}
@@ -155,6 +200,34 @@ func tooComplex(src string) bool {
 		}
 	}
 	return false
+}
+
+// fenceMarker splits a fence run at up to three columns of indentation.
+func fenceMarker(line string) (marker, tail string) {
+	s := strings.TrimLeft(line, " ")
+	if len(line)-len(s) > 3 || len(s) < 3 || (s[0] != '`' && s[0] != '~') {
+		return "", ""
+	}
+	i := 1
+	for i < len(s) && s[i] == s[0] {
+		i++
+	}
+	if i < 3 {
+		return "", ""
+	}
+	return s[:i], s[i:]
+}
+
+func afterFence(src, opener string) (string, bool) {
+	for src != "" {
+		line, rest, _ := strings.Cut(src, "\n")
+		src = rest
+		marker, tail := fenceMarker(line)
+		if len(marker) >= len(opener) && marker[0] == opener[0] && strings.Trim(tail, " \t\r") == "" {
+			return src, true
+		}
+	}
+	return "", false
 }
 
 func markdownSpace(c byte) bool { return c == ' ' || c == '\t' || c == '\r' }

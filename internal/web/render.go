@@ -28,6 +28,7 @@ type page struct {
 	Return     string
 	Today      civil.Date
 	Version    string // DF23: embedded CSS content hash, independent of build version.
+	MD         *markdown.Budget
 	Data       any
 	Err        *domain.Error
 	Resubmit   *resubmit
@@ -75,7 +76,7 @@ func (a *app) parseTemplates() error {
 			return hex.EncodeToString(b[:]), nil
 		},
 		"etag": domain.FormatETag,
-		"md":   markdown.Render,
+		"md":   (*markdown.Budget).Render,
 		"day": func(d civil.Date) string {
 			return d.Weekday().String()[:3] + " " + d.String()
 		},
@@ -121,7 +122,8 @@ func (a *app) newPage(r *http.Request, title, tab string, data any) page {
 	if r.Method == http.MethodPost {
 		ret = safeReturn(r.PostForm.Get("_return"))
 	}
-	return page{Title: title, Tab: tab, CSRF: s.CSRF, Gen: a.o.Svc.Generation(),
+	// AIDEV-NOTE: DF32: all rowCtx copies on this request share this page budget.
+	return page{MD: new(markdown.Budget), Title: title, Tab: tab, CSRF: s.CSRF, Gen: a.o.Svc.Generation(),
 		Return: ret, Today: a.o.Zone.DateOf(a.o.Clock.Now()), Version: cssVersion, Data: data}
 }
 

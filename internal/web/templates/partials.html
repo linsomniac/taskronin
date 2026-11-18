@@ -11,7 +11,7 @@
 
 {{/* AIDEV-NOTE: Invoke row partials with (row $ .). In them, use .V for
 row data and .P for page state, including {{template "hidden" .P}} and
-{{etag .P.Gen .V.Version}}. Page-level forms use {{template "hidden" $}}. */}}
+{{etag .P.Gen .V.Version}} and {{md .P.MD .V.Notes}}. Page-level forms use {{template "hidden" $}}. */}}
 
 {{define "taskrow"}}
 <article data-task="{{.V.ID}}">
@@ -56,7 +56,7 @@ row data and .P for page state, including {{template "hidden" .P}} and
 <article data-entry="{{.V.ID}}">
 <p>{{if .V.OccurredMin.Valid}}<time>{{hhmm .V.OccurredMin.V}}</time> {{end}}{{if eq .V.Kind "complete"}}✓ {{end}}{{.V.Title}}{{if .V.Reopened}} (reopened){{end}}{{if .V.DeletedAt.Valid}} (deleted){{end}}</p>
 <p>{{if .V.TaskID.Valid}}<a href="/ui/tasks/{{.V.TaskID.V}}">#{{.V.TaskID.V}} {{.V.TaskTitle}}</a>{{else}}standalone{{end}}</p>
-{{if .V.Notes}}<div class="notes">{{md .V.Notes}}</div>{{end}}
+{{if .V.Notes}}<div class="notes">{{md .P.MD .V.Notes}}</div>{{end}}
 {{/* AIDEV-NOTE: Deleted task pages retain entries but offer only task undelete. */}}
 {{if and (ne .P.Tab "today") (not (and (eq .P.Tab "task") (eq .P.Data.View "deleted")))}}
 {{if .V.DeletedAt.Valid}}
