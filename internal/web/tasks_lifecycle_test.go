@@ -217,21 +217,50 @@ func TestAcceptNew(t *testing.T) {
 	}
 }
 
+func TestAcceptNewPageLimit(t *testing.T) {
+	ta := newTestApp(t).login()
+	for i := range 101 {
+		ta.addTask(service.AddTaskIn{Title: fmt.Sprintf("Task %d", i+1)})
+	}
+	const path = "/ui/triage/accept-new"
+	form := scrapeForm(t, ta.viewBody("/ui/triage"), path)
+	if len(form["id"]) != 100 || len(form["etag"]) != 100 {
+		t.Fatal("expected 100 rendered id/etag pairs")
+	}
+	before := ta.opKinds()
+	form.Add("id", "101")
+	form.Add("etag", domain.FormatETag(ta.Svc.Generation(), ta.task(101).Version))
+	w := ta.post(path, form)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("101 pairs returned %d, want 400", w.Code)
+	}
+	assertErrorCode(t, w.Body.String(), "malformed")
+	requireElementText(t, w.Body.String(), "p", "expected at most 100 id and etag pairs")
+	if !slices.Equal(before, ta.opKinds()) {
+		t.Fatal("oversize batch recorded an operation")
+	}
+	form["id"], form["etag"] = form["id"][:100], form["etag"][:100]
+	assertRedirect(t, ta.post(path, form), "/ui/triage")
+	if !slices.Equal(ta.opKinds(), append(before, "task.accept_new")) || ta.task(100).View != domain.ViewBacklog || ta.task(101).View != domain.ViewTriage {
+		t.Fatal("100 pairs did not accept exactly the page")
+	}
+}
+
 func TestAcceptNewInvalidLists(t *testing.T) {
 	for _, tc := range []struct {
-		name, code string
-		status     int
-		input      url.Values
+		name, code, field, message string
+		status                     int
+		input                      url.Values
 	}{
-		{"unequal lengths", "malformed", 400, url.Values{"id": {"1", "2"}, "etag": {"first"}}},
-		{"empty lists", "malformed", 400, url.Values{"id": nil, "etag": nil}},
-		{"extra etag", "malformed", 400, url.Values{"id": {"1"}, "etag": {"first", "second"}}},
-		{"bad second id", "malformed", 400, url.Values{"id": {"1", "bad"}}},
-		{"bad second etag", "malformed", 400, url.Values{"etag": {"first", "bad"}}},
-		{"missing second etag", "precondition_required", 428, url.Values{"etag": {"first", ""}}},
-		{"stale second etag", "precondition_failed", 412, url.Values{"etag": {"first", "stale"}}},
-		{"duplicate", "validation", 422, url.Values{"id": {"1", "1"}, "etag": {"first", "first"}}},
-		{"ineligible", "conflict", 409, url.Values{"id": {"1", "3"}, "etag": {"first", "third"}}},
+		{"unequal lengths", "malformed", "", "expected equal nonempty id and etag lists", 400, url.Values{"id": {"1", "2"}, "etag": {"first"}}},
+		{"empty lists", "malformed", "", "expected equal nonempty id and etag lists", 400, url.Values{"id": nil, "etag": nil}},
+		{"extra etag", "malformed", "", "expected equal nonempty id and etag lists", 400, url.Values{"id": {"1"}, "etag": {"first", "second"}}},
+		{"bad second id", "malformed", "id", "", 400, url.Values{"id": {"1", "bad"}}},
+		{"bad second etag", "malformed", "", "invalid entity ETag", 400, url.Values{"etag": {"first", "bad"}}},
+		{"missing second etag", "precondition_required", "", "missing etag", 428, url.Values{"etag": {"first", ""}}},
+		{"stale second etag", "precondition_failed", "", "This changed elsewhere since the page was loaded — reload.", 412, url.Values{"etag": {"first", "stale"}}},
+		{"duplicate", "validation", "", "duplicate task #1", 422, url.Values{"id": {"1", "1"}, "etag": {"first", "first"}}},
+		{"ineligible", "conflict", "", "task #3 must have exactly the new reason", 409, url.Values{"id": {"1", "3"}, "etag": {"first", "third"}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ta := newTestApp(t).login()
@@ -259,11 +288,71 @@ func TestAcceptNewInvalidLists(t *testing.T) {
 			if w.Code != tc.status {
 				t.Fatalf("invalid batch = %d %s", w.Code, w.Body)
 			}
-			assertErrorCode(t, w.Body.String(), tc.code)
+			body := w.Body.String()
+			assertErrorCode(t, body, tc.code)
+			if tc.field != "" {
+				requireFieldErrors(t, body, tc.field)
+			} else {
+				requireFieldErrors(t, body)
+				requireElementText(t, body, "p", tc.message)
+			}
 			if !slices.Equal(before, ta.opKinds()) || !reflect.DeepEqual(first, ta.task(1)) || !reflect.DeepEqual(second, ta.task(2)) {
 				t.Error("invalid batch was partially applied")
 			}
 		})
+	}
+}
+
+func TestTaskActionPreconditions(t *testing.T) {
+	ta := newTestApp(t).login()
+	open := ta.addTask(service.AddTaskIn{Title: "Open task"})
+	closed := ta.addTask(service.AddTaskIn{Title: "Closed task"})
+	deleted := ta.addTask(service.AddTaskIn{Title: "Deleted task"})
+	ta.mustOp(ta.Svc.Place(t.Context(), ta.meta(), service.PlaceIn{ID: open, Expect: ta.taskExpect(open), How: domain.PlaceBottom}))
+	ta.mustOp(ta.Svc.Drop(t.Context(), ta.meta(), service.TaskRef{ID: closed, Expect: ta.taskExpect(closed)}))
+	ta.mustOp(ta.Svc.Delete(t.Context(), ta.meta(), service.TaskRef{ID: deleted, Expect: ta.taskExpect(deleted)}))
+
+	for _, tc := range []struct {
+		action string
+		id     domain.TaskID
+	}{
+		{"place", open}, {"defer", open}, {"triage", open}, {"block", open},
+		{"complete", open}, {"reopen", closed}, {"drop", open}, {"delete", open}, {"undelete", deleted},
+	} {
+		page := fmt.Sprintf("/ui/tasks/%d", tc.id)
+		path := page + "/" + tc.action
+		body := ta.viewBody(page)
+		stale := domain.FormatETag(ta.Svc.Generation(), ta.task(tc.id).Version-1)
+		for _, etag := range []struct {
+			name, value, code string
+			status            int
+		}{
+			{"missing", "", "precondition_required", http.StatusPreconditionRequired},
+			{"stale", stale, "precondition_failed", http.StatusPreconditionFailed},
+		} {
+			t.Run(tc.action+"/"+etag.name, func(t *testing.T) {
+				form := scrapeForm(t, body, path)
+				if tc.action == "defer" {
+					form.Set("until", "tomorrow")
+				}
+				if tc.action == "block" {
+					form.Set("span", "13:00-15:00")
+				}
+				form.Del("etag")
+				if etag.value != "" {
+					form.Set("etag", etag.value)
+				}
+				before := ta.opKinds()
+				w := ta.post(path, form)
+				if w.Code != etag.status {
+					t.Errorf("got status %d, want %d", w.Code, etag.status)
+				}
+				assertErrorCode(t, w.Body.String(), etag.code)
+				if !slices.Equal(before, ta.opKinds()) {
+					t.Error("rejected action recorded an operation")
+				}
+			})
+		}
 	}
 }
 

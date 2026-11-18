@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"taskronin/internal/datespec"
 	"taskronin/internal/domain"
@@ -11,7 +12,7 @@ import (
 )
 
 func entryTaskID(form url.Values) (sql.Null[domain.TaskID], error) {
-	if form.Get("task_id") == "" {
+	if strings.TrimSpace(form.Get("task_id")) == "" {
 		return sql.Null[domain.TaskID]{}, nil
 	}
 	id, err := formInt(form, "task_id")
@@ -74,7 +75,7 @@ func (a *app) editEntry(w http.ResponseWriter, r *http.Request) {
 				return nil, err
 			}
 			if date.IsZero() {
-				return nil, domain.ValidationError(domain.FieldError{Field: "date", Message: "must not be empty"})
+				return nil, emptyField("date")
 			}
 			in.WorkDate = &date
 		}

@@ -89,6 +89,10 @@ func (a *app) meta(r *http.Request) (service.Meta, error) {
 	}, nil
 }
 
+func emptyField(key string) error {
+	return domain.ValidationError(domain.FieldError{Field: key, Message: "must not be empty"})
+}
+
 func formInt(form url.Values, key string) (int64, error) {
 	id, err := positiveInt(strings.TrimPrefix(form.Get(key), "#"))
 	if err != nil {

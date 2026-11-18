@@ -15,6 +15,8 @@ type todayPage struct {
 	LogEntry service.AddEntryIn
 }
 
+const taskListPageSize = 100
+
 type taskListRow struct {
 	domain.TaskView
 	Prev, Next domain.TaskID
@@ -67,7 +69,7 @@ func (a *app) taskList(w http.ResponseWriter, r *http.Request, view domain.View,
 	s, _ := sessionFrom(r.Context())
 	q := r.URL.Query()
 	list, err := a.o.Svc.ListTasks(r.Context(), s.Actor, service.ListTasksIn{
-		View: view, Tag: q.Get("tag"), Project: q.Get("project"), Limit: 100, Cursor: q.Get("cursor"),
+		View: view, Tag: q.Get("tag"), Project: q.Get("project"), Limit: taskListPageSize, Cursor: q.Get("cursor"),
 	})
 	if err != nil {
 		a.renderError(w, r, err)

@@ -42,6 +42,7 @@ func TestAddEntryFromToday(t *testing.T) {
 	}{
 		{"focus", "10-28", nil, true, sql.Null[civil.Minute]{}},
 		{"standalone", "10-28", url.Values{"task_id": {""}}, false, sql.Null[civil.Minute]{}},
+		{"whitespace", "10-28", url.Values{"task_id": {" \t "}}, false, sql.Null[civil.Minute]{}},
 		{"yesterday", "10-27", url.Values{"task_id": {"1"}, "date": {"yesterday"}}, true, sql.Null[civil.Minute]{}},
 		{"time", "10-28", url.Values{"task_id": {"#1"}, "at": {"9:30"}}, true, sql.Null[civil.Minute]{V: 570, Valid: true}},
 	} {
@@ -249,13 +250,15 @@ func TestRelinkEntry(t *testing.T) {
 	ta := newTestApp(t).login()
 	ta.addTask(service.AddTaskIn{Title: "Replica"})
 	ta.mustOp(ta.Svc.AddEntry(t.Context(), ta.meta(), service.AddEntryIn{Title: "Standalone"}))
-	assertRedirect(t, ta.submit("/ui/recap", "/ui/entries/1/relink", url.Values{"task_id": {"1"}}), "/ui/recap")
-	if entry := ta.entry(1); !entry.TaskID.Valid || entry.TaskID.V != 1 {
-		t.Fatalf("linked entry = %+v", entry)
-	}
-	assertRedirect(t, ta.submit("/ui/log", "/ui/entries/1/relink", url.Values{"task_id": {""}}), "/ui/log")
-	if entry := ta.entry(1); entry.TaskID.Valid {
-		t.Errorf("standalone entry = %+v", entry)
+	for _, standalone := range []string{"", " \t "} {
+		assertRedirect(t, ta.submit("/ui/recap", "/ui/entries/1/relink", url.Values{"task_id": {"1"}}), "/ui/recap")
+		if entry := ta.entry(1); !entry.TaskID.Valid || entry.TaskID.V != 1 {
+			t.Fatalf("linked entry = %+v", entry)
+		}
+		assertRedirect(t, ta.submit("/ui/log", "/ui/entries/1/relink", url.Values{"task_id": {standalone}}), "/ui/log")
+		if entry := ta.entry(1); entry.TaskID.Valid {
+			t.Errorf("standalone entry = %+v", entry)
+		}
 	}
 	w := ta.submit("/ui/log", "/ui/entries/1/relink", url.Values{"task_id": {"abc"}})
 	if w.Code != http.StatusBadRequest {

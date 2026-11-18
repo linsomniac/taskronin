@@ -73,7 +73,7 @@ func (a *app) addPlacement(form url.Values) (*service.AddPlacement, error) {
 			return nil, err
 		}
 		if moment == nil {
-			return nil, domain.ValidationError(domain.FieldError{Field: "defer", Message: "must not be empty"})
+			return nil, emptyField("defer")
 		}
 		p.Defer = *moment // DF19: AddPlacement.Defer is a value, not a pointer.
 	case "block":
@@ -287,8 +287,11 @@ func (a *app) acceptNew(w http.ResponseWriter, r *http.Request) {
 		if len(ids) == 0 || len(ids) != len(etags) {
 			return nil, domain.Errorf(domain.CodeMalformed, "expected equal nonempty id and etag lists")
 		}
-		// AIDEV-NOTE: C12 accepts only the rendered pairs, without a fresh
+		// AIDEV-NOTE: DF31 bounds C12 to one page of rendered pairs, without a fresh
 		// triage read. Keep pair order and the original form intact for idempotency.
+		if len(ids) > taskListPageSize {
+			return nil, domain.Errorf(domain.CodeMalformed, "expected at most %d id and etag pairs", taskListPageSize)
+		}
 		in := service.AcceptNewIn{Items: make([]service.AcceptItem, 0, len(ids))}
 		for i, raw := range ids {
 			item := url.Values{"id": {raw}, "etag": {etags[i]}}

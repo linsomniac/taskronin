@@ -14,7 +14,7 @@
 <h2>{{day .Date}}</h2>
 {{range .Lines}}
 <article data-entry="{{.EntryID}}">
-<p>{{if .Time.Valid}}<time>{{hhmm .Time.V}}</time> {{end}}{{if eq .Kind "complete"}}✓ {{end}}{{.Title}}{{if .TaskID.Valid}} [<a href="/ui/tasks/{{.TaskID.V}}">#{{.TaskID.V}}{{if eq (index $.Data.FirstEntries .TaskID.V) .EntryID}} {{(index $.Data.Tasks .TaskID.V).Title}}{{end}}</a>]{{end}}{{if .Reopened}} (reopened){{end}}</p>
+<p>{{if .Time.Valid}}<time>{{hhmm .Time.V}}</time> {{end}}{{if eq .Kind "complete"}}✓ {{end}}{{.Title}}{{if .TaskID.Valid}}{{$task := index $.Data.Tasks .TaskID.V}} [<a href="/ui/tasks/{{.TaskID.V}}">#{{.TaskID.V}}{{if eq (index $.Data.FirstEntries .TaskID.V) .EntryID}} {{$task.Title}}{{end}}</a>]{{if $task.Deleted}} (deleted){{end}}{{end}}{{if .Reopened}} (reopened){{end}}</p>
 {{if .Notes}}<div class="notes">{{md $.MD .Notes}}</div>{{end}}
 </article>
 {{end}}

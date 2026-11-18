@@ -176,6 +176,20 @@ func TestReportPage(t *testing.T) {
 	requireText(t, body, " (reopened)")
 }
 
+func TestReportMarksDeletedTasks(t *testing.T) {
+	ta := newTestApp(t).login()
+	id := ta.addTask(service.AddTaskIn{Title: "Old task"})
+	ta.mustOp(ta.Svc.AddEntry(t.Context(), ta.meta(), service.AddEntryIn{
+		TaskID: sql.Null[domain.TaskID]{V: id, Valid: true}, Title: "Logged work"}))
+	requireElementText(t, ta.viewBody("/ui/report"), "p", "Logged work [#1 Old task]")
+	ta.mustOp(ta.Svc.Delete(t.Context(), ta.meta(), service.TaskRef{ID: id, Expect: ta.taskExpect(id)}))
+	body := ta.viewBody("/ui/report")
+	requireElementText(t, body, "p", "Logged work [#1 Old task] (deleted)")
+	if links := reportTaskLinks(t, body, id); !slices.Equal(links, []string{"#1 Old task"}) {
+		t.Errorf("deleted task links = %v", links)
+	}
+}
+
 func TestReportFiltersAndSections(t *testing.T) {
 	ta := newTestApp(t).login()
 	for _, in := range []service.AddTaskIn{
