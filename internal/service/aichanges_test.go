@@ -117,6 +117,12 @@ func TestSCP11(t *testing.T) {
 	}
 }
 
+func TestHistoryUnknownTask(t *testing.T) {
+	s := testutil.NewScenario(t)
+	_, err := s.Svc.History(s.Ctx(), s.Actor, service.HistoryIn{TaskID: 999})
+	testutil.RequireCode(t, err, domain.CodeNotFound)
+}
+
 func TestHistory(t *testing.T) {
 	s := testutil.NewScenario(t)
 	id := s.Add("A")

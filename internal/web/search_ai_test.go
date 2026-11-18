@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"golang.org/x/net/html"
@@ -79,6 +80,17 @@ func TestSearchPage(t *testing.T) {
 	}
 	if !reflect.DeepEqual(before, ta.opKinds()) {
 		t.Error("search GETs created user operations")
+	}
+}
+
+func TestSearchPageQueryLimit(t *testing.T) {
+	ta := newTestApp(t).login()
+	for _, char := range []string{"a", " "} {
+		w := ta.get("/ui/search?q=" + url.QueryEscape(strings.Repeat(char, 1025)))
+		if w.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("oversized search (%q) = %d, want 422", char, w.Code)
+		}
+		requireFieldErrors(t, w.Body.String(), "query")
 	}
 }
 

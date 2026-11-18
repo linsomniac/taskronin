@@ -182,7 +182,7 @@ func TestTaskDetailDoneAndDeleted(t *testing.T) {
 
 func TestTaskDetailNotFound(t *testing.T) {
 	ta := newTestApp(t).login()
-	for _, path := range []string{"/ui/tasks/999", "/ui/tasks/abc", "/ui/tasks/0", "/ui/tasks/abc/history"} {
+	for _, path := range []string{"/ui/tasks/999", "/ui/tasks/abc", "/ui/tasks/0", "/ui/tasks/abc/history", "/ui/tasks/999/history"} {
 		w := ta.get(path)
 		if w.Code != http.StatusNotFound || !slices.Contains(dataIDs(t, w.Body.String(), "data-code"), "not_found") {
 			t.Errorf("GET %s = %d %s", path, w.Code, w.Body)

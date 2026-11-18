@@ -27,7 +27,7 @@ func (a *app) search(w http.ResponseWriter, r *http.Request) {
 	if p.Kind == "" {
 		p.Kind = "all"
 	}
-	p.Searched = strings.TrimSpace(p.Query) != ""
+	p.Searched = len(p.Query) > service.MaxSearchQueryBytes || strings.TrimSpace(p.Query) != ""
 	if p.Searched {
 		s, _ := sessionFrom(r.Context())
 		list, err := a.o.Svc.Search(r.Context(), s.Actor, service.SearchIn{

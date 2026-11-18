@@ -13,6 +13,9 @@ import (
 	"taskronin/internal/store"
 )
 
+// MaxSearchQueryBytes bounds the raw input before FTS tokenization.
+const MaxSearchQueryBytes = 1024
+
 // SearchIn selects literal full-text terms, entity kinds and an offset page.
 type SearchIn struct {
 	Query, Kind string
@@ -75,12 +78,18 @@ func (s *Service) Search(ctx context.Context, a domain.Actor, in SearchIn) (Page
 }
 
 func ftsQuery(user string) (string, error) {
+	if len(user) > MaxSearchQueryBytes {
+		return "", validation("query", errors.New("must be at most 1024 bytes"))
+	}
 	// AIDEV-NOTE: FTS5 treats NUL as the end of its query, including inside a
 	// quoted term. Reject it before quoting to avoid an unterminated string.
 	if !utf8.ValidString(user) || strings.ContainsRune(user, 0) {
 		return "", validation("query", errors.New("must be UTF-8 text without NUL"))
 	}
 	terms := strings.Fields(user)
+	if len(terms) > 64 {
+		return "", validation("query", errors.New("must have at most 64 terms"))
+	}
 	quoted := make([]string, 0, len(terms))
 	for _, term := range terms {
 		stem := strings.TrimRight(term, "*")

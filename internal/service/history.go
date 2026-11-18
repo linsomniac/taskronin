@@ -71,6 +71,9 @@ func (s *Service) History(ctx context.Context, a domain.Actor, in HistoryIn) (Pa
 	}
 	var page Page[EventView]
 	err = s.read(ctx, a, domain.ScopeRead, false, func(q store.Q, _ time.Time, _ civil.Date) error {
+		if _, err := store.GetTask(ctx, q, in.TaskID); err != nil {
+			return err
+		}
 		events, err := store.TaskEvents(ctx, q, in.TaskID, domain.EventID(cursor.ID), limit+1)
 		if err != nil {
 			return err

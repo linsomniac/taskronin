@@ -464,6 +464,12 @@ func TestReadViews(t *testing.T) {
 	if err != nil || len(history2.Items) != 1 || history.Items[0].ID == history2.Items[0].ID {
 		t.Fatalf("next history = %+v, %v", history2, err)
 	}
+	// An exhausted history cursor for an existing task still yields an empty JSON array.
+	cursor := domain.EncodeCursor(domain.Cursor{Keys: []any{"history"}, ID: 1})
+	empty, err := srv.Client.TaskHistory(ctx, id, client.PageQuery{Cursor: cursor})
+	if err != nil || empty.Items == nil || len(empty.Items) != 0 || empty.NextCursor != nil {
+		t.Fatalf("exhausted history = %+v, %v", empty, err)
+	}
 	op, err := srv.Client.GetOp(ctx, task.OpID.String())
 	if err != nil || op.Op.OpID != task.OpID.String() || op.Op.Actor != "owner" || len(op.Events) == 0 || len(op.Op.TaskIDs) != 1 || op.Op.TaskIDs[0] != id {
 		t.Fatalf("op = %+v, %v", op, err)
@@ -581,6 +587,16 @@ func TestReadAIChangesAndOpsPagination(t *testing.T) {
 	}
 }
 
+func TestHistoryUnknownTask(t *testing.T) {
+	srv := testutil.StartServer(t)
+	status, headers, body := readAPI(t, srv, "/tasks/999/history", "")
+	var problem api.Problem
+	if err := json.Unmarshal(body, &problem); err != nil || status != http.StatusNotFound ||
+		headers.Get("Content-Type") != api.ContentTypeProblem || problem.Code != "not_found" {
+		t.Fatalf("unknown task history = %d %s %s, %v", status, headers.Get("Content-Type"), body, err)
+	}
+}
+
 func TestReadEmptyArrays(t *testing.T) {
 	srv := testutil.StartServer(t)
 	for _, tc := range []struct {
@@ -593,7 +609,6 @@ func TestReadEmptyArrays(t *testing.T) {
 		{"/tasks?view=all", []string{"items"}},
 		{"/entries?from=2026-10-28&to=2026-10-28", []string{"items"}},
 		{"/search?q=absent&kind=all", []string{"items"}},
-		{"/tasks/1/history", []string{"items"}},
 		{"/ai-changes", []string{"ops"}},
 		{"/report?from=2026-10-28&to=2026-10-28", []string{"days"}},
 	} {

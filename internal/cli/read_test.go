@@ -131,6 +131,9 @@ func TestUpcomingAndSearch(t *testing.T) {
 
 func TestHistory(t *testing.T) {
 	_, sys := captureServer(t)
+	if _, stderr, code := runCLI(t, sys, "", "history", "999"); code != 5 {
+		t.Fatalf("unknown task history exit = %d, want 5; stderr = %q", code, stderr)
+	}
 	captureRun(t, sys, "", "add", "History task")
 	captureRun(t, sys, "", "keep", "1")
 	out := captureRun(t, sys, "", "history", "1")

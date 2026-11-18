@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"reflect"
+	"strings"
 	"testing"
 
 	"taskronin/internal/civil"
@@ -129,6 +130,31 @@ func TestSearch(t *testing.T) {
 	prefix := readSearch(t, s, service.SearchIn{Query: "quar**"})
 	if !reflect.DeepEqual(prefix.Items, all.Items) {
 		t.Fatal("prefix query did not match")
+	}
+}
+
+func TestSearchQueryLimits(t *testing.T) {
+	s := testutil.NewScenario(t)
+	for _, tc := range []struct{ name, query, message string }{
+		{"1024 bytes", strings.Repeat("é", 512), ""},
+		{"1025 bytes", strings.Repeat("é", 512) + "a", "must be at most 1024 bytes"},
+		{"64 terms", strings.Repeat("x ", 64), ""},
+		{"65 terms", strings.Repeat("x ", 65), "must have at most 64 terms"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := s.Svc.Search(s.Ctx(), s.Actor, service.SearchIn{Query: tc.query})
+			if tc.message == "" {
+				if err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			testutil.RequireCode(t, err, domain.CodeValidation)
+			de, _ := domain.AsError(err)
+			if !reflect.DeepEqual(de.Fields, []domain.FieldError{{Field: "query", Message: tc.message}}) {
+				t.Fatalf("field errors = %+v", de.Fields)
+			}
+		})
 	}
 }
 
