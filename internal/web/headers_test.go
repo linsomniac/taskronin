@@ -37,16 +37,24 @@ func TestHostAllowlist(t *testing.T) {
 	} {
 		t.Run(tc.listen, func(t *testing.T) {
 			h := newHandler(t, tc.listen)
-			for _, host := range []string{"127.0.0.1:7878", "localhost:7878", "LOCALHOST:7878", "[::1]:7878", "127.0.0.2:7878", "127.0.0.1:7879", "evil.example:7878", "127.0.0.1", "localhost", ""} {
-				t.Run(host, func(t *testing.T) {
+			for _, req := range []struct{ host, forwarded string }{
+				{"127.0.0.1:7878", ""}, {"localhost:7878", ""}, {"LOCALHOST:7878", ""},
+				{"[::1]:7878", ""}, {"127.0.0.2:7878", ""}, {"127.0.0.1:7879", ""},
+				{"evil.example:7878", ""}, {"127.0.0.1", ""}, {"localhost", ""}, {"", ""},
+				{"localhost.:7878", ""}, {"evil", tc.listen},
+			} {
+				t.Run(req.host, func(t *testing.T) {
 					want := http.StatusBadRequest
 					for _, allowed := range tc.hosts {
-						if strings.EqualFold(host, allowed) {
+						if strings.EqualFold(req.host, allowed) {
 							want = http.StatusOK
 						}
 					}
 					r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/healthz", nil)
-					r.Host = host
+					r.Host = req.host
+					if req.forwarded != "" {
+						r.Header.Set("X-Forwarded-Host", req.forwarded)
+					}
 					w := httptest.NewRecorder()
 					h.ServeHTTP(w, r)
 					if w.Code != want {
@@ -84,23 +92,38 @@ func TestNewRejectsBadListen(t *testing.T) {
 
 func TestSecurityHeadersOnEveryResponse(t *testing.T) {
 	h := newHandler(t, "127.0.0.1:7878")
-	for _, tc := range []struct{ method, path, host, contentType, body string }{
-		{http.MethodGet, "/healthz", "127.0.0.1:7878", "", ""},
-		{http.MethodGet, "/", "127.0.0.1:7878", "", ""},
-		{http.MethodGet, "/static/app.css", "127.0.0.1:7878", "", ""},
-		{http.MethodGet, "/nope", "127.0.0.1:7878", "", ""},
-		{http.MethodGet, "/api/v1/tasks", "127.0.0.1:7878", "", ""},
-		{http.MethodGet, "/healthz", "evil.example:7878", "", ""},
-		{http.MethodPost, "/ui/tasks", "127.0.0.1:7878", "application/json", "{}"},
-		{http.MethodPost, "/ui/tasks", "127.0.0.1:7878", "application/x-www-form-urlencoded", "a=%zz"},
-		{http.MethodPost, "/ui/tasks", "127.0.0.1:7878", "application/x-www-form-urlencoded", strings.Repeat("a", 1<<20+1)},
+	for _, tc := range []struct {
+		method, path, host, contentType, body string
+		status                                int
+	}{
+		{http.MethodGet, "/healthz", "127.0.0.1:7878", "", "", http.StatusOK},
+		{http.MethodPost, "/healthz", "127.0.0.1:7878", "application/x-www-form-urlencoded", "", http.StatusForbidden},
+		{http.MethodGet, "/", "127.0.0.1:7878", "", "", http.StatusSeeOther},
+		{http.MethodGet, "/static/app.css", "127.0.0.1:7878", "", "", http.StatusOK},
+		{http.MethodHead, "/static/htmx-2.0.11.min.js", "127.0.0.1:7878", "", "", http.StatusOK},
+		{http.MethodGet, "/nope", "127.0.0.1:7878", "", "", http.StatusNotFound},
+		{http.MethodGet, "/api/v1/tasks", "127.0.0.1:7878", "", "", http.StatusUnauthorized},
+		{http.MethodGet, "/healthz", "evil.example:7878", "", "", http.StatusBadRequest},
+		{http.MethodPost, "/ui/tasks", "127.0.0.1:7878", "application/json", "{}", http.StatusUnsupportedMediaType},
+		{http.MethodPost, "/ui/tasks", "127.0.0.1:7878", "application/x-www-form-urlencoded", "a=%zz", http.StatusBadRequest},
+		{http.MethodPost, "/ui/tasks", "127.0.0.1:7878", "application/x-www-form-urlencoded", strings.Repeat("a", 1<<20+1), http.StatusRequestEntityTooLarge},
 	} {
 		t.Run(tc.method+tc.path+tc.host+tc.contentType, func(t *testing.T) {
 			r := httptest.NewRequestWithContext(t.Context(), tc.method, tc.path, strings.NewReader(tc.body))
 			r.Host = tc.host
 			r.Header.Set("Content-Type", tc.contentType)
+			if tc.method == http.MethodPost {
+				r.Header.Set("Origin", "http://"+tc.host)
+				r.Header.Set("Sec-Fetch-Site", "same-origin")
+			}
 			w := httptest.NewRecorder()
 			h.ServeHTTP(w, r)
+			if w.Code != tc.status {
+				t.Errorf("status = %d, want %d", w.Code, tc.status)
+			}
+			if tc.method == http.MethodHead && w.Body.Len() != 0 {
+				t.Errorf("HEAD returned %d body bytes", w.Body.Len())
+			}
 			for name, want := range map[string]string{
 				"Content-Security-Policy":    web.CSP,
 				"X-Content-Type-Options":     "nosniff",

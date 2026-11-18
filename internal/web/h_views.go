@@ -41,6 +41,8 @@ type logPage struct {
 	LogEntry       service.AddEntryIn
 }
 
+// AIDEV-NOTE: Today and Upcoming have no service cursor. Their Overdue, Due soon
+// and Deferred sections are unbounded. Paging them needs a service and API change.
 func (a *app) today(w http.ResponseWriter, r *http.Request) {
 	s, _ := sessionFrom(r.Context())
 	view, err := a.o.Svc.Today(r.Context(), s.Actor)

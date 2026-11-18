@@ -236,6 +236,17 @@ func TestReportFiltersAndSections(t *testing.T) {
 	}
 }
 
+func TestRecapReportEmpty(t *testing.T) {
+	ta := newTestApp(t).login()
+	recap := ta.viewBody("/ui/recap")
+	requireText(t, recap, "No blocks on this date.", "No linked entries on this date.",
+		"No unlinked entries on this date.", "No interruptions on this date.")
+
+	report := ta.viewBody("/ui/report?todo=1&upcoming=1")
+	requireText(t, report, "No entries in this date range.", "Nothing to triage.",
+		"No backlog tasks.", "No upcoming tasks.")
+}
+
 func TestRecapReportDates(t *testing.T) {
 	ta := newTestApp(t).login()
 	for _, tc := range []struct{ path, field string }{
@@ -243,12 +254,13 @@ func TestRecapReportDates(t *testing.T) {
 		{"/ui/report?from=garbage", "from"}, {"/ui/report?to=garbage", "to"},
 		{"/ui/report?from=today+10:00", "from"}, {"/ui/report?to=today+10:00", "to"},
 		{"/ui/report?from=2026-10-28&to=2026-10-26", "to"},
+		{"/ui/report?from=2025-10-26&to=2026-10-28", "to"}, // 367-day span
 	} {
 		w := ta.get(tc.path)
 		if w.Code != http.StatusUnprocessableEntity || !slices.Contains(dataIDs(t, w.Body.String(), "data-code"), "validation") {
 			t.Errorf("%s = %d %s", tc.path, w.Code, w.Body)
 		}
-		requireText(t, w.Body.String(), tc.field+":")
+		requireFieldErrors(t, w.Body.String(), tc.field)
 		assertInert(t, w.Body.String())
 	}
 	// UTC is already Monday; the configured zone is still Sunday. WeekStart

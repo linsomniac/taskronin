@@ -50,8 +50,14 @@ func TestWebUIOverTCP(t *testing.T) {
 	form.Set("title", "From the browser")
 	resp, body = browser.request(http.MethodPost, "/ui/tasks", form)
 	assertWebPage(t, resp, http.StatusOK, "/ui/")
-	if !strings.Contains(webNodeText(parseWebHTML(t, body)), "From the browser") {
-		t.Fatal("added task is missing from Today")
+	foundInTriage := false
+	walkWebHTML(parseWebHTML(t, body), func(n *html.Node) {
+		if n.Type == html.ElementNode && n.Data == "section" && webAttr(n, "aria-label") == "Triage" {
+			foundInTriage = strings.Contains(webNodeText(n), form.Get("title"))
+		}
+	})
+	if !foundInTriage {
+		t.Fatal("added task is missing from Today’s Triage section")
 	}
 	tasks, err := srv.Client.ListTasks(t.Context(), client.TaskQuery{View: "triage"})
 	if err != nil {
