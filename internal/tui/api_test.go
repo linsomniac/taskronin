@@ -10,7 +10,33 @@ import (
 	"taskronin/internal/client"
 )
 
-func TestFakeImplementsAPI(_ *testing.T) { var _ API = newFake() }
+func TestFakeMutationResponseIsIndependent(t *testing.T) {
+	f := newFake()
+	f.resp.Task = &api.Task{Tags: []string{"original"}}
+	f.resp.Effects = []api.Effect{{Kind: "completed"}}
+	f.resp.Warnings = []string{"original"}
+	got, err := f.Undo(t.Context(), client.Mut{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	*got.OpID = "changed"
+	got.Task.Tags[0], got.Effects[0].Kind, got.Warnings[0] = "changed", "changed", "changed"
+	eq(t, *f.resp.OpID, "fake-op")
+	eq(t, f.resp.Task.Tags[0], "original")
+	eq(t, f.resp.Effects[0].Kind, "completed")
+	eq(t, f.resp.Warnings[0], "original")
+}
+
+func TestFakeAIPageIsIndependent(t *testing.T) {
+	f := newFake()
+	f.aiPages = []api.AIChanges{{Ops: []api.OpSummary{{Seq: 42}}}}
+	got, err := f.AIChanges(t.Context(), false, client.PageQuery{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got.Ops[0].Seq = 1
+	eq(t, f.aiPages[0].Ops[0].Seq, int64(42))
+}
 
 func TestFakeErrorsClassify(t *testing.T) {
 	var pe *client.ProblemError
@@ -180,11 +206,19 @@ func TestFakePagination(t *testing.T) {
 	}
 	eq(t, *first, api.Page[api.Entry]{Items: f.entries, NextCursor: &next})
 	f.entries = []api.Entry{{ID: 10}}
-	last, err := f.ListEntries(t.Context(), client.EntryQuery{PageQuery: client.PageQuery{Cursor: next}})
+	third := "c3"
+	f.entriesNext = &third
+	second, err := f.ListEntries(t.Context(), client.EntryQuery{PageQuery: client.PageQuery{Cursor: next}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	eq(t, *last, api.Page[api.Entry]{Items: f.entries})
+	eq(t, *second, api.Page[api.Entry]{Items: f.entries, NextCursor: &third})
+	f.entriesNext = nil
+	last, err := f.ListEntries(t.Context(), client.EntryQuery{PageQuery: client.PageQuery{Cursor: third}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	eq(t, last.NextCursor, (*string)(nil))
 
 	f.aiPages = []api.AIChanges{
 		{ReviewedThrough: 3, Unreviewed: 2, Ops: []api.OpSummary{{Seq: 5}}, NextCursor: &next},

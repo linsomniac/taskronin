@@ -207,11 +207,7 @@ func (f *fakeAPI) ListEntries(_ context.Context, q client.EntryQuery) (*api.Page
 	if err := f.record(call{Method: "ListEntries", Q: q}); err != nil {
 		return nil, err
 	}
-	page := &api.Page[api.Entry]{Items: slices.Clone(f.entries)}
-	if q.Cursor == "" {
-		page.NextCursor = f.entriesNext
-	}
-	return page, nil
+	return &api.Page[api.Entry]{Items: slices.Clone(f.entries), NextCursor: clonePtr(f.entriesNext)}, nil
 }
 
 func (f *fakeAPI) ListBlocks(_ context.Context, q client.BlockQuery) ([]api.Block, error) {
@@ -239,6 +235,7 @@ func (f *fakeAPI) AIChanges(_ context.Context, all bool, p client.PageQuery) (*a
 	var page api.AIChanges
 	if i < len(f.aiPages) {
 		page = f.aiPages[i]
+		page.Ops = slices.Clone(page.Ops)
 	}
 	return &page, nil
 }
@@ -250,7 +247,48 @@ func (f *fakeAPI) mutation(c call) (*api.OpResponse, error) {
 		return nil, err
 	}
 	resp := f.resp
+	resp.OpID = clonePtr(resp.OpID)
+	resp.Effects = slices.Clone(resp.Effects)
+	resp.Warnings = slices.Clone(resp.Warnings)
+	if resp.Task != nil {
+		resp.Task = ptr(cloneTask(*resp.Task))
+	}
+	resp.Tasks = slices.Clone(resp.Tasks)
+	for i, task := range resp.Tasks {
+		resp.Tasks[i] = cloneTask(task)
+	}
+	if e := clonePtr(resp.Entry); e != nil {
+		e.TaskID, e.TaskTitle = clonePtr(e.TaskID), clonePtr(e.TaskTitle)
+		e.Time, e.DeletedAt = clonePtr(e.Time), clonePtr(e.DeletedAt)
+		resp.Entry = e
+	}
+	if b := clonePtr(resp.Block); b != nil {
+		b.OutcomeSource, b.CancelReason = clonePtr(b.OutcomeSource), clonePtr(b.CancelReason)
+		b.SlippedAt, b.ResolvedAt = clonePtr(b.SlippedAt), clonePtr(b.ResolvedAt)
+		resp.Block = b
+	}
 	return &resp, nil
+}
+
+func clonePtr[T any](v *T) *T {
+	if v == nil {
+		return nil
+	}
+	return ptr(*v)
+}
+
+func cloneTask(t api.Task) api.Task {
+	t.Tags, t.Reasons = slices.Clone(t.Tags), slices.Clone(t.Reasons)
+	t.Priority, t.Project = clonePtr(t.Priority), clonePtr(t.Project)
+	t.LastPlacedAt, t.CompletedAt = clonePtr(t.LastPlacedAt), clonePtr(t.CompletedAt)
+	t.CompletedDate, t.DeletedAt = clonePtr(t.CompletedDate), clonePtr(t.DeletedAt)
+	t.Defer, t.Due = clonePtr(t.Defer), clonePtr(t.Due)
+	for _, moment := range []*api.Moment{t.Defer, t.Due} {
+		if moment != nil {
+			moment.Time = clonePtr(moment.Time)
+		}
+	}
+	return t
 }
 
 func (f *fakeAPI) AddTask(_ context.Context, m client.Mut, r api.AddTaskRequest) (*api.OpResponse, error) {
