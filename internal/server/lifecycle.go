@@ -43,6 +43,8 @@ type Startup struct {
 // adapter over web.New (architecture §6.2 web chain).
 var newWebHandler func(svc *service.Service, clk clock.Clock, zone civil.Zone, weekStart time.Weekday, listen string, log *slog.Logger) (http.Handler, error)
 
+// listenWeb opens the web listener. It is a test seam: only SetWebListener in
+// export_test.go replaces it.
 var listenWeb = (&net.ListenConfig{}).Listen
 
 // Run recovers and serves an instance until cancellation, then drains it while

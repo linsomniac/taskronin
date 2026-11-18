@@ -382,10 +382,12 @@ func opBudgetError(ctx context.Context, keyed bool, err error) error {
 	// AIDEV-NOTE: S1′ is safe only for keyed operations: PutIdem commits in the
 	// same transaction as the mutation, so a retry re-executes after rollback or
 	// replays after commit (including a result-load timeout). ErrTxDone from
-	// Commit after a budget-expired rollback is safe to retry. Exempt operations
-	// are excluded: client.callExempt retries busy (internal/client/retry.go),
-	// but has no replay record; a post-commit busy could duplicate a token or
-	// settings change.
+	// Commit after a budget-expired rollback is safe to retry. That branch is
+	// defensive: beginTx begins on a detached context, so database/sql does not
+	// roll back on budget expiry today. Exempt operations are excluded:
+	// client.callExempt retries busy (internal/client/retry.go), but has no
+	// replay record; a post-commit busy could duplicate a token or settings
+	// change. Commit then result loading: runEntered (tx.Commit, then loadResult).
 	if !keyed || err == nil || !errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 		return err
 	}

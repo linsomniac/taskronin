@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -13,8 +14,14 @@ import (
 	"taskronin/internal/store"
 )
 
-// MaxSearchQueryBytes bounds the raw input before FTS tokenization.
-const MaxSearchQueryBytes = 1024
+// AIDEV-NOTE: DF30: every client reaches FTS through ftsQuery, so these caps
+// bound query cost for the API, MCP, CLI, TUI and web alike.
+const (
+	// MaxSearchQueryBytes bounds the raw input before FTS tokenization.
+	MaxSearchQueryBytes = 1024
+	// MaxSearchQueryTerms bounds the whitespace-separated terms before quoting.
+	MaxSearchQueryTerms = 64
+)
 
 // SearchIn selects literal full-text terms, entity kinds and an offset page.
 type SearchIn struct {
@@ -79,7 +86,7 @@ func (s *Service) Search(ctx context.Context, a domain.Actor, in SearchIn) (Page
 
 func ftsQuery(user string) (string, error) {
 	if len(user) > MaxSearchQueryBytes {
-		return "", validation("query", errors.New("must be at most 1024 bytes"))
+		return "", validation("query", fmt.Errorf("must be at most %d bytes", MaxSearchQueryBytes))
 	}
 	// AIDEV-NOTE: FTS5 treats NUL as the end of its query, including inside a
 	// quoted term. Reject it before quoting to avoid an unterminated string.
@@ -87,8 +94,8 @@ func ftsQuery(user string) (string, error) {
 		return "", validation("query", errors.New("must be UTF-8 text without NUL"))
 	}
 	terms := strings.Fields(user)
-	if len(terms) > 64 {
-		return "", validation("query", errors.New("must have at most 64 terms"))
+	if len(terms) > MaxSearchQueryTerms {
+		return "", validation("query", fmt.Errorf("must have at most %d terms", MaxSearchQueryTerms))
 	}
 	quoted := make([]string, 0, len(terms))
 	for _, term := range terms {

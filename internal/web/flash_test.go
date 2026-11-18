@@ -98,6 +98,11 @@ func TestFlashLinesEveryEffectKind(t *testing.T) {
 			}
 		})
 	}
+	for kind := range cases {
+		if !slices.Contains(service.EffectKinds(), kind) {
+			t.Errorf("stale flash wording for %q: not in service.EffectKinds()", kind)
+		}
+	}
 }
 
 func TestFlashLinesWarningsAndFlags(t *testing.T) {
