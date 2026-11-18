@@ -12,6 +12,8 @@ const (
 	// MaxTitleRunes is the maximum number of Unicode code points in a title.
 	MaxTitleRunes = 500
 	// MaxNotesBytes is the maximum UTF-8 byte length of normalized notes.
+	// AIDEV-NOTE: Change markdown.maxNoteBytes with this limit so the
+	// pre-render guard matches validation.
 	MaxNotesBytes = 65536
 )
 

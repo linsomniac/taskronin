@@ -368,17 +368,20 @@ func sectionText(t *testing.T, body, label string) string {
 
 func TestPageMarkdownBudget(t *testing.T) {
 	ta := newTestApp(t).login()
-	for i := range 6 {
+	// Report reaches 256 KiB exactly with notes 0–3. Recap reads in reverse:
+	// notes 5–2 use 255 KiB, so note 1 must fall back with 1 KiB still free.
+	sizesKiB := []int{64, 64, 64, 64, 63, 64}
+	for i, size := range sizesKiB {
 		marker := fmt.Sprintf("**note %d**", i)
 		ta.mustOp(ta.Svc.AddEntry(t.Context(), ta.meta(), service.AddEntryIn{
-			Title: "Work", Notes: marker + strings.Repeat("x", (64<<10)-len(marker)),
+			Title: "Work", Notes: marker + strings.Repeat("x", (size<<10)-len(marker)),
 			At: sql.Null[civil.Minute]{V: civil.Minute(i), Valid: true},
 		}))
 	}
 	// Recap renders the newest entry first via a row partial. Report renders oldest first.
 	for _, path := range []string{"/ui/recap", "/ui/report", "/ui/recap"} {
 		body := ta.viewBody(path)
-		for i := range 6 {
+		for i := range sizesKiB {
 			marker := fmt.Sprintf("note %d", i)
 			formatted := i < 4
 			if path == "/ui/recap" {

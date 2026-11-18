@@ -191,15 +191,24 @@ func TestRenderOrdinaryLargeNotes(t *testing.T) {
 }
 
 func TestRenderFencedDelimiters(t *testing.T) {
-	for _, fence := range []string{"```", "~~~~"} {
-		src := "Before\n\n  " + fence + "text\n" + strings.Repeat("*_[()]", 500) + "\n " + fence + fence + "\t\n\n**after**"
-		got, err := Render(src)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !strings.Contains(string(got), "<pre><code>") || !strings.Contains(string(got), "<strong>after</strong>") {
-			t.Errorf("%q fence lost code or following markdown", fence)
-		}
+	// Four delimiters per shallow line exceed the 2048-byte inline budget.
+	body := strings.Repeat("*_[]\n", 600)
+	for _, tc := range []struct{ name, open, close, newline string }{
+		{"backticks", "Before\n\n  ```text", " ``````\t", "\n"},
+		{"tildes", "Before\n\n  ~~~~text", " ~~~~~~~~\t", "\n"},
+		{"after list", "- item\n```", "```", "\n"},
+		{"CRLF", "```", "```", "\r\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			src := tc.open + "\n" + body + tc.close + "\n\n**after**"
+			got, err := Render(strings.ReplaceAll(src, "\n", tc.newline))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(got), "<pre><code>") || !strings.Contains(string(got), "<strong>after</strong>") {
+				t.Error("missing fenced code or following markdown")
+			}
+		})
 	}
 }
 
@@ -207,6 +216,7 @@ func TestRenderFenceBounds(t *testing.T) {
 	delimiters := strings.Repeat("*a*\n", 1025)
 	for name, src := range map[string]string{
 		"unclosed":              "```\n" + delimiters,
+		"mismatched closer":     "```\n" + delimiters + "~~~\n",
 		"oversize unclosed":     "```\n" + strings.Repeat("x", 64<<10),
 		"after closer":          "~~~~\n~~~\ncode\n~~~~~\n" + delimiters,
 		"invalid backtick info": "```lang`info\n" + delimiters + "```",

@@ -52,6 +52,7 @@ type resubmitField struct {
 // AIDEV-NOTE: Row partials receive (row $ .), not just the row: use .P for
 // page state (template "hidden" .P, etag .P.Gen .V.Version), and .V for data.
 // Page forms use template "hidden" $; partials.html forms use "hidden" .P.
+// .P also carries the per-page markdown budget (md .P.MD .V.Notes).
 type rowCtx struct {
 	P page
 	V any

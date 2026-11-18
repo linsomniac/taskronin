@@ -68,12 +68,18 @@ func (imageAsLink) render(w util.BufWriter, _ []byte, node ast.Node, entering bo
 	return ast.WalkContinue, nil
 }
 
-// Budget bounds markdown conversion for one page. Its zero value is ready to use.
+// Budget bounds markdown input and is created once per page render.
+// Its zero value is ready to use. A Budget is not safe for concurrent use.
 type Budget struct {
 	used int
 }
 
-const pageNoteBytes = 256 << 10
+const (
+	// AIDEV-NOTE: maxNoteBytes mirrors textsafe.MaxNotesBytes and must change
+	// with it. The archtest dependency rules forbid markdown importing textsafe.
+	maxNoteBytes  = 64 << 10
+	pageNoteBytes = 256 << 10
+)
 
 // Render converts Markdown notes to HTML using the notes allowlist.
 func Render(src string) (template.HTML, error) {
@@ -82,12 +88,12 @@ func Render(src string) (template.HTML, error) {
 
 // Render uses the DF28 fallback once the page's markdown input budget is spent.
 func (b *Budget) Render(src string) (template.HTML, error) {
-	// Mirror the service's 64 KiB input limit for direct callers, too.
 	var rendered []byte
-	plain := len(src) > 64<<10 || (b != nil && b.used == pageNoteBytes) || tooComplex(src)
+	plain := len(src) > maxNoteBytes || (b != nil && b.used == pageNoteBytes) || tooComplex(src)
 	if !plain && b != nil {
 		// AIDEV-NOTE: DF32 charges bytes sent to goldmark, even if its output
-		// trips the size guard. A note that won't fit exhausts the page budget.
+		// trips the size guard. A note that won't fit exhausts the page budget
+		// and renders as plain text along with all later notes.
 		if len(src) > pageNoteBytes-b.used {
 			b.used = pageNoteBytes
 			plain = true
@@ -113,9 +119,11 @@ func (b *Budget) Render(src string) (template.HTML, error) {
 // AIDEV-NOTE: DF28: scan in linear time before goldmark. Its repeated container,
 // link, emphasis, strike and backtick parsing can be quadratic. Allow at most
 // 16 potential nested openers per line and 2048 inline delimiter bytes overall;
-// exclude confirmed fence contents and cap sanitized Markdown at 512 KiB. The plain fallback stays escaped and
-// sanitized (at most six times the service's 64 KiB notes limit). The 10 s GET
-// deadline cancels service calls, not template rendering or goldmark.
+// exclude confirmed fence contents and cap sanitized Markdown at 512 KiB.
+// The 64 KiB pre-render guard sends oversized notes straight to the fallback.
+// The plain fallback stays escaped and sanitized (at most six times the
+// service's 64 KiB notes limit). The 10 s GET deadline cancels service calls,
+// not template rendering or goldmark.
 func tooComplex(src string) bool {
 	delimiters := 0
 	// Only exempt confirmed top-level fences. An HTML block can consume an
