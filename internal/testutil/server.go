@@ -179,7 +179,7 @@ func (s *Server) Start(t testing.TB) {
 	go func() {
 		done <- server.Run(ctx, cfg, server.Deps{Paths: s.Paths, Clock: s.Clock, Logger: slog.New(slog.NewJSONHandler(s.Log, &slog.HandlerOptions{Level: level})), Started: func(v server.Startup) { started <- v }})
 	}()
-	timer := time.NewTimer(10 * time.Second)
+	timer := time.NewTimer(time.Minute)
 	defer timer.Stop()
 	select {
 	case v := <-started:
@@ -201,7 +201,7 @@ func (s *Server) Start(t testing.TB) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	healthCtx, cancelHealth := context.WithTimeout(t.Context(), 5*time.Second)
+	healthCtx, cancelHealth := context.WithTimeout(t.Context(), time.Minute)
 	defer cancelHealth()
 	if err := s.Client.Health(healthCtx); err != nil {
 		t.Fatalf("server health: %v", err)

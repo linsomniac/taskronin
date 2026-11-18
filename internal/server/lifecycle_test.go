@@ -792,3 +792,45 @@ func TestWebFailureKeepsAPI(t *testing.T) {
 		})
 	}
 }
+
+type failingWebListener struct{ net.Listener }
+
+func (ln failingWebListener) Accept() (net.Conn, error) {
+	conn, err := ln.Listener.Accept()
+	if errors.Is(err, net.ErrClosed) {
+		return nil, errors.New("web accept failed\n\x1b")
+	}
+	return conn, err
+}
+
+func TestRuntimeWebFailureKeepsAPI(t *testing.T) {
+	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	t.Cleanup(server.SetWebListener(failingWebListener{ln}))
+	s := testutil.StartServer(t, testutil.WithWeb())
+	resp, _ := newWebBrowser(t, s.WebURL).request(http.MethodGet, "/ui/login", nil)
+	assertWebPage(t, resp, http.StatusOK, "/ui/login")
+	if err := ln.Close(); err != nil {
+		t.Fatal(err)
+	}
+	timeout := time.NewTimer(time.Minute)
+	defer timeout.Stop()
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for !strings.Contains(s.Log.String(), `"level":"WARN","msg":"web UI disabled","error":"web accept failed��"`) {
+		select {
+		case <-s.Svc.Stopping():
+			t.Fatal("web listener failure stopped the API")
+		case <-timeout.C:
+			t.Fatalf("missing sanitized Serve warning: %s", s.Log)
+		case <-tick.C:
+		}
+	}
+	if _, err := s.Client.WhoAmI(t.Context()); err != nil {
+		t.Fatalf("socket API after web listener failure: %v", err)
+	}
+	s.Stop()
+}

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"log/slog"
+	"net"
 	"net/http"
 	"time"
 
@@ -48,4 +49,11 @@ func SetSchedulerObserver(f func(job, event string, at time.Time)) func() {
 	old := schedulerObserver
 	schedulerObserver = f
 	return func() { schedulerObserver = old }
+}
+
+// SetWebListener supplies the listener used by Run in a lifecycle test.
+func SetWebListener(ln net.Listener) func() {
+	old := listenWeb
+	listenWeb = func(context.Context, string, string) (net.Listener, error) { return ln, nil }
+	return func() { listenWeb = old }
 }

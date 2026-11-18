@@ -43,6 +43,8 @@ type Startup struct {
 // adapter over web.New (architecture §6.2 web chain).
 var newWebHandler func(svc *service.Service, clk clock.Clock, zone civil.Zone, weekStart time.Weekday, listen string, log *slog.Logger) (http.Handler, error)
 
+var listenWeb = (&net.ListenConfig{}).Listen
+
 // Run recovers and serves an instance until cancellation, then drains it while
 // retaining the database and instance lock until all accepted work returns.
 func Run(ctx context.Context, cfg *config.Server, deps Deps) (err error) {
@@ -173,8 +175,8 @@ func Run(ctx context.Context, cfg *config.Server, deps Deps) (err error) {
 		apiListener.(*net.UnixListener).SetUnlinkOnClose(false)
 	}
 	adapter := New(svc, api.Conv{Gen: svc.Generation(), Loc: zone.Location()}, deps.Clock, deps.Logger)
-	servers := []*http.Server{httpServer(adapter.APIHandler(), deps.Logger)}
-	listeners := []net.Listener{apiListener}
+	apiServer := httpServer(adapter.APIHandler(), deps.Logger)
+	servers := []*http.Server{apiServer}
 	startup := Startup{Svc: svc, Socket: apiListener.Addr().String()}
 	if cfg.Web.Enabled && newWebHandler != nil {
 		if gateErr := cfg.WebListenerAllowed(); gateErr != nil {
@@ -183,7 +185,7 @@ func Run(ctx context.Context, cfg *config.Server, deps Deps) (err error) {
 			addr, _ := cfg.WebAddr()
 			// AIDEV-NOTE: DF27: the optional web UI must never prevent the
 			// unix-socket API from starting. Bind/handler failures disable only web.
-			ln, webErr := (&net.ListenConfig{}).Listen(ctx, "tcp", addr.String())
+			ln, webErr := listenWeb(ctx, "tcp", addr.String())
 			if webErr == nil {
 				var h http.Handler
 				h, webErr = newWebHandler(svc, deps.Clock, zone, weekStart, ln.Addr().String(), deps.Logger)
@@ -196,7 +198,14 @@ func Run(ctx context.Context, cfg *config.Server, deps Deps) (err error) {
 					// headers and Host validation instead of net/http's bare 200.
 					webServer.DisableGeneralOptionsHandler = true
 					servers = append(servers, webServer)
-					listeners = append(listeners, ln)
+					// AIDEV-NOTE: DF27 also covers runtime Accept failures. Only
+					// the API can stop Run. Keep web in the shutdown list to drain
+					// requests accepted before its listener failed.
+					go func() {
+						if err := webServer.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+							deps.Logger.Warn("web UI disabled", "error", textsafe.SanitizeLine(err.Error()))
+						}
+					}()
 					startup.WebAddr = ln.Addr().String()
 					accounts, accountErr := config.OtherHumanAccounts("/etc/passwd", os.Getuid())
 					if accountErr != nil {
@@ -211,10 +220,8 @@ func Run(ctx context.Context, cfg *config.Server, deps Deps) (err error) {
 			}
 		}
 	}
-	serveErrs := make(chan error, len(servers))
-	for i, srv := range servers {
-		go func() { serveErrs <- srv.Serve(listeners[i]) }()
-	}
+	apiErr := make(chan error, 1)
+	go func() { apiErr <- apiServer.Serve(apiListener) }()
 	// Schedulers have their own cancellation lifetime: cancel them at shutdown
 	// step 3, after HTTP graceful shutdown, and join even unaccounted FlushUsage.
 	schedCtx, cancelSchedulers := context.WithCancel(context.WithoutCancel(ctx))
@@ -259,7 +266,7 @@ func Run(ctx context.Context, cfg *config.Server, deps Deps) (err error) {
 	select {
 	case <-ctx.Done():
 		return nil
-	case err := <-serveErrs:
+	case err := <-apiErr:
 		return fmt.Errorf("HTTP serve: %w", err)
 	}
 }

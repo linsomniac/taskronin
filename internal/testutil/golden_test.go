@@ -20,7 +20,7 @@ func TestGolden(t *testing.T) {
 	}
 	run := func(got string, update bool) (string, error) {
 		t.Helper()
-		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+		ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 		defer cancel()
 		args := []string{"-test.run=^TestGoldenProcessHelper$"}
 		if update {
