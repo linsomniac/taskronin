@@ -34,6 +34,9 @@ func TestTUIHookInstalled(t *testing.T) {
 
 func TestTUIHookRecapUsage(t *testing.T) {
 	testutil.StartServer(t)
+	// StdoutTTY enables color unless NO_COLOR is set; the exact-message checks
+	// below must not depend on the developer's environment.
+	t.Setenv("NO_COLOR", "1")
 	sys := sysDeps{StdinTTY: true, StdoutTTY: true, Getenv: os.Getenv}
 	for _, tc := range []struct{ spec, message string }{
 		{"nextweek", `tkr: --date: unrecognised date "nextweek": use today, yesterday, tomorrow, a weekday (mon…sun), +Nd/-Nd, +Nw/-Nw, or YYYY-MM-DD`},
