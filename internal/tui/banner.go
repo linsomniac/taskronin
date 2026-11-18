@@ -23,12 +23,24 @@ const (
 type banner struct {
 	kind       bannerKind
 	text       string
-	readError  bool // Only a successful read of readTarget clears this banner.
-	readTarget *loadState
+	readError  bool       // Read failures recover on a matching load or when their screen closes.
+	loadTarget *loadState // A successful read of this list or pane clears its notice.
+	owner      screen     // Screen whose dismissal clears this banner.
 }
 
 func (a *App) setBanner(k bannerKind, text string) {
 	a.banner = banner{kind: k, text: textsafe.SanitizeLine(text)}
+}
+
+func (a *App) setTruncationBanner(target *loadState) {
+	a.setBanner(bannerInfo, "showing the first 2500")
+	a.banner.loadTarget = target
+}
+
+func (a *App) clearScreenBanner(s screen) {
+	if s != nil && a.banner.owner == s {
+		a.banner = banner{}
+	}
 }
 
 func (a *App) appendBanner(s string) {
@@ -57,7 +69,7 @@ func (a *App) handleReadErr(err error, target ...*loadState) tea.Cmd {
 	}
 	a.banner.readError = true
 	if len(target) > 0 {
-		a.banner.readTarget = target[0]
+		a.banner.loadTarget = target[0]
 	}
 	return cmd
 }

@@ -404,3 +404,15 @@ func TestUpcomingKeepCapturesFreshSelectionAndGuards(t *testing.T) {
 	eq(t, f.mustLast(t, "PlaceTask"), call{Method: "PlaceTask", ID: 2, Mut: client.Mut{IfMatch: "g-2b"}, Req: api.PlaceRequest{How: "keep"}})
 	selectedID(t, a, 5)
 }
+
+func TestUpcomingNilPayloadRetainsRows(t *testing.T) {
+	f := newFake()
+	f.upcoming.Deferred = []api.Task{task(7, "retained")}
+	a := newTestApp(t, f)
+	press(t, a, "4")
+	a.Update(upcomingMsg{req: a.nextReq("upcoming")})
+	selectedID(t, a, 7)
+	if !strings.Contains(viewText(a), "upcoming not loaded") {
+		t.Fatal(viewText(a))
+	}
+}

@@ -80,13 +80,17 @@ const (
 	loadFailed
 )
 
-func (s *loadState) finish(a *App, err error) tea.Cmd {
+func (s *loadState) finish(a *App, err error, owner ...screen) tea.Cmd {
 	if err != nil {
 		*s = loadFailed
-		return a.handleReadErr(err, s)
+		cmd := a.handleReadErr(err, s)
+		if len(owner) != 0 {
+			a.banner.owner = owner[0]
+		}
+		return cmd
 	}
 	*s = loadLoaded
-	if a.banner.readError && a.banner.readTarget == s {
+	if a.banner.loadTarget == s {
 		a.banner = banner{}
 	}
 	return nil

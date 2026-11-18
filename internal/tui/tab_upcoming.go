@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -36,6 +37,9 @@ func (s *upcomingScreen) update(a *App, msg tea.Msg) tea.Cmd {
 	}
 	if m.err != nil {
 		return s.state.finish(a, m.err)
+	}
+	if m.up == nil {
+		return s.state.finish(a, errors.New("missing upcoming response"))
 	}
 	s.deferred = len(m.up.Deferred)
 	items := make([]api.Task, 0, s.deferred+len(m.up.DueSoon))

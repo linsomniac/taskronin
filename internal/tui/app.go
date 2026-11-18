@@ -42,32 +42,36 @@ type Config struct {
 
 // App owns the terminal UI. Only Update and its helpers change model state.
 type App struct {
-	cfg          Config
-	api          API
-	ctx          context.Context
-	width        int
-	height       int
-	clock        api.Clock
-	today        *api.Today
-	todayETag    string
-	todayLoad    loadState
-	pollReq      int
-	tab          Tab
-	tabs         [5]screen
-	mode         Mode
-	modeScreen   screen
-	exitWithMode bool
-	overlays     []screen
-	overlayDirty bool // A refresh or poll change requires reloading hidden screens on reveal.
-	form         screen
-	banner       banner
-	draftPaths   []string
-	inflight     bool
-	quitting     bool
-	reqSeq       map[string]int
-	styles       Styles
-	keys         keyMap
-	help         help.Model
+	cfg            Config
+	api            API
+	ctx            context.Context
+	width          int
+	height         int
+	clock          api.Clock
+	today          *api.Today
+	todayETag      string
+	todayLoad      loadState
+	pollReq        int
+	pollBaseline   *api.Today
+	pairedTodayReq int // Today request accompanied by a visible-screen load.
+	editorRead     loadState
+	tab            Tab
+	tabs           [5]screen
+	mode           Mode
+	modeScreen     screen
+	exitWithMode   bool
+	overlays       []screen
+	overlayDirty   bool // An own operation requires reloading covered overlays on reveal.
+	baseDirty      bool // Reload the underlying tab/mode when the last overlay closes.
+	form           screen
+	banner         banner
+	draftPaths     []string
+	inflight       bool
+	quitting       bool
+	reqSeq         map[string]int
+	styles         Styles
+	keys           keyMap
+	help           help.Model
 }
 
 var _ tea.Model = (*App)(nil)
@@ -137,9 +141,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.inflight = false
 			return a, nil
 		}
+		cmd := a.editorRead.finish(a, msg.err)
 		if msg.err != nil {
 			a.inflight = false
-			return a, a.handleReadErr(msg.err)
+			return a, cmd
 		}
 		d := msg.detail
 		return a, a.prepareEditor(editTarget{kind: "task", id: msg.id, etag: d.ETag, origTitle: d.Title, origNotes: d.Notes})
@@ -169,13 +174,20 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		a.todayLoad.finish(a, nil)
 		var cmds []tea.Cmd
+		dayBefore := a.clock.Today
 		if !msg.notModified && msg.today != nil {
-			changed := todayPayloadChanged(a.today, msg.today)
 			a.today, a.todayETag, a.clock = msg.today, msg.etag, msg.today.Clock
 			cmds = append(cmds, a.tabs[TabToday].update(a, msg))
-			if msg.poll && changed {
+		}
+		// AIDEV-NOTE: openLog can advance today and its ETag without loading
+		// the visible screen. Keep the last dashboard covered by a poll or
+		// full refresh, and compare it even when the next poll returns 304.
+		if msg.poll || msg.req == a.pairedTodayReq {
+			changed := msg.poll && todayPayloadChanged(a.pollBaseline, a.today)
+			a.pollBaseline = a.today
+			if changed || dayBefore != a.clock.Today {
 				if len(a.overlays) > 0 {
-					a.overlayDirty = true
+					a.baseDirty = true
 				} else if a.current() != a.tabs[TabToday] {
 					cmds = append(cmds, a.current().load(a))
 				}
@@ -200,6 +212,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// it runs under the mutation guard. It cannot have saved this attempt.
 			if errors.As(msg.err, &read) {
 				cmd = a.handleReadErr(read.err)
+				a.banner.owner = a.form
 			} else {
 				cmd = a.handleErr(msg.err)
 			}
@@ -219,10 +232,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		var after tea.Cmd
 		// The refresh below covers any screen revealed by the success hook.
-		a.overlayDirty = false
+		a.overlayDirty, a.baseDirty = false, false
 		if msg.after != nil {
 			after = msg.after(a, msg.resp)
 		}
+		a.overlayDirty = len(a.overlays) > 0
 		return a, tea.Batch(a.refresh(), after)
 	}
 
@@ -319,6 +333,7 @@ func (a *App) handleKey(k tea.KeyPressMsg) tea.Cmd {
 	if a.mode != ModeTabs || len(a.overlays) > 0 {
 		return nil
 	}
+	previousTab := a.tab
 	switch s := k.String(); s {
 	case "1", "2", "3", "4", "5":
 		a.tab = Tab(s[0] - '1')
@@ -330,6 +345,11 @@ func (a *App) handleKey(k tea.KeyPressMsg) tea.Cmd {
 		return a.quit()
 	default:
 		return nil
+	}
+	if previousTab != a.tab && a.pollReq != 0 && a.latest("today", a.pollReq) {
+		// The new tab has its own load. Discard an older poll, including its
+		// ETag, so the next tick can fetch the current aggregate.
+		a.nextReq("today")
 	}
 	return a.current().load(a)
 }
@@ -410,8 +430,10 @@ func (a *App) fetchToday(poll bool) tea.Cmd {
 }
 
 func (a *App) refresh() tea.Cmd {
-	a.overlayDirty = len(a.overlays) > 0
-	return tea.Batch(a.fetchToday(false), a.current().load(a))
+	a.baseDirty = len(a.overlays) > 0
+	today := a.fetchToday(false)
+	a.pairedTodayReq = a.reqSeq["today"]
+	return tea.Batch(today, a.current().load(a))
 }
 
 type opMsg struct {
@@ -447,6 +469,7 @@ func (a *App) enterMode(m Mode, s screen) tea.Cmd {
 }
 
 func (a *App) exitMode() tea.Cmd {
+	a.clearScreenBanner(a.modeScreen)
 	if a.exitWithMode {
 		return a.quit()
 	}
@@ -461,18 +484,21 @@ func (a *App) openOverlay(s screen) tea.Cmd {
 
 func (a *App) closeOverlay() tea.Cmd {
 	if n := len(a.overlays); n > 0 {
+		a.clearScreenBanner(a.overlays[n-1])
 		a.overlays[n-1] = nil
 		a.overlays = a.overlays[:n-1]
 		// AIDEV-NOTE: own ops refresh the visible overlay immediately. Coalesce
 		// the hidden tab/mode's reload until the last overlay is closed; polls
 		// deliberately do not reload overlays (CF02). Error/explicit refreshes
 		// and changed poll payloads also mark that underlying screen dirty.
-		// Closing an overlay explicitly reveals the next screen: reload it too,
-		// retaining the dirty flag until the underlying tab/mode is refreshed.
-		if a.overlayDirty {
-			if len(a.overlays) == 0 {
-				a.overlayDirty = false
+		// Only own operations also invalidate other overlays in the stack.
+		if len(a.overlays) == 0 {
+			a.overlayDirty = false
+			if a.baseDirty {
+				a.baseDirty = false
+				return a.current().load(a)
 			}
+		} else if a.overlayDirty {
 			return a.current().load(a)
 		}
 	}

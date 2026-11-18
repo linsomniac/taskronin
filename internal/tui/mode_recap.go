@@ -52,7 +52,7 @@ func (s *recapMode) update(a *App, msg tea.Msg) tea.Cmd {
 		return nil
 	}
 	if m.err != nil {
-		return s.state.finish(a, m.err)
+		return s.state.finish(a, m.err, s)
 	}
 	if m.day == nil || m.day.Date != s.date {
 		return nil
@@ -60,11 +60,11 @@ func (s *recapMode) update(a *App, msg tea.Msg) tea.Cmd {
 	selected := s.selected()
 	s.state.finish(a, nil)
 	s.day, s.rows = m.day, nil
-	for _, b := range m.day.Blocks {
-		s.rows = append(s.rows, recapRow{block: &b})
+	for i := range m.day.Blocks {
+		s.rows = append(s.rows, recapRow{block: &m.day.Blocks[i]})
 	}
-	for _, e := range m.day.Unlinked {
-		s.rows = append(s.rows, recapRow{entry: &e})
+	for i := range m.day.Unlinked {
+		s.rows = append(s.rows, recapRow{entry: &m.day.Unlinked[i]})
 	}
 	// A task can own several blocks, and block/entry IDs occupy separate
 	// namespaces. Follow the row's own identity, then clamp if it disappeared.

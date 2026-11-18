@@ -34,7 +34,10 @@ func todayPayloadChanged(before, after *api.Today) bool {
 	}
 	// CF02: the server ETag includes clock.now, so real polls normally return
 	// 200. Compare copies without Clock to avoid resetting other screens for
-	// clock ticks while still accepting the new clock and ETag in App.
+	// clock ticks. The civil date still matters for date-scoped screen loads.
+	if before.Clock.Today != after.Clock.Today {
+		return true
+	}
 	b, a := *before, *after
 	b.Clock, a.Clock = api.Clock{}, api.Clock{}
 	return !reflect.DeepEqual(b, a)

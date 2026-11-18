@@ -81,6 +81,7 @@ func (f *form) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
 	}
 	switch k.String() {
 	case "esc":
+		a.clearScreenBanner(f)
 		a.form = nil
 		if f.retry != nil {
 			a.setBanner(bannerError, "closed — the first attempt may have saved; check before re-adding")
@@ -170,20 +171,22 @@ func (f *form) send(a *App) tea.Cmd {
 	snapshot := f.retry
 	var send sendFunc
 	var gen, key string
-	var err error
 	at := a.clock.Now.Time
 	if snapshot != nil && value == snapshot.value {
 		send = snapshot.send
 	} else {
-		if snapshot != nil {
-			f.dropRetry(a)
-			snapshot = nil
+		// A changed log submission resolves its implicit link before capturing
+		// the body. Keep the old key, body and label if parsing fails.
+		if snapshot != nil && f.onToday != nil {
+			f.onToday(a)
 		}
-		f.label, send, err = f.submit(a, value)
+		label, resolved, err := f.submit(a, value)
 		if err != nil {
 			f.errText = err.Error()
 			return nil
 		}
+		f.label, send = label, resolved
+		f.retry, f.retryBusy, snapshot = nil, false, nil
 	}
 	f.waiting, f.errText = true, ""
 	// AIDEV-NOTE: retry snapshot. Resolve once in Update and capture the FIRST

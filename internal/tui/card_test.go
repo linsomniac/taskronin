@@ -641,6 +641,9 @@ func TestCardBulkAcceptanceDoesNotMarkUnpresentedTasksSeen(t *testing.T) { // M2
 	d := a.modeScreen.(*cardMode).deck
 	selectedID(t, a, 3)
 	eq(t, d.seen, map[int64]bool{1: true, 3: true})
+	if !strings.Contains(viewText(a), "Card 2/2") {
+		t.Fatal(viewText(a))
+	}
 	eq(t, len(d.queue), 3)
 	press(t, a, "s")
 	if !strings.Contains(viewText(a), "Triage clear (1 skipped)") {

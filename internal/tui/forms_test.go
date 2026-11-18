@@ -775,3 +775,24 @@ func freshFormKey(t *testing.T, f *fakeAPI, method string) string {
 	}
 	return key
 }
+
+func TestFormInvalidEditPreservesRetry(t *testing.T) {
+	f := newFake()
+	a := newTestApp(t, f)
+	fm := openDeferForm(t, a)
+	f.errs["DeferTask"] = problem("busy", 503, "busy")
+	press(t, a, "enter")
+	first, snapshot := f.mustLast(t, "DeferTask"), fm.retry
+	typeText(t, a, "!")
+	press(t, a, "enter")
+	if fm.errText == "" || snapshot == nil || fm.retry != snapshot {
+		t.Fatal("invalid date must leave the retry snapshot intact")
+	}
+	eq(t, f.count("DeferTask"), 1)
+	_, cmd := a.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
+	drain(t, a, cmd)
+	press(t, a, "enter")
+	eq(t, f.mustLast(t, "DeferTask"), first)
+	eq(t, f.count("DeferTask"), 2)
+	eq(t, a.banner.text, "deferred")
+}

@@ -484,3 +484,12 @@ func TestLogTabEmptyAndRendering(t *testing.T) {
 		eq(t, a.form, nil)
 	}
 }
+
+func TestLogNilPageRetainsRows(t *testing.T) {
+	a, _ := logApp(t)
+	a.Update(entriesMsg{req: a.nextReq("entries")})
+	requireLogSelection(t, a, 9)
+	if !strings.Contains(viewText(a), "log not loaded") {
+		t.Fatal(viewText(a))
+	}
+}

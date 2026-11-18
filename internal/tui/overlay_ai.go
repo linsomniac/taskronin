@@ -69,7 +69,7 @@ func (s *aiScreen) update(a *App, msg tea.Msg) tea.Cmd {
 	}
 	if m.err != nil {
 		s.loadAll = false
-		return s.state.finish(a, m.err)
+		return s.state.finish(a, m.err, s)
 	}
 	s.state.finish(a, nil)
 	ops := slices.Clone(m.ai.Ops)

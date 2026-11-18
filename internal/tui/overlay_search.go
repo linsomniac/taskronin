@@ -67,7 +67,7 @@ func (s *searchScreen) update(a *App, msg tea.Msg) tea.Cmd {
 		return nil
 	}
 	if m.err != nil {
-		return s.state.finish(a, m.err)
+		return s.state.finish(a, m.err, s)
 	}
 	s.state.finish(a, nil)
 	s.page = m.page

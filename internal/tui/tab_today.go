@@ -35,7 +35,7 @@ func (s *todayScreen) update(a *App, msg tea.Msg) tea.Cmd {
 		return nil
 	}
 	var selected todayRow
-	inTail := s.cursor == len(s.rows) && s.scroll > 0
+	inTail := s.cursor == len(s.rows)
 	if s.cursor >= 0 && s.cursor < len(s.rows) {
 		selected = s.rows[s.cursor]
 	}

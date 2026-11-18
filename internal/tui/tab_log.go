@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -66,6 +67,9 @@ func (s *logScreen) update(a *App, msg tea.Msg) tea.Cmd {
 	if m.err != nil {
 		return s.state.finish(a, m.err)
 	}
+	if m.page == nil {
+		return s.state.finish(a, errors.New("missing log page"))
+	}
 	s.state.finish(a, nil)
 	s.to = m.to
 	items := slices.Clone(m.page.Items)
@@ -94,6 +98,7 @@ func (s *logScreen) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
 		if s.state != loadLoading && s.to != a.clock.Today {
 			return s.load(a), true
 		}
+		// Either direction can land on the last row: in a one-row list k stays there.
 		if s.list.cursor == len(s.list.items)-1 && s.nextCursor != "" && s.pageReq == 0 && s.state != loadLoading {
 			return s.loadPage(a, s.nextCursor, true), true
 		}

@@ -142,7 +142,7 @@ func (d *cardDeck) update(a *App, msg tea.Msg, target string) tea.Cmd {
 			return nil
 		}
 		if m.err != nil {
-			return d.state.finish(a, m.err)
+			return d.state.finish(a, m.err, a.modeScreen)
 		}
 		d.state.finish(a, nil)
 		for _, t := range m.tasks {
@@ -150,7 +150,7 @@ func (d *cardDeck) update(a *App, msg tea.Msg, target string) tea.Cmd {
 		}
 		d.refill(m.tasks)
 		if m.truncated {
-			a.setBanner(bannerInfo, "showing the first 2500")
+			a.setTruncationBanner(&d.state)
 		}
 	case opMsg:
 		var read *formReadError
@@ -234,7 +234,13 @@ func (d *cardDeck) view(a *App, w, h int) string {
 	}
 	// Position counts distinct presentations, not the backing-array index:
 	// starting at #2 of three presents Cards 1/3, 2/3, 3/3 as #2, #3, #1.
-	lines := []string{a.styles.Header.Render(a.line(fmt.Sprintf("Card %d/%d", len(d.seen), len(d.queue)), w))}
+	total := len(d.queue)
+	for id := range d.placedIDs {
+		if !d.seen[id] {
+			total--
+		}
+	}
+	lines := []string{a.styles.Header.Render(a.line(fmt.Sprintf("Card %d/%d", len(d.seen), total), w))}
 	add := func(text string) { lines = append(lines, a.line(text, w)) }
 	add(fmt.Sprintf("#%d %s", t.ID, t.Title))
 	for _, r := range t.Reasons {

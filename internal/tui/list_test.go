@@ -150,6 +150,9 @@ func TestListLoadPagination(t *testing.T) {
 			drain(t, a, func() tea.Msg { return msg })
 			if pages > 5 {
 				eq(t, a.banner.text, "showing the first 2500")
+				f.pages[""] = api.Page[api.Task]{}
+				drain(t, a, a.loadTasks("backlog", "backlog"))
+				eq(t, a.banner.text, "")
 			}
 		})
 	}

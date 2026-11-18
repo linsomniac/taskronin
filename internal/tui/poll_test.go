@@ -7,6 +7,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/exp/teatest/v2"
+
+	"taskronin/internal/api"
 )
 
 func TestPollNotModifiedKeepsState(t *testing.T) {
@@ -42,13 +44,15 @@ func TestPollChangeRefetchesVisibleTab(t *testing.T) {
 	eq(t, a.todayETag, `"a-3"`)
 	td.Clock.Generation = "fedcba9876543210"
 	f.setToday(td, `"a-4"`)
-	drain(t, a, func() tea.Msg { return pollMsg{} }) // The whole Clock is excluded.
+	drain(t, a, func() tea.Msg { return pollMsg{} }) // Clock settings alone do not reload the visible screen.
 	eq(t, s.loads, 2)
 	eq(t, a.clock, td.Clock)
 	td.TriageCount++
 	f.setToday(td, `"a-5"`)
-	drain(t, a, a.fetchToday(false)) // Own refreshes handle their visible load separately.
+	press(t, a, "l") // An unconditional Today read can discover the change first.
 	eq(t, s.loads, 2)
+	drain(t, a, a.poll()) // The new ETag now yields a 304.
+	eq(t, s.loads, 3)
 }
 
 func TestPollNeverReloadsOverlays(t *testing.T) {
@@ -275,4 +279,34 @@ func TestPollingRunsUnderTeatest(t *testing.T) {
 	}
 	tm.Send(key("q"))
 	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
+}
+
+func TestPollMidnightReloadsVisibleTab(t *testing.T) {
+	a, f := logApp(t)
+	td := *a.today
+	td.Clock.Today = td.Clock.Today.AddDays(1)
+	f.setToday(td, "midnight")
+	drain(t, a, a.poll())
+	eq(t, f.count("ListEntries"), 2)
+	eq(t, f.mustLast(t, "ListEntries").Q, logQuery("2026-10-16", "2026-10-29", ""))
+}
+
+func TestPollReplyAfterTabSwitch(t *testing.T) {
+	f := fakeWithToday(todayFixture())
+	a := newTestApp(t, f)
+	f.setToday(withFocusTitle(todayFixture(), "stale"), "old")
+	reply := a.poll()()
+	f.tasks["backlog"] = []api.Task{task(7, "current backlog")}
+	press(t, a, "3")
+	f.tasks["backlog"] = []api.Task{task(8, "unwanted reload")}
+	_, cmd := a.Update(reply)
+	drain(t, a, cmd)
+	eq(t, f.count("ListTasks"), 1)
+	selectedID(t, a, 7)
+	eq(t, a.todayETag, `"a-1"`)
+	eq(t, a.pollReq, 0)
+	f.setToday(withFocusTitle(todayFixture(), "fresh"), "fresh")
+	drain(t, a, a.poll())
+	eq(t, a.today.Focus.Title, "fresh")
+	eq(t, f.count("ListTasks"), 2)
 }

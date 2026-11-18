@@ -579,3 +579,42 @@ func TestRenderSelectedRow(t *testing.T) {
 		}
 	}
 }
+
+func TestEditorReadBannerClearsOnSuccessfulRetry(t *testing.T) {
+	f := newFake()
+	a := newTestApp(t, f)
+	f.errs["GetTask"] = notSent()
+	drain(t, a, a.editTask(7))
+	eq(t, a.banner.text, "cannot reach the Taskronin server")
+	reply := a.editTask(7)()
+	_, cmd := a.Update(reply)
+	eq(t, a.banner.text, "")
+	drain(t, a, cmd)
+}
+
+func TestReadBannerClearsWhenOwnerCloses(t *testing.T) {
+	for _, name := range []string{"overlay", "mode", "form"} {
+		t.Run(name, func(t *testing.T) {
+			f := newFake()
+			a := newTestApp(t, f)
+			exit := "esc"
+			switch name {
+			case "overlay":
+				f.errs["GetTask"] = notSent()
+				drain(t, a, a.openDetail(7))
+			case "mode":
+				f.errs["Day"] = notSent()
+				drain(t, a, a.enterMode(ModeRecap, newRecapMode(f.clock.Today)))
+				exit = "q"
+			case "form":
+				press(t, a, "a")
+				typeText(t, a, "read before send")
+				f.errs["Generation"] = notSent()
+				press(t, a, "enter")
+			}
+			eq(t, a.banner.text, "cannot reach the Taskronin server")
+			press(t, a, exit)
+			eq(t, a.banner.text, "")
+		})
+	}
+}

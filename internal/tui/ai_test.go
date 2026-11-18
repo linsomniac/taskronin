@@ -467,3 +467,20 @@ func TestFinalAILoadingIsNotFailure(t *testing.T) {
 	}
 	drain(t, a, retry)
 }
+
+func TestAIRevealedAfterPollRetainsTail(t *testing.T) {
+	a, f := aiApp(t, api.AIChanges{Ops: []api.OpSummary{aiOp(12)}, NextCursor: ptr("c2")}, api.AIChanges{Ops: []api.OpSummary{aiOp(8)}})
+	press(t, a, "A")
+	searchFor(t, a, "upper")
+	td := *a.today
+	td.AIChanges++
+	f.setToday(td, "changed")
+	drain(t, a, a.poll())
+	press(t, a, "esc")
+	eq(t, f.count("AIChanges"), 2)
+	if !strings.Contains(viewText(a), "8 10:00") {
+		t.Fatal(viewText(a))
+	}
+	press(t, a, "A")
+	eq(t, f.mustLast(t, "ReviewAIChanges").Req, api.ReviewRequest{ThroughSeq: 12})
+}

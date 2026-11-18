@@ -341,3 +341,24 @@ func TestTodaySelectedRowStaysVisible(t *testing.T) {
 		t.Fatal(viewText(a))
 	}
 }
+
+func TestTodayMovesBackFromEndWhenContentFits(t *testing.T) {
+	f := newFake()
+	f.today.DueSoon = []api.Task{task(1, "first"), task(2, "last")}
+	a := newTestApp(t, f)
+	press(t, a, "j", "j", "j")
+	_ = viewText(a) // Rendering clamps the tail scroll to zero when everything fits.
+	_, _, ok := a.current().selection()
+	eq(t, ok, false)
+	press(t, a, "k")
+	selectedID(t, a, 2)
+	// A clock tick between keystrokes must preserve the past-end position too.
+	press(t, a, "j")
+	_ = viewText(a)
+	td := *a.today
+	td.Clock.Now.Time = td.Clock.Now.Add(5 * time.Second)
+	f.setToday(td, "tick")
+	drain(t, a, a.poll())
+	press(t, a, "k")
+	selectedID(t, a, 2)
+}

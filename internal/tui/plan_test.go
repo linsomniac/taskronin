@@ -67,11 +67,18 @@ func TestPlanFlow(t *testing.T) { // D§4.1 walkthrough.
 	press(t, a, "j", "B")
 	typeText(t, a, "16:00-17:00")
 	f.blocks = append(f.blocks, api.Block{ID: 3, TaskID: 8, TaskTitle: "second", Date: f.clock.Today, Start: 960, End: 1020, Status: "planned"})
+	f.tasks["backlog"] = []api.Task{task(8, "second, refreshed"), task(7, "first")}
+	backlogReads := f.count("ListTasks")
 	reads := f.count("ListBlocks")
 	press(t, a, "enter")
 	eq(t, f.mustLast(t, "BlockTask"), call{Method: "BlockTask", ID: 8, Mut: client.Mut{Key: freshFormKey(t, f, "BlockTask"), IfMatch: "g-8"}, Req: api.BlockRequest{Date: f.clock.Today, Start: 960, End: 1020}})
 	if f.count("ListBlocks") <= reads {
 		t.Fatal("successful block did not reload today's blocks")
+	}
+	eq(t, f.count("ListTasks"), backlogReads+1)
+	selectedID(t, a, 8)
+	if !strings.Contains(viewText(a), "› #8 second, refreshed") {
+		t.Fatal(viewText(a))
 	}
 	eq(t, a.modeScreen.(*planMode).step2Blocked, 1)
 	press(t, a, "enter")
@@ -407,6 +414,20 @@ func TestPlanRender(t *testing.T) {
 				}
 			}
 			press(t, a, "enter")
+		}
+	}
+}
+
+func TestPlanFreeSlotsAt80Columns(t *testing.T) {
+	f := newFake()
+	for _, start := range []civil.Minute{660, 780, 900} {
+		f.blocks = append(f.blocks, api.Block{Start: start, End: civil.EndMinute(start + 30), Status: "planned"})
+	}
+	a := planApp(t, f)
+	a.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	for _, span := range []string{"10:00–11:00", "11:30–13:00", "13:30–15:00", "15:30–24:00"} {
+		if !strings.Contains(viewText(a), span) {
+			t.Fatalf("missing %s:\n%s", span, viewText(a))
 		}
 	}
 }

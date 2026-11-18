@@ -111,7 +111,7 @@ func (s *planMode) update(a *App, msg tea.Msg) tea.Cmd {
 			return nil
 		}
 		if m.err != nil {
-			return s.backlogState.finish(a, m.err)
+			return s.backlogState.finish(a, m.err, s)
 		}
 		s.list.set(m.tasks)
 		s.backlogLoaded = true
@@ -121,7 +121,7 @@ func (s *planMode) update(a *App, msg tea.Msg) tea.Cmd {
 			return nil
 		}
 		if m.err != nil {
-			return s.blocksState.finish(a, m.err)
+			return s.blocksState.finish(a, m.err, s)
 		}
 		s.blocks = m.blocks
 		s.blocksLoaded = true
@@ -209,6 +209,7 @@ func (s *planMode) freeText(a *App) string {
 	if !s.blocksLoaded {
 		return s.blocksState.notice("blocks")
 	}
+	// AIDEV-NOTE: clock.Now advances on Today fetches (normally the 5 s poll).
 	from := a.clock.Now.Hour()*60 + a.clock.Now.Minute()
 	var spans []string
 	for _, slot := range freeSlots(s.blocks, from) {
@@ -244,7 +245,7 @@ func (s *planMode) view(a *App, w, h int) string {
 			right = append(right, notice)
 		}
 		if s.blocksLoaded {
-			right = append(right, s.freeText(a))
+			right = append(right, strings.Split(lipgloss.Wrap(s.freeText(a), rightWidth, ""), "\n")...)
 		}
 		for i, text := range right {
 			if i == len(left) {

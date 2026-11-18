@@ -208,7 +208,7 @@ func (s *listTab) accept(a *App, tasks []api.Task, truncated bool, err error) te
 	if err == nil {
 		s.list.set(tasks)
 		if truncated {
-			a.setBanner(bannerInfo, "showing the first 2500")
+			a.setTruncationBanner(&s.state)
 		}
 	}
 	return cmd
