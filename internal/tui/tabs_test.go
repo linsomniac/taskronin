@@ -211,7 +211,9 @@ func TestListTabsEmpty(t *testing.T) {
 		tab  Tab
 		want string
 	}{
-		{TabTriage, "nothing in triage"}, {TabBacklog, "backlog is empty"}, {TabUpcoming, "nothing upcoming"},
+		{TabTriage, "Triage clear ✓ — nothing needs a decision"},
+		{TabBacklog, "Backlog empty — a adds a task"},
+		{TabUpcoming, "Nothing deferred, nothing due soon"},
 	} {
 		t.Run(tc.want, func(t *testing.T) {
 			f := newFake()
@@ -223,6 +225,43 @@ func TestListTabsEmpty(t *testing.T) {
 			eq(t, a.form, nil)
 			eq(t, len(a.overlays), 0)
 			eq(t, f.count("PlaceTask")+f.count("CompleteTask")+f.count("DropTask")+f.count("GetTask")+f.count("SetFocus"), 0)
+		})
+	}
+}
+
+func TestEmptyStatesWaitForLoad(t *testing.T) {
+	for _, tc := range []struct {
+		tab           Tab
+		mode          Mode
+		method, label string
+		empty         string
+	}{
+		{TabToday, ModeTabs, "Today", "Today", "Nothing scheduled"},
+		{TabTriage, ModeTabs, "ListTasks", "triage", "Triage clear"},
+		{TabBacklog, ModeTabs, "ListTasks", "backlog", "Backlog empty"},
+		{TabUpcoming, ModeTabs, "Upcoming", "upcoming", "Nothing deferred"},
+		{TabLog, ModeTabs, "ListEntries", "log", "No entries for"},
+		{TabToday, ModePlan, "ListTasks", "backlog", "Backlog empty"},
+		{TabToday, ModeRecap, "Day", "day", "Nothing to recap"},
+	} {
+		t.Run(tc.label+fmt.Sprint(tc.mode), func(t *testing.T) {
+			f := newFake()
+			f.days[f.clock.Today] = api.Day{Date: f.clock.Today}
+			a := newTestApp(t, f, func(c *Config) { c.StartTab, c.StartMode = tc.tab, tc.mode })
+			f.errs[tc.method] = notSent()
+			cmd := a.refresh()
+			if out := viewText(a); strings.Contains(out, tc.empty) {
+				t.Errorf("loading showed %q:\n%s", tc.empty, out)
+			}
+			drain(t, a, cmd)
+			out := viewText(a)
+			if !strings.Contains(out, tc.label+" not loaded · r retries") || strings.Contains(out, tc.empty) {
+				t.Fatalf("failed load:\n%s", out)
+			}
+			press(t, a, "r")
+			if out = viewText(a); !strings.Contains(out, tc.empty) || strings.ContainsRune(out, '\x1b') {
+				t.Fatalf("retry, color off: %q", out)
+			}
 		})
 	}
 }

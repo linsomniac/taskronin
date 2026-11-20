@@ -64,6 +64,15 @@ func requireLogSelection(t *testing.T, a *App, id int64) {
 	t.Fatalf("entry e%d is not visibly selected:\n%s", id, viewText(a))
 }
 
+func TestLogTabEmptyRange(t *testing.T) {
+	a := newTestApp(t, newFake(), func(c *Config) { c.StartTab = TabLog })
+	// The displayed range still ends on Wednesday until a new range loads.
+	a.clock.Today = a.clock.Today.AddDays(1)
+	if out := viewText(a); !strings.Contains(out, "No entries for Thu 10-15 — l logs work") {
+		t.Fatal(out)
+	}
+}
+
 func TestLogTabRangeAndPaging(t *testing.T) {
 	a, f := logApp(t)
 	eq(t, f.count("ListEntries"), 1)

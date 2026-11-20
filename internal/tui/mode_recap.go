@@ -208,6 +208,27 @@ func (p *recapLogPicker) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
 	return a.openLog(p.date, link{TaskID: id, Has: !none, Why: "selected"}), true
 }
 
+func recapSummary(day *api.Day) string {
+	worked, missed, review := 0, 0, len(day.Unlinked)
+	for _, b := range day.Blocks {
+		switch b.Status {
+		case "worked", "done":
+			worked++
+		case "missed":
+			missed++
+		case "planned":
+			review++
+		}
+	}
+	if review > 0 {
+		return fmt.Sprintf("%d worked · %d missed · %d to review", worked, missed, review)
+	}
+	if worked+missed > 0 {
+		return fmt.Sprintf("Recap complete · %d worked · %d missed", worked, missed)
+	}
+	return "Nothing to recap for " + logDay(day.Date)
+}
+
 func (s *recapMode) view(a *App, w, h int) string {
 	var notice []string
 	if text := s.state.retainedNotice("day", s.day != nil); text != "" {
@@ -218,7 +239,9 @@ func (s *recapMode) view(a *App, w, h int) string {
 	if s.day == nil {
 		return clip(append(lines, notice...), w, h)
 	}
-	lines = append(lines, a.line("j/k/↑/↓ move · w worked · m missed · a auto · x done · l log · L link", w))
+	if s.state == loadLoaded {
+		lines = append(lines, a.line(recapSummary(s.day), w))
+	}
 	selectedLine := -1
 	for i, row := range s.rows {
 		var text string
@@ -243,9 +266,6 @@ func (s *recapMode) view(a *App, w, h int) string {
 			selectedLine = len(lines)
 		}
 		lines = append(lines, a.styledRow(text, w, i == s.cursor))
-	}
-	if len(s.rows) == 0 {
-		lines = append(lines, a.line("no blocks or unlinked entries", w))
 	}
 	if len(s.day.Interruptions) > 0 {
 		lines = append(lines, a.line("Interruptions", w))

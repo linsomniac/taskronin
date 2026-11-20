@@ -194,7 +194,18 @@ func (s *todayScreen) view(a *App, w, h int) string {
 	} else if b != nil {
 		focus = "▷ " + a.id("#", b.TaskID) + " " + textsafe.SanitizeLine(b.TaskTitle) + " (→" + hhmm(int(b.End)) + ")"
 	}
-	lines := []string{renderOver(a.styles.Current, textsafe.Truncate(focus, w, "…")), a.styles.Head.Render(a.line("Blocks", w))}
+	lines := []string{renderOver(a.styles.Current, textsafe.Truncate(focus, w, "…"))}
+	quiet := len(td.Blocks) == 0 && td.TriageCount == 0 && len(td.Entries) == 0 && len(td.Interruptions) == 0
+	if quiet {
+		if a.todayLoad == loadLoaded {
+			lines = append(lines, a.styles.Dim.Render(a.line("Nothing scheduled, nothing to triage · a adds · 2 opens triage", w)))
+		}
+	} else {
+		lines = append(lines, a.styles.Head.Render(a.line("Blocks", w)))
+		if len(td.Blocks) == 0 && a.todayLoad == loadLoaded {
+			lines = append(lines, a.styles.Dim.Render(a.line("  none planned today", w)))
+		}
+	}
 	selectedLine := -1
 	anchor := s.cursor
 	if anchor == len(s.rows) {
@@ -219,7 +230,9 @@ func (s *todayScreen) view(a *App, w, h int) string {
 		}
 		lines = append(lines, line)
 	}
-	lines = append(lines, a.styles.Head.Render(a.line(fmt.Sprintf("Triage %d", td.TriageCount), w)))
+	if !quiet {
+		lines = append(lines, a.styles.Head.Render(a.line(fmt.Sprintf("Triage %d", td.TriageCount), w)))
+	}
 	for i, task := range td.TriageTop[:min(5, len(td.TriageTop))] {
 		selected := len(td.Blocks)+i == s.cursor
 		if len(td.Blocks)+i == anchor {
@@ -244,7 +257,9 @@ func (s *todayScreen) view(a *App, w, h int) string {
 			}
 		}
 	}
-	lines = append(lines, a.styles.Head.Render(a.line("Log", w)))
+	if !quiet {
+		lines = append(lines, a.styles.Head.Render(a.line("Log", w)))
+	}
 	for _, e := range td.Entries {
 		lines = append(lines, a.styledRow(a.entryText(e, " "), w, false))
 	}
@@ -265,17 +280,16 @@ func (s *todayScreen) view(a *App, w, h int) string {
 		lines = append(lines, a.styles.Info.Render(a.line(fmt.Sprintf("AI changes: %d unreviewed — A to review", td.AIChanges), w)))
 	}
 
-	health := "Backup: healthy"
 	if !td.Backup.Healthy {
-		health = "Backup: needs attention"
+		health := "Backup: needs attention"
+		if td.Backup.LastSuccessAt != nil {
+			health += " · last success " + td.Backup.LastSuccessAt.Format("2006-01-02 15:04")
+		}
+		if td.Backup.LastError != "" {
+			health += " · " + td.Backup.LastError
+		}
+		lines = append(lines, a.line(health, w))
 	}
-	if td.Backup.LastSuccessAt != nil {
-		health += " · last success " + td.Backup.LastSuccessAt.Format("2006-01-02 15:04")
-	}
-	if td.Backup.LastError != "" {
-		health += " · " + td.Backup.LastError
-	}
-	lines = append(lines, a.line(health, w))
 	for _, b := range td.Banners {
 		if b.Kind == "ai_changes" {
 			continue // The dedicated AI notice above includes the review shortcut.

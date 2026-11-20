@@ -35,5 +35,5 @@ func (s *triageScreen) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
 }
 
 func (s *triageScreen) view(a *App, w, h int) string {
-	return s.listTab.view(a, "triage", "nothing in triage", w, h, nil)
+	return s.listTab.view(a, "triage", "Triage clear ✓ — nothing needs a decision", w, h, nil)
 }

@@ -82,5 +82,5 @@ func (s *upcomingScreen) view(a *App, w, h int) string {
 	if len(s.list.items) > s.deferred {
 		headings[s.deferred] = "Due soon"
 	}
-	return s.listTab.view(a, "upcoming", "nothing upcoming", w, h, headings)
+	return s.listTab.view(a, "upcoming", "Nothing deferred, nothing due soon", w, h, headings)
 }

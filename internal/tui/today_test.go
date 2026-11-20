@@ -43,6 +43,39 @@ func withFocusTitle(td api.Today, title string) api.Today {
 	return td
 }
 
+func TestTodayQuietDay(t *testing.T) {
+	const quiet = "Nothing scheduled, nothing to triage · a adds · 2 opens triage"
+	for _, color := range []bool{false, true} {
+		f := newFake()
+		f.today.Backup.Healthy = true
+		a := newTestApp(t, f, func(c *Config) { c.Color = color })
+		out := viewText(a)
+		if !strings.Contains(out, a.styles.Dim.Render(quiet)) || strings.Contains(out, "Backup:") {
+			t.Errorf("quiet day, color=%v:\n%s", color, out)
+		}
+		if !color {
+			eq(t, a.current().view(a, 100, 30), "no focus\n"+quiet)
+		}
+
+		f.today.Backup = api.BackupHealth{LastSuccessAt: &f.clock.Now, LastError: "disk full"}
+		f.today.DueSoon = []api.Task{task(7, "renew certificate")}
+		drain(t, a, a.fetchToday(false))
+		out = viewText(a)
+		for _, want := range []string{quiet, "renew certificate", "Backup: needs attention · last success 2026-10-28 10:00 · disk full"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("missing %q:\n%s", want, out)
+			}
+		}
+
+		f.today.TriageCount = 1
+		drain(t, a, a.fetchToday(false))
+		out = viewText(a)
+		if !strings.Contains(out, a.styles.Head.Render("Blocks")+"\n"+a.styles.Dim.Render("  none planned today")) || strings.Contains(out, quiet) {
+			t.Errorf("empty Blocks section:\n%s", out)
+		}
+	}
+}
+
 func TestTodayRender(t *testing.T) { // BLK-48, BLK-17/RCP-06, INT-08 (TUI side).
 	v := viewText(newTestApp(t, fakeWithToday(todayFixture())))
 	for _, s := range []string{

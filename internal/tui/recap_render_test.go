@@ -44,6 +44,42 @@ func TestRecapShowsInterruptions(t *testing.T) { // INT-08 (TUI side).
 	}
 }
 
+func TestRecapSummary(t *testing.T) {
+	f := newFake()
+	date := f.clock.Today.AddDays(-1)
+	d := recapFixture(date) // One missed, one worked, one unlinked entry.
+	d.Blocks = append(d.Blocks, api.Block{ID: 3, Date: date, Status: "done"},
+		api.Block{ID: 4, Date: date, Status: "cancelled"}, api.Block{ID: 5, Date: date, Status: "planned"})
+	d.Unlinked = append(d.Unlinked, api.Entry{ID: 7, WorkDate: date})
+	f.days[date] = d
+	a := recapApp(t, f, date)
+	check := func(summary string) {
+		t.Helper()
+		out := viewText(a)
+		if !strings.Contains(out, "Recap Tue 2026-10-27\n"+summary+"\n") || strings.ContainsRune(out, '\x1b') {
+			t.Errorf("missing second header line %q in plain frame:\n%s", summary, out)
+		}
+		if strings.Contains(a.current().view(a, 100, 30), "w worked") {
+			t.Error("key legend still in recap body")
+		}
+	}
+	check("2 worked · 1 missed · 3 to review")
+	d.Blocks = slices.Clone(d.Blocks)
+	d.Blocks[4].Status = "cancelled"
+	for _, e := range d.Unlinked {
+		e.TaskID = ptr(int64(2))
+		d.Entries = append(d.Entries, e)
+	}
+	d.Unlinked = nil
+	f.days[date] = d
+	drain(t, a, a.refresh())
+	check("Recap complete · 2 worked · 1 missed")
+
+	f.days[date] = api.Day{Date: date}
+	drain(t, a, a.refresh())
+	check("Nothing to recap for Tue 10-27")
+}
+
 func TestRecapDateHeader(t *testing.T) {
 	for _, tc := range []struct {
 		date civil.Date
@@ -163,7 +199,7 @@ func TestRecapLoadingFailureAndEmptyDay(t *testing.T) {
 	eq(t, f.count("Day"), 1)
 	f.days[date] = api.Day{Date: date}
 	drain(t, a, a.refresh())
-	if !strings.Contains(viewText(a), "no blocks or unlinked entries") {
+	if !strings.Contains(viewText(a), "Nothing to recap for Tue 10-27") {
 		t.Fatal(viewText(a))
 	}
 	press(t, a, "l")

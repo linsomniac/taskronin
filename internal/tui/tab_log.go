@@ -43,7 +43,7 @@ func (s *logScreen) load(a *App) tea.Cmd {
 
 func (s *logScreen) loadPage(a *App, cursor string, appendPage bool) tea.Cmd {
 	req, ctx, c := a.nextReq("entries"), a.ctx, a.api
-	from, to := a.clock.Today.AddDays(-13), a.clock.Today
+	from, to := logRangeStart(a.clock.Today), a.clock.Today
 	q := client.EntryQuery{From: &from, To: &to, PageQuery: client.PageQuery{Limit: 100, Cursor: cursor}}
 	if appendPage {
 		s.pageReq = req
@@ -150,7 +150,7 @@ func (s *logScreen) view(a *App, w, h int) string {
 		if notice != "" {
 			return a.line(notice, w)
 		}
-		return a.line("no log entries", w)
+		return a.line("No entries for "+logDay(logRangeStart(s.to))+" — l logs work", w)
 	}
 	bodyHeight := h
 	if notice != "" {
@@ -174,6 +174,9 @@ func (s *logScreen) view(a *App, w, h int) string {
 	}
 	return body
 }
+
+// The Log tab includes both endpoints of its 14-day range.
+func logRangeStart(to civil.Date) civil.Date { return to.AddDays(-13) }
 
 func logDay(date civil.Date) string {
 	return fmt.Sprintf("%.3s %s", date.Weekday(), date.String()[5:])

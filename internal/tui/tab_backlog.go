@@ -77,5 +77,5 @@ func (s *backlogScreen) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
 }
 
 func (s *backlogScreen) view(a *App, w, h int) string {
-	return s.listTab.view(a, "backlog", "backlog is empty", w, h, nil)
+	return s.listTab.view(a, "backlog", "Backlog empty — a adds a task", w, h, nil)
 }

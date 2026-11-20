@@ -373,16 +373,11 @@ func TestRowPaddingFitsWidth(t *testing.T) {
 }
 
 func TestRenderColorFrameClips(t *testing.T) {
-	a := newTestApp(t, newFake(), func(c *Config) { c.Color = true })
-	a.Update(tea.WindowSizeMsg{Width: 20, Height: 8})
-	a.setTabScreen(TabToday, &shellScreen{body: a.row(strings.Repeat("宽", 40), 80, true)})
-	a.form = &shellScreen{body: a.styles.Info.Render("prompt\ninput\nhint")}
-	a.setBanner(bannerError, strings.Repeat("宽", 40))
-	for _, fullHelp := range []bool{false, true} {
-		a.help.ShowAll = fullHelp
+	check := func(a *App) {
+		t.Helper()
 		out := viewText(a)
-		if !strings.ContainsRune(out, '\x1b') {
-			t.Fatal("frame did not exercise color styles")
+		if strings.ContainsRune(out, '\x1b') != a.cfg.Color {
+			t.Fatalf("color=%v, frame=%q", a.cfg.Color, out)
 		}
 		lines := strings.Split(out, "\n")
 		if len(lines) > 8 {
@@ -393,6 +388,31 @@ func TestRenderColorFrameClips(t *testing.T) {
 				t.Fatalf("oversized color line: %q", line)
 			}
 		}
+	}
+	a := newTestApp(t, newFake(), func(c *Config) { c.Color = true })
+	a.Update(tea.WindowSizeMsg{Width: 20, Height: 8})
+	a.setTabScreen(TabToday, &shellScreen{body: a.row(strings.Repeat("宽", 40), 80, true)})
+	a.form = &shellScreen{body: a.styles.Info.Render("prompt\ninput\nhint")}
+	a.setBanner(bannerError, strings.Repeat("宽", 40))
+	for _, fullHelp := range []bool{false, true} {
+		a.help.ShowAll = fullHelp
+		check(a)
+	}
+	for _, color := range []bool{false, true} {
+		f := newFake()
+		f.days[f.clock.Today] = api.Day{Date: f.clock.Today}
+		a := newTestApp(t, f, func(c *Config) { c.Color = color })
+		a.Update(tea.WindowSizeMsg{Width: 20, Height: 8})
+		for _, tab := range []string{"1", "2", "3", "4", "5"} {
+			press(t, a, tab)
+			check(a)
+		}
+		drain(t, a, a.enterMode(ModePlan, newPlanMode()))
+		check(a)
+		press(t, a, "enter")
+		check(a)
+		drain(t, a, a.enterMode(ModeRecap, newRecapMode(f.clock.Today)))
+		check(a)
 	}
 }
 

@@ -82,13 +82,31 @@ func TestPlanFlow(t *testing.T) { // D§4.1 walkthrough.
 	}
 	eq(t, a.modeScreen.(*planMode).step2Blocked, 1)
 	press(t, a, "enter")
-	for _, want := range []string{"placed 1 · blocked 2 · triage left 0", "09:00–10:00", "13:00–15:00", "16:00–17:00", "#8 second"} {
+	for _, want := range []string{"Plan 3/3 · enter/q ends\nPlan done · placed 1 · blocked 2 · triage clear", "09:00–10:00", "13:00–15:00", "16:00–17:00", "#8 second"} {
 		if !strings.Contains(viewText(a), want) {
 			t.Fatalf("missing %q: %s", want, viewText(a))
 		}
 	}
 	press(t, a, "enter")
 	eq(t, a.quitting, true)
+}
+
+func TestPlanEmptyBacklogAndSummaryLoad(t *testing.T) {
+	f := newFake()
+	a := planApp(t, f)
+	if out := viewText(a); !strings.Contains(out, "Backlog empty — nothing to block") {
+		t.Fatal(out)
+	}
+	f.errs["Today"] = notSent()
+	press(t, a, "enter")
+	out := viewText(a)
+	if !strings.Contains(out, "Today not loaded · r retries") || strings.Contains(out, "triage clear") {
+		t.Fatal(out)
+	}
+	press(t, a, "r")
+	if out = viewText(a); !strings.Contains(out, "Plan done · placed 0 · blocked 0 · triage clear") || strings.ContainsRune(out, '\x1b') {
+		t.Fatal(out)
+	}
 }
 
 func TestPlanEmptyTriageStartsAtStep2(t *testing.T) {
@@ -374,7 +392,7 @@ func TestPlanSummaryAndExit(t *testing.T) {
 					drain(t, a, a.enterMode(ModePlan, newPlanMode()))
 				}
 				press(t, a, "s", "enter")
-				if !strings.Contains(viewText(a), "placed 0 · blocked 0 · triage left 1") {
+				if !strings.Contains(viewText(a), "Plan done · placed 0 · blocked 0 · triage left 1") {
 					t.Fatal(viewText(a))
 				}
 				press(t, a, exitKey)

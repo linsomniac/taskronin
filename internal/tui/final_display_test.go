@@ -38,7 +38,7 @@ func TestFinalHeaderWarningsAt80(t *testing.T) {
 	f.today.Banners = nil
 	f.today.Backup = api.BackupHealth{Healthy: true, LastSuccessAt: &f.clock.Now}
 	drain(t, a, a.fetchToday(false))
-	if body = a.current().view(a, 80, 40); !strings.Contains(body, "Backup: healthy") {
+	if body = a.current().view(a, 80, 40); strings.Contains(body, "Backup:") {
 		t.Fatal(body)
 	}
 }

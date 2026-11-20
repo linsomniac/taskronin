@@ -234,8 +234,8 @@ func (s *planMode) view(a *App, w, h int) string {
 		if notice := s.backlogState.retainedNotice("backlog", s.backlogLoaded); notice != "" {
 			left = append(left, a.line(notice, leftWidth))
 		}
-		if s.backlogLoaded && len(s.list.items) == 0 {
-			left = append(left, a.line("backlog is empty", leftWidth))
+		if s.backlogState == loadLoaded && len(s.list.items) == 0 {
+			left = append(left, a.line("Backlog empty — nothing to block", leftWidth))
 		} else {
 			body := s.list.render(a, leftWidth, max(0, h-1-len(left)), func(t api.Task, width int) string { return taskRow(a, t, width) })
 			left = append(left, strings.Split(body, "\n")...)
@@ -257,13 +257,17 @@ func (s *planMode) view(a *App, w, h int) string {
 		lines = append(lines, left...)
 		return clip(lines, w, h)
 	}
-	triageLeft := 0
-	if a.today != nil {
-		triageLeft = a.today.TriageCount
+	summary := a.todayLoad.notice("Today")
+	if a.todayLoad == loadLoaded && a.today != nil {
+		triage := "triage clear"
+		if a.today.TriageCount > 0 {
+			triage = fmt.Sprintf("triage left %d", a.today.TriageCount)
+		}
+		summary = fmt.Sprintf("Plan done · placed %d · blocked %d · %s", s.deck.placed, s.deck.blocked+s.step2Blocked, triage)
 	}
 	lines := []string{
 		a.line("Plan 3/3 · enter/q ends", w),
-		a.line(fmt.Sprintf("placed %d · blocked %d · triage left %d", s.deck.placed, s.deck.blocked+s.step2Blocked, triageLeft), w),
+		a.line(summary, w),
 		a.line("Today's blocks · "+a.clock.Today.String(), w),
 	}
 	if s.blocksState != loadLoaded {
