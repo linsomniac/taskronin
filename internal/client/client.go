@@ -62,21 +62,17 @@ func readToken(path string) (string, error) {
 		if errors.Is(err, os.ErrNotExist) {
 			return "", fmt.Errorf("%w: %s not found — run `tkr init` (or pass --token-file)", ErrTokenFile, path)
 		}
-		return "", tokenFileError(path, err)
+		return "", &TokenFileError{Path: path, Err: err}
 	}
 	data, err := os.ReadFile(path) //nolint:gosec // G304: the user's own token file, checked by fsutil.CheckPrivate first
 	if err != nil {
-		return "", tokenFileError(path, err)
+		return "", &TokenFileError{Path: path, Err: err}
 	}
 	token := strings.TrimRight(string(data), "\r\n ")
 	if !strings.HasPrefix(token, "tkr_") || strings.ContainsAny(token, "\r\n") {
-		return "", tokenFileError(path, errors.New("invalid token content"))
+		return "", &TokenFileError{Path: path, Err: errors.New("invalid token content")}
 	}
 	return token, nil
-}
-
-func tokenFileError(path string, err error) error {
-	return fmt.Errorf("%w: %s: %w — run `tkr init` (or pass --token-file)", ErrTokenFile, path, err)
 }
 
 // NewFromConfig uses the resolved client configuration and supplied channel.

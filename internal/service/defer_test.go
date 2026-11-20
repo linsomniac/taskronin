@@ -420,6 +420,9 @@ func TestDAT05(t *testing.T) {
 			until := testutil.Moment(tc.moment)
 			_, err := s.Svc.Defer(s.Ctx(), s.Meta(), service.DeferIn{ID: id, Expect: s.Expect(id), Until: &until})
 			testutil.RequireCode(t, err, domain.CodeValidation)
+			if de, _ := domain.AsError(err); de.Detail != "defer must be in the future" {
+				t.Fatalf("API problem detail = %q", de.Detail)
+			}
 			_, err = s.Svc.AddTask(s.Ctx(), s.Meta(), service.AddTaskIn{Title: "B", Place: &service.AddPlacement{How: "defer", Defer: until}})
 			testutil.RequireCode(t, err, domain.CodeValidation)
 			if s.OpCount() != 1 || s.Task(id).DeferDate.Valid {

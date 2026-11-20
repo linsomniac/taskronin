@@ -1,6 +1,9 @@
 package civil
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 func TestParseHHMM(t *testing.T) {
 	for _, tc := range []struct {
@@ -20,6 +23,16 @@ func TestParseHHMM(t *testing.T) {
 		}
 		if tc.wantOK && got != tc.want {
 			t.Fatalf("ParseHHMM(%q,%v) = %d, want %d", tc.in, tc.allow, got, tc.want)
+		}
+	}
+}
+
+func TestClockError(t *testing.T) {
+	for input, reason := range map[string]string{"25:00": "hour out of range", "1:60": "minutes out of range", "9:5": "expected HH:MM"} {
+		_, err := ParseHHMM(input, false)
+		var clock *ClockError
+		if !errors.As(err, &clock) || clock.Value != input || clock.Reason != reason {
+			t.Errorf("ParseHHMM(%q) error = %#v", input, err)
 		}
 	}
 }

@@ -51,7 +51,7 @@ func scheduleBlockCommand(e *env, verb string) *cobra.Command {
 			}
 			span, err := datespec.ParseSpan(spanText, datespec.Future, ref)
 			if err != nil {
-				return usagef("%s: %s", verb, err)
+				return dateUsage(verb, err)
 			}
 			req := api.BlockRequest{Date: span.Date, Start: span.Start, End: span.End}
 			c, err := e.client()

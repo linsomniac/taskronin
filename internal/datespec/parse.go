@@ -4,6 +4,7 @@ package datespec
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -28,6 +29,17 @@ type Ref struct {
 	Today     civil.Date
 	WeekStart time.Weekday
 }
+
+// InputError keeps historical problem JSON available to the CLI while
+// Error describes an input failure without implementation prefixes.
+type InputError struct {
+	detail, problemDetail string
+}
+
+func (e *InputError) Error() string { return e.detail }
+
+// ProblemDetail returns the original detail used in machine-readable errors.
+func (e *InputError) ProblemDetail() string { return e.problemDetail }
 
 // Parse resolves a date with an optional clock, or a bare clock on today.
 // Keywords are case-insensitive and surrounding whitespace is ignored.
@@ -93,13 +105,13 @@ func ParseSpan(s string, m Mode, r Ref) (domain.BlockSpan, error) {
 	if !ok {
 		return domain.BlockSpan{}, fmt.Errorf("invalid block span %q: expected start-end clocks", s)
 	}
-	start, err := ParseClock(startText, false)
+	start, err := parseClock(startText, false, "start")
 	if err != nil {
-		return domain.BlockSpan{}, fmt.Errorf("invalid block start: %w", err)
+		return domain.BlockSpan{}, err
 	}
-	end, err := ParseClock(endText, true)
+	end, err := parseClock(endText, true, "end")
 	if err != nil {
-		return domain.BlockSpan{}, fmt.Errorf("invalid block end: %w", err)
+		return domain.BlockSpan{}, err
 	}
 	if start >= end {
 		return domain.BlockSpan{}, fmt.Errorf("invalid block span %q: end must be after start on the same day", s)
@@ -110,7 +122,21 @@ func ParseSpan(s string, m Mode, r Ref) (domain.BlockSpan, error) {
 // ParseClock parses H:MM or HH:MM, trimming surrounding whitespace.
 // The clock 24:00 is accepted only when allow2400 is true.
 func ParseClock(s string, allow2400 bool) (civil.Minute, error) {
-	return civil.ParseHHMM(strings.TrimSpace(s), allow2400)
+	return parseClock(s, allow2400, "")
+}
+
+func parseClock(s string, allow2400 bool, blockField string) (civil.Minute, error) {
+	minute, err := civil.ParseHHMM(strings.TrimSpace(s), allow2400)
+	var clock *civil.ClockError
+	if errors.As(err, &clock) {
+		detail, wire := fmt.Sprintf("%q: %s", clock.Value, clock.Reason), clock.Error()
+		if blockField != "" {
+			detail = "block " + blockField + " " + detail
+			wire = "invalid block " + blockField + ": " + wire
+		}
+		return 0, &InputError{detail: detail, problemDetail: wire}
+	}
+	return minute, err
 }
 
 var isoDatePattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
@@ -157,7 +183,8 @@ func parseDate(s string, m Mode, r Ref) (civil.Date, error) {
 	// here so every accepted date can round-trip through the ISO grammar.
 	d, err := civil.ParseDate(r.Today.AddDays(offset).String())
 	if err != nil {
-		return civil.Date{}, fmt.Errorf("date specification %q resolves outside the supported calendar: %w", s, err)
+		detail := fmt.Sprintf("date specification %q resolves outside the supported calendar", s)
+		return civil.Date{}, &InputError{detail, detail + ": " + err.Error()}
 	}
 	return d, nil
 }

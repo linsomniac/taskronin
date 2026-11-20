@@ -123,7 +123,9 @@ func (e *env) pendingRetry(args []string) error {
 		if first == nil {
 			first = err
 		} else {
-			e.errorLine("tkr: pending request %s: %s", p.Key, problemFor(err).Detail)
+			problem := problemFor(err)
+			e.errorLine("tkr: pending request %s: %s", p.Key, problem.Detail)
+			e.problemHint(problem)
 		}
 		if errors.Is(err, client.ErrNotSent) || errors.Is(err, client.ErrOutcomeUnknown) {
 			break

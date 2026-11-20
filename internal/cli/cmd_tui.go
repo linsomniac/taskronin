@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"taskronin/internal/client"
+	"taskronin/internal/datespec"
 	"taskronin/internal/tui"
 )
 
@@ -54,6 +55,10 @@ func runTUI(cmd *cobra.Command, req TUIRequest) error {
 	})
 	if errors.Is(err, tui.ErrUsage) {
 		if req.Mode == "recap" && req.RecapDate != "" {
+			var input *datespec.InputError
+			if errors.As(err, &input) {
+				return dateUsage("--date", input)
+			}
 			return usagef("--date: %s", strings.TrimPrefix(err.Error(), tui.ErrUsage.Error()+": "))
 		}
 		return usagef("%v", err)

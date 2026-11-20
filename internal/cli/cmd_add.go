@@ -27,7 +27,7 @@ func addCommand(e *env) *cobra.Command {
 				return usagef("quote your title")
 			}
 			if len(args) != 1 {
-				return usagef("add requires a title")
+				return &usageError{detail: "add requires a title", humanDetail: `add needs a title: tkr add "…"`}
 			}
 			req.Title = args[0]
 			var placement string
@@ -94,7 +94,7 @@ func addCommand(e *env) *cobra.Command {
 				case "block":
 					span, err := datespec.ParseSpan(block, datespec.Future, ref)
 					if err != nil {
-						return usagef("--block: %s", err)
+						return dateUsage("--block", err)
 					}
 					req.Place.Block = &api.BlockRequest{Date: span.Date, Start: span.Start, End: span.End}
 				}
@@ -142,7 +142,7 @@ func addCommand(e *env) *cobra.Command {
 func parseCaptureMoment(value, flag string, ref datespec.Ref) (*api.Moment, error) {
 	moment, err := datespec.Parse(value, datespec.Future, ref)
 	if err != nil {
-		return nil, usagef("--%s: %s", flag, err)
+		return nil, dateUsage("--"+flag, err)
 	}
 	result := &api.Moment{Date: moment.Date}
 	if moment.Min.Valid {
@@ -221,7 +221,7 @@ func (e *env) addBlockAction(res *api.OpResponse) (opHeadline, error) {
 		if effect.Kind == "blocked" && effect.TaskID == res.Task.ID {
 			span, err := datespec.ParseSpan(effect.To, datespec.Future, datespec.Ref{})
 			if err != nil {
-				return nil, fmt.Errorf("invalid block in server response: %w", err)
+				return nil, fmt.Errorf("server returned an invalid block (%w)", err)
 			}
 			day := e.dayWord(span.Date)
 			return func(p paint) string {

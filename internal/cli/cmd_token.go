@@ -60,7 +60,7 @@ func tokenCreateCommand(e *env) *cobra.Command {
 				return usagef("--rate must not be negative")
 			}
 			if _, err := domain.ParseScopes(scopes); err != nil {
-				return usagef("--scopes: %s", err)
+				return &usageError{detail: "--scopes: " + err.Error(), humanDetail: "--scopes: unknown scope name"}
 			}
 			if expires == "" {
 				answer, err := e.promptExpiry()
@@ -97,7 +97,11 @@ func tokenCreateCommand(e *env) *cobra.Command {
 			}
 			if path != "" {
 				if err := writeTokenFile(e, path, created.Secret); err != nil {
-					return fmt.Errorf("token %q (id %d) was created but its secret could not be saved: %w; revoke it with `tkr token revoke %d` and retry", name, created.Token.ID, err, created.Token.ID)
+					failure := fmt.Errorf("its secret could not be saved: %w", err)
+					if !e.jsonOut {
+						failure = fmt.Errorf("saving its secret to %q failed (%w)", path, tokenWriteCause(err))
+					}
+					return fmt.Errorf("token %q (id %d) was created but %w; revoke it with `tkr token revoke %d` and retry", name, created.Token.ID, failure, created.Token.ID)
 				}
 				if e.jsonOut {
 					return json.NewEncoder(e.out).Encode(struct {
@@ -162,6 +166,18 @@ func (e *env) parseExpiry(s string) (api.Opt[api.Time], error) {
 		return api.Opt[api.Time]{}, usagef("--expires %s", err)
 	}
 	return api.Opt[api.Time]{Set: true, V: api.Time{Time: at.V}}, nil
+}
+
+func tokenWriteCause(err error) error {
+	var path *fs.PathError
+	if errors.As(err, &path) {
+		return path.Err
+	}
+	var link *os.LinkError
+	if errors.As(err, &link) {
+		return link.Err
+	}
+	return err
 }
 
 func writeTokenFile(e *env, path, secret string) error {

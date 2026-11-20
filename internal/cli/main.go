@@ -128,7 +128,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	root.SetArgs(append([]string{}, args...))
 	if _, err := root.ExecuteContextC(e.ctx); err != nil {
 		if !e.executing {
-			err = usagef("%s", err)
+			err = argumentUsage(err)
 		}
 		return e.fail(err)
 	}

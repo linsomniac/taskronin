@@ -37,7 +37,7 @@ func doneCommand(e *env) *cobra.Command {
 				}
 				moment, err := datespec.Parse(date, datespec.Past, ref)
 				if err != nil {
-					return usagef("--date: %s", err)
+					return dateUsage("--date", err)
 				}
 				if moment.Min.Valid {
 					return usagef("--date requires a date without a time")

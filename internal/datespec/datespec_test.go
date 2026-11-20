@@ -129,6 +129,19 @@ func TestUnrecognisedDateMessages(t *testing.T) {
 	}
 }
 
+func TestParseSpanClockErrors(t *testing.T) {
+	for input, want := range map[string]string{
+		"25:00-26:00": `block start "25:00": hour out of range`,
+		"09:00-24:01": `block end "24:01": hour out of range`,
+		"09:00-09:60": `block end "09:60": minutes out of range`,
+		"9:5-10:00":   `block start "9:5": expected HH:MM`,
+	} {
+		if _, err := ParseSpan(input, Future, ref); err == nil || err.Error() != want {
+			t.Errorf("ParseSpan(%q) error = %v, want %q", input, err, want)
+		}
+	}
+}
+
 func TestUnrecognisedSpanDateMessages(t *testing.T) {
 	const help = ": use today, yesterday, tomorrow, a weekday (mon…sun), +Nd/-Nd, +Nw/-Nw, or YYYY-MM-DD"
 	for _, tc := range []struct{ in, want string }{

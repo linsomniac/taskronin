@@ -32,7 +32,7 @@ func momentCommand(e *env, verb string) *cobra.Command {
 				}
 				parsed, err := datespec.Parse(args[1], datespec.Future, ref)
 				if err != nil {
-					return usagef("%s: %s", verb, err)
+					return dateUsage(verb, err)
 				}
 				moment.V.Date = parsed.Date
 				if parsed.Min.Valid {

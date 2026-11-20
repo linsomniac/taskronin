@@ -90,7 +90,6 @@ func newRoot(e *env) *cobra.Command {
 	// assigning only root.Context here would be overwritten by Cobra's execute.
 	e.ctx = context.WithValue(e.ctx, envKey{}, e)
 	root.SetContext(e.ctx)
-	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return usagef("%s", err) })
 	f := root.PersistentFlags()
 	f.BoolVar(&e.jsonOut, "json", false, "Print API JSON or problem JSON")
 	f.StringVar(&e.socket, "socket", "", "Override the server socket path")

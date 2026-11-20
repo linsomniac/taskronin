@@ -18,6 +18,22 @@ var (
 	ErrActorMismatch      = errors.New("pending request belongs to another actor")
 )
 
+// TokenFileError carries the credential path and the failed read or check.
+type TokenFileError struct {
+	Path string
+	Err  error
+}
+
+func (e *TokenFileError) Error() string {
+	return fmt.Sprintf("%s: %s: %s — run `tkr init` (or pass --token-file)", ErrTokenFile, e.Path, e.Err)
+}
+
+// Is recognizes the token-file exit class.
+func (e *TokenFileError) Is(target error) bool { return target == ErrTokenFile }
+
+// Unwrap retains the underlying filesystem error.
+func (e *TokenFileError) Unwrap() error { return e.Err }
+
 // ProblemError preserves the complete RFC 9457 problem and HTTP status.
 type ProblemError struct {
 	Status  int

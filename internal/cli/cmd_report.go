@@ -100,14 +100,14 @@ func reportRange(f reportFlags, r datespec.Ref) (from, to civil.Date, err error)
 	case f.from != "":
 		start, parseErr := datespec.Parse(f.from, datespec.Past, r)
 		if parseErr != nil {
-			return from, to, usagef("--from: %s", parseErr)
+			return from, to, dateUsage("--from", parseErr)
 		}
 		if start.Min.Valid {
 			return from, to, usagef("--from requires a date without a time")
 		}
 		end, parseErr := datespec.Parse(f.to, datespec.Past, r)
 		if parseErr != nil {
-			return from, to, usagef("--to: %s", parseErr)
+			return from, to, dateUsage("--to", parseErr)
 		}
 		if end.Min.Valid {
 			return from, to, usagef("--to requires a date without a time")

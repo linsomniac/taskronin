@@ -103,7 +103,7 @@ func entriesCommand(e *env) *cobra.Command {
 func entryDate(value, flag string, ref datespec.Ref) (*civil.Date, error) {
 	moment, err := datespec.Parse(value, datespec.Past, ref)
 	if err != nil {
-		return nil, usagef("%s: %s", flag, err)
+		return nil, dateUsage(flag, err)
 	}
 	if moment.Min.Valid {
 		return nil, usagef("%s requires a date without a time", flag)

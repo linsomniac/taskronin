@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -15,14 +17,52 @@ import (
 	"taskronin/internal/api"
 	"taskronin/internal/client"
 	"taskronin/internal/config"
+	"taskronin/internal/datespec"
 	"taskronin/internal/domain"
 	"taskronin/internal/textsafe"
 )
 
-type usageError struct{ detail string }
+type usageError struct{ detail, humanDetail string }
 
 func (e *usageError) Error() string        { return e.detail }
 func usagef(format string, a ...any) error { return &usageError{detail: fmt.Sprintf(format, a...)} }
+
+// argumentUsage handles Cobra's argument and flag errors before RunE.
+func argumentUsage(err error) error {
+	var number *strconv.NumError
+	if errors.As(err, &number) {
+		// pflag already names the value and flag. Its final cause repeats the
+		// input and names the strconv function that tried to parse it.
+		prefix, ok := strings.CutSuffix(err.Error(), ": "+number.Error())
+		if ok {
+			reason := "expected a whole number"
+			if number.Func == "ParseBool" {
+				reason = "expected true or false"
+			} else if errors.Is(number, strconv.ErrRange) {
+				reason = "value out of range"
+			}
+			return &usageError{detail: err.Error(), humanDetail: prefix + ": " + reason}
+		}
+	}
+	return usagef("%s", err)
+}
+
+// dateUsage retains the pre-existing problem detail for scripts. The parser
+// already identifies block fields, so repeating the command obscures the cause.
+func dateUsage(field string, err error) error {
+	detail := field + ": " + err.Error()
+	wire := detail
+	var input *datespec.InputError
+	if errors.As(err, &input) {
+		wire = field + ": " + input.ProblemDetail()
+		detail = field + " " + input.Error()
+	}
+	switch field {
+	case "block", "reblock", "--block":
+		detail = err.Error()
+	}
+	return &usageError{detail: wire, humanDetail: detail}
+}
 
 // checkFoundError reports that a check-only run found work still to do (exit 8,
 // A§9.6). It is not a failure of the command itself, so it has its own exit
@@ -39,6 +79,27 @@ func tokenConfigError(err error) error {
 		return fmt.Errorf("%w: %w — run `tkr init` (or pass --token-file)", client.ErrTokenFile, err)
 	}
 	return err
+}
+
+func tokenFileDetail(err error) string {
+	var configured *config.TokenFileError
+	var credential *client.TokenFileError
+	var path, reason string
+	switch {
+	case errors.As(err, &configured):
+		path, reason = configured.Path, configured.Err.Error()
+		reason = strings.TrimPrefix(strings.TrimPrefix(reason, "mcp.token_file: "), "token_file: ")
+	case errors.As(err, &credential):
+		path, reason = credential.Path, credential.Err.Error()
+		reason = strings.TrimPrefix(reason, fmt.Sprintf("private file %q: ", path))
+	default:
+		return err.Error()
+	}
+	var pathErr *fs.PathError
+	if errors.As(err, &pathErr) {
+		reason = fmt.Sprintf("cannot %s %q (%s)", pathErr.Op, pathErr.Path, pathErr.Err)
+	}
+	return fmt.Sprintf("token file %q: %s — run `tkr init` (or pass --token-file)", path, reason)
 }
 
 func exitCode(err error) int {
@@ -147,7 +208,7 @@ func (e *env) fail(err error) int {
 		}
 		e.errorLine("tkr: start it with: systemctl --user start taskronin.socket")
 	case errors.Is(err, client.ErrTokenFile):
-		e.errorLine("tkr: %s", err)
+		e.errorLine("tkr: %s", tokenFileDetail(err))
 		if e.mutates {
 			e.errorLine("tkr: nothing was saved. Your command was:")
 			e.commandEcho()
@@ -155,7 +216,16 @@ func (e *env) fail(err error) int {
 	case errors.Is(err, context.Canceled):
 		e.errorLine("tkr: interrupted")
 	default:
-		e.errorLine("tkr: %s", p.Detail)
+		detail := p.Detail
+		var usage *usageError
+		if errors.As(err, &usage) && usage.humanDetail != "" {
+			detail = usage.humanDetail
+		}
+		if p.Code == string(domain.CodeValidation) && detail == domain.DeferFutureDetail && e.serverClock != nil {
+			detail += " (today is " + formatDate(e.serverClock.Today) + ")"
+		}
+		e.errorLine("tkr: %s", detail)
+		e.problemHint(p)
 		for _, field := range p.Errors {
 			e.errorLine("  %s: %s", field.Field, field.Message)
 		}
@@ -173,6 +243,19 @@ func (e *env) fail(err error) int {
 		}
 	}
 	return code
+}
+
+func (e *env) problemHint(p api.Problem) {
+	if hint := hintFor(p); hint != "" && !e.jsonOut {
+		e.errorLine("  %s", hint)
+	}
+}
+
+func hintFor(p api.Problem) string {
+	if p.Code == string(domain.CodeNotFound) && strings.HasPrefix(p.Detail, "task #") {
+		return "tkr ls lists open tasks"
+	}
+	return ""
 }
 
 func (e *env) commandEcho() { e.errorLine("  tkr %s", quoteArgs(e.argv)) }

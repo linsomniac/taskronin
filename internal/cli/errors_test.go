@@ -20,6 +20,7 @@ import (
 	"taskronin/internal/client"
 	"taskronin/internal/config"
 	"taskronin/internal/domain"
+	"taskronin/internal/testutil"
 )
 
 func TestExitCodes(t *testing.T) {
@@ -62,6 +63,86 @@ func TestQuoteArgs(t *testing.T) {
 	}
 	if got := quoteArgs([]string{"", "$(touch x)", "a\nb"}); got != "'' '$(touch x)' 'a�b'" {
 		t.Fatal(got)
+	}
+}
+
+func TestCommandErrorText(t *testing.T) {
+	srv, sys := captureServer(t)
+	// At this instant it is already Saturday in UTC.
+	srv.Clock.Set(testutil.Local(t, "2026-11-20 23:45"))
+	for range 4 {
+		captureTask(t, srv, "open task")
+	}
+	for _, tc := range []struct {
+		args                  []string
+		code                  int
+		stderr, problemDetail string
+	}{
+		{[]string{"block", "1", "25:00-26:00"}, 2, `tkr: block start "25:00": hour out of range`, `block: invalid block start: civil: "25:00" has hour out of range`},
+		{[]string{"add"}, 2, `tkr: add needs a title: tkr add "…"`, "add requires a title"},
+		{[]string{"defer", "4", "yesterday"}, 1, "tkr: defer must be in the future (today is Fri 2026-11-20)", "defer must be in the future"},
+		{[]string{"done", "99"}, 5, "tkr: task #99 not found\n  tkr ls lists open tasks", "task #99 not found"},
+	} {
+		t.Run(tc.args[0], func(t *testing.T) {
+			out, stderr, code := runCLI(t, sys, "", tc.args...)
+			if code != tc.code || out != "" || stderr != tc.stderr+"\n" {
+				t.Errorf("exit=%d stdout=%q stderr=%q, want exit %d and %q", code, out, stderr, tc.code, tc.stderr+"\n")
+			}
+			out, stderr, code = runCLI(t, sys, "", append(tc.args, "--json")...)
+			var p api.Problem
+			if err := json.Unmarshal([]byte(out), &p); err != nil || stderr != "" || code != tc.code || p.Detail != tc.problemDetail {
+				t.Errorf("--json exit=%d stdout=%q stderr=%q, decode error %v", code, out, stderr, err)
+			}
+		})
+	}
+}
+
+func TestProblemErrorHint(t *testing.T) {
+	sys, _ := testSys(t)
+	p := api.Problem{Status: 404, Code: "not_found", Detail: "task #27 has disappeared", Errors: []api.FieldError{{Field: "task", Message: "unknown"}}}
+	socket, token := fakeAPI(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(p.Status)
+		writeJSON(t, w, p)
+	}))
+	args := []string{"--socket", socket, "--token-file", token, "--color", "always", "__test-clock"}
+	out, stderr, code := runCLI(t, sys, "", args...)
+	red := paint{on: true}.bad
+	want := red("tkr: task #27 has disappeared") + "\n" + red("  tkr ls lists open tasks") + "\n" + red("  task: unknown") + "\n"
+	if code != 5 || out != "" || stderr != want {
+		t.Fatalf("exit=%d stdout=%q stderr=%q, want %q", code, out, stderr, want)
+	}
+	raw, err := json.Marshal(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, stderr, code = runCLI(t, sys, "", append(args, "--json")...)
+	if code != 5 || stderr != "" || out != string(raw)+"\n" {
+		t.Fatalf("--json exit=%d stdout=%q stderr=%q", code, out, stderr)
+	}
+	for _, other := range []api.Problem{{Code: "conflict", Detail: p.Detail}, {Code: p.Code, Detail: "entry #27 not found"}} {
+		if hint := hintFor(other); hint != "" {
+			t.Errorf("unexpected hint %q for %#v", hint, other)
+		}
+	}
+}
+
+func TestUsagePrefixAudit(t *testing.T) {
+	_, sys := captureServer(t)
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"reblock", "1", "9:00-26:00"}, `block end "26:00": hour out of range`},
+		{[]string{"add", "x", "--block", "9:00-26:00"}, `block end "26:00": hour out of range`},
+		{[]string{"log", "-N", "x", "--at", "9:60"}, `--at "9:60": minutes out of range`},
+		{[]string{"token", "create", "x", "--scopes", "unknown"}, "--scopes: unknown scope name"},
+		{[]string{"history", "--limit", "abc"}, `invalid argument "abc" for "--limit" flag: expected a whole number`},
+		{[]string{"now", "--clear=abc"}, `invalid argument "abc" for "--clear" flag: expected true or false`},
+	} {
+		out, stderr, code := runCLI(t, sys, "", tc.args...)
+		if code != 2 || out != "" || stderr != "tkr: "+tc.want+"\n" {
+			t.Errorf("%v: exit=%d stdout=%q stderr=%q", tc.args, code, out, stderr)
+		}
 	}
 }
 

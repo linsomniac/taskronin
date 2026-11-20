@@ -32,7 +32,7 @@ func logCommand(e *env) *cobra.Command {
 			if cmd.Flags().Changed("at") {
 				minute, err := datespec.ParseClock(at, false)
 				if err != nil {
-					return usagef("--at: %s", err)
+					return dateUsage("--at", err)
 				}
 				req.Time = &minute
 			}
@@ -53,7 +53,7 @@ func logCommand(e *env) *cobra.Command {
 				}
 				moment, err := datespec.Parse(date, datespec.Past, ref)
 				if err != nil {
-					return usagef("--date: %s", err)
+					return dateUsage("--date", err)
 				}
 				if moment.Min.Valid {
 					return usagef("--date requires a date; use --at for the time")

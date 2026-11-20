@@ -60,6 +60,9 @@ const (
 	CodeBusy Code = "busy"
 )
 
+// DeferFutureDetail is the stable validation detail shared with API clients.
+const DeferFutureDetail = "defer must be in the future"
+
 // ErrorCodes returns every defined service error code. Adapter drift tests also
 // check this catalog against the declarations so additions cannot be omitted.
 func ErrorCodes() []Code {

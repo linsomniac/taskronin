@@ -74,7 +74,7 @@ func (o *op) checkDefer(t domain.Task, until domain.Moment) error {
 		return err
 	}
 	if !o.s.zone.DeferMoment(until.Date, until.Min).After(o.now) {
-		return domain.Errorf(domain.CodeValidation, "defer must be in the future")
+		return domain.Errorf(domain.CodeValidation, domain.DeferFutureDetail)
 	}
 	var due *domain.Moment
 	if t.DueDate.Valid {

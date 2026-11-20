@@ -16,6 +16,19 @@ const EndOfDay Minute = 1440
 // distinct type from Minute (0..1439) so wire schemas and validation differ.
 type EndMinute Minute
 
+// ClockError identifies the input and the failed HH:MM check. Error preserves
+// the existing diagnostic for configuration files and machine-readable errors.
+type ClockError struct {
+	Value, Reason string
+}
+
+func (e *ClockError) Error() string {
+	if e.Reason == "expected HH:MM" {
+		return fmt.Sprintf("civil: %q is not HH:MM", e.Value)
+	}
+	return fmt.Sprintf("civil: %q has %s", e.Value, e.Reason)
+}
+
 // ParseHHMM parses "H:MM" or "HH:MM". "24:00" is accepted only when
 // allow2400 is true.
 func ParseHHMM(s string, allow2400 bool) (Minute, error) {
@@ -26,16 +39,16 @@ func ParseHHMM(s string, allow2400 bool) (Minute, error) {
 	case len(s) == 5 && s[2] == ':' && isDigits(s[0:2]) && isDigits(s[3:5]):
 		h, m = int(s[0]-'0')*10+int(s[1]-'0'), int(s[3]-'0')*10+int(s[4]-'0')
 	default:
-		return 0, fmt.Errorf("civil: %q is not HH:MM", s)
+		return 0, &ClockError{Value: s, Reason: "expected HH:MM"}
 	}
 	if m > 59 {
-		return 0, fmt.Errorf("civil: %q has minutes out of range", s)
+		return 0, &ClockError{Value: s, Reason: "minutes out of range"}
 	}
 	if h == 24 && m == 0 && allow2400 {
 		return EndOfDay, nil
 	}
 	if h > 23 {
-		return 0, fmt.Errorf("civil: %q has hour out of range", s)
+		return 0, &ClockError{Value: s, Reason: "hour out of range"}
 	}
 	return Minute(h*60 + m), nil //nolint:gosec // G115: at most 1439
 }
