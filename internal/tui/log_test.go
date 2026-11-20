@@ -11,6 +11,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"taskronin/internal/api"
 	"taskronin/internal/civil"
@@ -461,7 +462,7 @@ func TestLogTabEmptyAndRendering(t *testing.T) {
 			a.Update(size)
 			press(t, a, "j", "j")
 			out = viewText(a)
-			if size.Width == 20 && !strings.Contains(out, "e6 ") {
+			if size.Width == 20 && !strings.Contains(ansi.Strip(out), "e6 ") {
 				t.Fatal("selected row hidden", out)
 			}
 			if strings.ContainsAny(out, "\u009b\u202e") || (!color && strings.ContainsRune(out, '\x1b')) {

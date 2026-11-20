@@ -10,6 +10,7 @@ import (
 	"taskronin/internal/api"
 	"taskronin/internal/civil"
 	"taskronin/internal/client"
+	"taskronin/internal/textsafe"
 )
 
 type dayMsg struct {
@@ -225,23 +226,23 @@ func (s *recapMode) view(a *App, w, h int) string {
 			if i == 0 {
 				lines = append(lines, a.line("Blocks", w))
 			}
-			text = fmt.Sprintf("b%d %s #%d %s  %s", b.ID, spanText(b.Start, b.End), b.TaskID, b.TaskTitle, b.Status)
+			text = a.blockText(*b) + "  " + a.blockStatus(b.Status)
 			if b.OutcomeSource != nil {
-				text += " (" + *b.OutcomeSource + ")"
+				text += " (" + textsafe.SanitizeLine(*b.OutcomeSource) + ")"
 			}
 			if b.Slipped {
-				text += " slipped"
+				text += " " + a.styles.Bad.Render("slipped")
 			}
 		} else if e := row.entry; e != nil {
 			if i == len(s.day.Blocks) {
 				lines = append(lines, a.line("Unlinked entries", w))
 			}
-			text = fmt.Sprintf("e%d %s", e.ID, e.Title)
+			text = a.id("e", e.ID) + " " + textsafe.SanitizeLine(e.Title)
 		}
 		if i == s.cursor {
 			selectedLine = len(lines)
 		}
-		lines = append(lines, a.row(text, w, i == s.cursor))
+		lines = append(lines, a.styledRow(text, w, i == s.cursor))
 	}
 	if len(s.rows) == 0 {
 		lines = append(lines, a.line("no blocks or unlinked entries", w))
@@ -254,7 +255,7 @@ func (s *recapMode) view(a *App, w, h int) string {
 			blocks[b.ID] = b
 		}
 		for _, i := range s.day.Interruptions {
-			lines = append(lines, a.row(interruptionLine(i, titles, blocks), w, false))
+			lines = append(lines, a.styledRow(interruptionLine(i, titles, blocks, a.styles.ID), w, false))
 		}
 	}
 	start := 0

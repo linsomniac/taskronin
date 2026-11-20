@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"taskronin/internal/api"
 	"taskronin/internal/civil"
@@ -186,45 +187,45 @@ func (s *todayScreen) view(a *App, w, h int) string {
 	focus := "no focus"
 	b := td.CurrentBlock
 	if f := td.Focus; f != nil {
-		focus = fmt.Sprintf("▶ #%d %s", f.ID, f.Title)
+		focus = "▶ " + a.id("#", f.ID) + " " + textsafe.SanitizeLine(f.Title)
 		if b != nil && b.TaskID == f.ID {
 			focus += " (→" + hhmm(int(b.End)) + ")"
 		}
 	} else if b != nil {
-		focus = fmt.Sprintf("▷ #%d %s (→%s)", b.TaskID, b.TaskTitle, hhmm(int(b.End)))
+		focus = "▷ " + a.id("#", b.TaskID) + " " + textsafe.SanitizeLine(b.TaskTitle) + " (→" + hhmm(int(b.End)) + ")"
 	}
-	lines := []string{a.styles.Current.Render(a.line(focus, w)), a.line("Blocks", w)}
+	lines := []string{renderOver(a.styles.Current, textsafe.Truncate(focus, w, "…")), a.styles.Head.Render(a.line("Blocks", w))}
 	selectedLine := -1
 	anchor := s.cursor
 	if anchor == len(s.rows) {
 		anchor-- // The last task anchors scrolling but has no selection marker.
 	}
 	for i, b := range td.Blocks {
-		text := fmt.Sprintf("b%d %s #%d %s", b.ID, spanText(b.Start, b.End), b.TaskID, b.TaskTitle)
+		text := a.blockText(b)
 		switch {
 		case b.Current:
-			text += " ◀ now"
+			text += " " + a.styles.OK.Render("◀ now")
 		case b.NeedsReblock:
-			text += " reblock?"
+			text += " " + a.styles.Warn.Render("reblock?")
 		case b.Status != "planned":
-			text += " " + b.Status
+			text += " " + a.blockStatus(b.Status)
 		}
-		line := a.row(text, w, i == s.cursor)
+		line := a.styledRow(text, w, i == s.cursor)
 		if b.Current && i != s.cursor {
-			line = a.styles.Current.Render(line)
+			line = renderOver(a.styles.Current, line)
 		}
 		if i == anchor {
 			selectedLine = len(lines)
 		}
 		lines = append(lines, line)
 	}
-	lines = append(lines, a.line(fmt.Sprintf("Triage %d", td.TriageCount), w))
+	lines = append(lines, a.styles.Head.Render(a.line(fmt.Sprintf("Triage %d", td.TriageCount), w)))
 	for i, task := range td.TriageTop[:min(5, len(td.TriageTop))] {
 		selected := len(td.Blocks)+i == s.cursor
 		if len(td.Blocks)+i == anchor {
 			selectedLine = len(lines)
 		}
-		lines = append(lines, a.row(todayTaskText(task), w, selected))
+		lines = append(lines, a.styledRow(a.todayTaskText(task), w, selected))
 	}
 	rowIndex := len(td.Blocks) + min(5, len(td.TriageTop))
 	for _, section := range []struct {
@@ -232,34 +233,23 @@ func (s *todayScreen) view(a *App, w, h int) string {
 		tasks []api.Task
 	}{{"Overdue", td.Overdue}, {"Due soon", td.DueSoon}} {
 		if len(section.tasks) > 0 {
-			lines = append(lines, a.line(section.title, w))
+			lines = append(lines, a.styles.Head.Render(a.line(section.title, w)))
 			for _, t := range section.tasks {
 				selected := rowIndex == s.cursor
 				if rowIndex == anchor {
 					selectedLine = len(lines)
 				}
-				lines = append(lines, a.row(todayTaskText(t), w, selected))
+				lines = append(lines, a.styledRow(a.todayTaskText(t), w, selected))
 				rowIndex++
 			}
 		}
 	}
-	lines = append(lines, a.line("Log", w))
+	lines = append(lines, a.styles.Head.Render(a.line("Log", w)))
 	for _, e := range td.Entries {
-		text := fmt.Sprintf("e%d", e.ID)
-		if e.Time != nil {
-			text += " " + hhmm(int(*e.Time))
-		}
-		if e.Kind == "complete" {
-			text += " ✓"
-		}
-		text += " " + e.Title
-		if e.TaskID != nil {
-			text += fmt.Sprintf(" [#%d]", *e.TaskID)
-		}
-		lines = append(lines, a.row(text, w, false))
+		lines = append(lines, a.styledRow(a.entryText(e, " "), w, false))
 	}
 	if len(td.Interruptions) > 0 {
-		lines = append(lines, a.line("Interruptions", w))
+		lines = append(lines, a.styles.Head.Render(a.line("Interruptions", w)))
 		titles, blocks := titlesFrom(td), make(map[int64]api.Block)
 		for _, b := range td.Blocks {
 			blocks[b.ID] = b
@@ -268,7 +258,7 @@ func (s *todayScreen) view(a *App, w, h int) string {
 			blocks[td.CurrentBlock.ID] = *td.CurrentBlock
 		}
 		for _, i := range td.Interruptions {
-			lines = append(lines, a.row(interruptionLine(i, titles, blocks), w, false))
+			lines = append(lines, a.styledRow(interruptionLine(i, titles, blocks, a.styles.ID), w, false))
 		}
 	}
 	if td.AIChanges > 0 {
@@ -302,14 +292,14 @@ func (s *todayScreen) view(a *App, w, h int) string {
 	return clip(append(notice, lines[min(len(lines), start+s.scroll):]...), w, h)
 }
 
-func todayTaskText(t api.Task) string {
-	text := fmt.Sprintf("#%d %s", t.ID, t.Title)
+func (a *App) todayTaskText(t api.Task) string {
+	text := a.id("#", t.ID) + " " + textsafe.SanitizeLine(t.Title)
 	if len(t.Reasons) > 0 {
 		reasons := make([]string, 0, len(t.Reasons))
 		for _, r := range t.Reasons {
 			reasons = append(reasons, r.Reason)
 		}
-		text += " {" + strings.Join(reasons, ", ") + "}"
+		text += " " + a.styles.Warn.Render(textsafe.SanitizeLine("{"+strings.Join(reasons, ", ")+"}"))
 	}
 	return text
 }
@@ -320,13 +310,13 @@ func spanText(start civil.Minute, end civil.EndMinute) string {
 	return hhmm(int(start)) + "–" + hhmm(int(end))
 }
 
-func interruptionLine(i api.Interruption, titles map[int64]string, blocks map[int64]api.Block) string {
-	text := fmt.Sprintf("%s #%d", i.At.Format("15:04"), i.ToTaskID)
+func interruptionLine(i api.Interruption, titles map[int64]string, blocks map[int64]api.Block, idStyle lipgloss.Style) string {
+	text := i.At.Format("15:04") + " " + idStyle.Render(fmt.Sprintf("#%d", i.ToTaskID))
 	if title := titles[i.ToTaskID]; title != "" {
 		text += " '" + textsafe.SanitizeLine(title) + "'"
 	}
 	if i.FromTaskID != nil {
-		text += fmt.Sprintf(" interrupted #%d", *i.FromTaskID)
+		text += " interrupted " + idStyle.Render(fmt.Sprintf("#%d", *i.FromTaskID))
 	}
 	if i.FromBlockID != nil {
 		if b, ok := blocks[*i.FromBlockID]; ok {

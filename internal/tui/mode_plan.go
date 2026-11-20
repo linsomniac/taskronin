@@ -275,7 +275,7 @@ func (s *planMode) view(a *App, w, h int) string {
 		if s.blocksState != loadLoaded {
 			break
 		}
-		lines = append(lines, a.line(fmt.Sprintf("b%d %s #%d %s · %s", b.ID, spanText(b.Start, b.End), b.TaskID, b.TaskTitle, b.Status), w))
+		lines = append(lines, a.blockText(b)+" · "+a.blockStatus(b.Status))
 	}
 	return clip(lines, w, h)
 }

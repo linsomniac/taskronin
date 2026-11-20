@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"taskronin/internal/api"
 	"taskronin/internal/civil"
@@ -325,6 +326,54 @@ func TestActionFormInvalidInput(t *testing.T) {
 	}
 }
 
+func TestTaskRowTokenColors(t *testing.T) {
+	a := newTestApp(t, newFake(), func(c *Config) { c.Color = true })
+	v := task(42, "literal #42 slipped×2\x1b[7m", "slipped", "due")
+	v.Slips.Lifetime = 2
+	v.Project, v.Tags = ptr("infra"), []string{"db"}
+	v.Due = &api.Moment{Date: civil.MustDate("2026-10-30")}
+	row := taskRow(a, v, 100)
+	for _, want := range []string{a.styles.ID.Render("#42"), a.styles.Bad.Render("slipped×2"), a.styles.Warn.Render(",due]"),
+		"literal #42 slipped×2�[7m", a.styles.Dim.Render("infra +db"), a.styles.Warn.Render("due Fri 10-30")} {
+		if !strings.Contains(row, want) {
+			t.Errorf("missing %q in %q", want, row)
+		}
+	}
+	v.DuePhase = "overdue"
+	if row := taskRow(a, v, 100); !strings.Contains(row, a.styles.Bad.Render("overdue Fri 10-30")) {
+		t.Error(row)
+	}
+
+	f := newFake()
+	f.tasks["backlog"] = []api.Task{task(1, "title")}
+	a = newTestApp(t, f, func(c *Config) { c.Color, c.StartTab = true, TabBacklog })
+	row = a.current().view(a, 14, 1)
+	if !strings.HasSuffix(row, a.styles.Selected.Render(" title    ")) {
+		t.Errorf("selection ended before title or padding: %q", row)
+	}
+}
+
+func TestBlockRowTokenColors(t *testing.T) {
+	for _, mode := range []Mode{ModePlan, ModeRecap} {
+		f := newFake()
+		day := recapFixture(f.clock.Today)
+		f.days[day.Date], f.blocks = day, day.Blocks
+		a := newTestApp(t, f, func(c *Config) { c.Color, c.StartMode = true, mode })
+		tokens := []string{a.styles.ID.Render("b1"), a.styles.ID.Render("#1"), a.styles.OK.Render("worked"), a.styles.Bad.Render("missed")}
+		if mode == ModePlan {
+			press(t, a, "enter")
+		} else {
+			tokens = append(tokens, a.styles.Bad.Render("slipped"), a.styles.ID.Render("e6"))
+		}
+		body := viewText(a)
+		for _, token := range tokens {
+			if !strings.Contains(body, token) {
+				t.Errorf("mode %v missing %q", mode, token)
+			}
+		}
+	}
+}
+
 func TestListTabsTinyTerminal(t *testing.T) {
 	for _, tab := range []Tab{TabTriage, TabBacklog, TabUpcoming} {
 		for _, color := range []bool{false, true} {
@@ -343,7 +392,7 @@ func TestListTabsTinyTerminal(t *testing.T) {
 						press(t, a, "j")
 					}
 					out := viewText(a)
-					if size.Width == 20 && !strings.Contains(out, "› #10 ") {
+					if size.Width == 20 && !strings.Contains(ansi.Strip(out), "› #10 ") {
 						t.Fatal("selection hidden", out)
 					}
 					if strings.ContainsAny(out, "\u009b\u202e") || (!color && strings.ContainsRune(out, '\x1b')) {

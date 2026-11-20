@@ -12,6 +12,7 @@ import (
 	"taskronin/internal/api"
 	"taskronin/internal/civil"
 	"taskronin/internal/client"
+	"taskronin/internal/textsafe"
 )
 
 type entriesMsg struct {
@@ -162,21 +163,11 @@ func (s *logScreen) view(a *App, w, h int) string {
 		}
 	}
 	body := s.list.renderHeadings(a, w, bodyHeight, func(e api.Entry, width int) string {
-		text := fmt.Sprintf("%s  e%d", logDay(e.WorkDate), e.ID)
-		if e.Time != nil {
-			text += " " + hhmm(int(*e.Time))
-		}
-		if e.Kind == "complete" {
-			text += " ✓"
-		}
-		text += " " + e.Title
-		if e.TaskID != nil {
-			text += fmt.Sprintf("  [#%d]", *e.TaskID)
-		}
+		text := logDay(e.WorkDate) + "  " + a.entryText(e, "  ")
 		if e.Reopened {
 			text += " (reopened)"
 		}
-		return a.line(text, width)
+		return textsafe.Truncate(text, width, "…")
 	}, headings)
 	if notice != "" {
 		return clip(append([]string{a.line(notice+" · previous results", w)}, strings.Split(body, "\n")...), w, h)

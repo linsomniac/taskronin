@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"strings"
 
+	"charm.land/lipgloss/v2"
+
+	"taskronin/internal/api"
 	"taskronin/internal/textsafe"
 )
 
@@ -12,10 +15,73 @@ func (a *App) line(s string, w int) string {
 }
 
 func (a *App) row(s string, w int, selected bool) string {
-	if selected {
-		return a.styles.Selected.Render(a.line("› "+s, w))
+	return a.styledRow(textsafe.SanitizeLine(s), w, selected)
+}
+
+// styledRow accepts sanitized text with optional trusted token styles.
+func (a *App) styledRow(s string, w int, selected bool) string {
+	if !selected {
+		return textsafe.Truncate("  "+s, w, "…")
 	}
-	return a.line("  "+s, w)
+	line := textsafe.Truncate("› "+s, w, "…")
+	if !a.cfg.Color {
+		return line
+	}
+	return renderOver(a.styles.Selected, a.pad(line, w))
+}
+
+// AIDEV-NOTE: pad sanitized, already-truncated text before applying the
+// selection style so the reverse bar spans the frame without exceeding it.
+func (a *App) pad(s string, w int) string {
+	return s + strings.Repeat(" ", max(0, w-textsafe.Width(s)))
+}
+
+// A token's closing SGR also resets its enclosing style. Reapply the outer
+// style to each subsequent run, including any trailing cursor padding.
+func renderOver(style lipgloss.Style, text string) string {
+	var out strings.Builder
+	for run := range strings.SplitSeq(text, "\x1b[m") {
+		if run != "" {
+			out.WriteString(style.Render(run))
+		}
+	}
+	return out.String()
+}
+
+func (a *App) id(prefix string, id int64) string {
+	return a.styles.ID.Render(fmt.Sprintf("%s%d", prefix, id))
+}
+
+func (a *App) blockText(b api.Block) string {
+	return a.id("b", b.ID) + " " + spanText(b.Start, b.End) + " " + a.id("#", b.TaskID) + " " + textsafe.SanitizeLine(b.TaskTitle)
+}
+
+func (a *App) blockStatus(status string) string {
+	switch status {
+	case "missed", "slipped":
+		return a.styles.Bad.Render(status)
+	case "worked":
+		return a.styles.OK.Render(status)
+	case "cancelled":
+		return a.styles.Dim.Render(status)
+	default:
+		return textsafe.SanitizeLine(status)
+	}
+}
+
+func (a *App) entryText(e api.Entry, linkSeparator string) string {
+	text := a.id("e", e.ID)
+	if e.Time != nil {
+		text += " " + hhmm(int(*e.Time))
+	}
+	if e.Kind == "complete" {
+		text += " " + a.styles.OK.Render("✓")
+	}
+	text += " " + textsafe.SanitizeLine(e.Title)
+	if e.TaskID != nil {
+		text += linkSeparator + "[" + a.id("#", *e.TaskID) + "]"
+	}
+	return text
 }
 
 // clip accepts already-sanitized, possibly styled lines.
@@ -39,12 +105,22 @@ func fitLines(s string, h int) []string {
 }
 
 func (a *App) header(w int) string {
-	parts := []string{a.styles.Header.Render(a.line("Taskronin  "+a.clock.Now.Format("Mon 2006-01-02 15:04"), w))}
+	separator := " "
+	if a.cfg.Color {
+		separator = "  "
+	}
+	parts := []string{a.styles.Head.Render(a.line("Taskronin · "+a.clock.Now.Format("Mon 2006-01-02 15:04"), w))}
 	for i, name := range tabNames {
 		label := fmt.Sprintf("%d %s", i+1, name)
 		style := a.styles.TabOff
 		if Tab(i) == a.tab {
-			label, style = "["+label+"]", a.styles.TabOn
+			if a.cfg.Color {
+				// Keep a standalone reverse-video SGR around the bold tab.
+				style = a.styles.TabOn.UnsetBold()
+				label = a.styles.Head.Render(" " + label + " ")
+			} else {
+				label = "[" + label + "]"
+			}
 		}
 		parts = append(parts, style.Render(label))
 	}
@@ -74,10 +150,10 @@ func (a *App) header(w int) string {
 			status = append(status, a.styles.Info.Render(fmt.Sprintf("ai %d", a.today.AIChanges)))
 		}
 		if len(status) > 0 {
-			return strings.Join(parts, " ") + "\n" + strings.Join(status, " · ")
+			return strings.Join(parts, separator) + "\n" + strings.Join(status, " · ")
 		}
 	}
-	return strings.Join(parts, " ")
+	return strings.Join(parts, separator)
 }
 
 // AIDEV-NOTE: kept drafts have a separate lifetime from transient banners.

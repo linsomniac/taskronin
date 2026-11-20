@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"taskronin/internal/api"
 	"taskronin/internal/civil"
@@ -29,7 +30,7 @@ func TestRecapGlobals(t *testing.T) {
 
 func TestRecapShowsInterruptions(t *testing.T) { // INT-08 (TUI side).
 	a, f, date := historicalRecap(t)
-	if !strings.Contains(viewText(a), interruptionLine(f.days[date].Interruptions[0], nil, nil)) {
+	if !strings.Contains(viewText(a), interruptionLine(f.days[date].Interruptions[0], nil, nil, a.styles.ID)) {
 		t.Fatal(viewText(a))
 	}
 	d := f.days[date]
@@ -287,7 +288,7 @@ func TestRecapRenderSanitizesAndClips(t *testing.T) {
 		for range 40 {
 			press(t, a, "j")
 		}
-		if !strings.Contains(viewText(a), "› e39 last entry") {
+		if !strings.Contains(ansi.Strip(viewText(a)), "› e39 last entry") {
 			t.Fatal("selected row scrolled out of view")
 		}
 	}

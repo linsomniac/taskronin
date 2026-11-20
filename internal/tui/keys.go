@@ -146,14 +146,14 @@ func (a *App) helpView(w int) string {
 			next = line + " · " + item
 		}
 		if textsafe.Width(next) > w && line != "" {
-			lines = append(lines, line)
+			lines = append(lines, a.styles.Dim.Render(line))
 			line = item
 		} else {
 			line = next
 		}
 	}
 	if line != "" {
-		lines = append(lines, line)
+		lines = append(lines, a.styles.Dim.Render(line))
 	}
 	return strings.Join(lines, "\n")
 }

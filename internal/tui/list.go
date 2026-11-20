@@ -10,6 +10,7 @@ import (
 	"taskronin/internal/api"
 	"taskronin/internal/client"
 	"taskronin/internal/datespec"
+	"taskronin/internal/textsafe"
 )
 
 type tasksMsg struct {
@@ -116,7 +117,7 @@ func (l *recordList[T]) renderHeadings(a *App, w, h int, row func(T, int) string
 		if i == l.cursor {
 			selectedLine = len(lines)
 		}
-		lines = append(lines, a.row(row(t, max(0, w-2)), w, i == l.cursor))
+		lines = append(lines, a.styledRow(row(t, max(0, w-2)), w, i == l.cursor))
 	}
 	l.offset = min(max(0, l.offset), max(0, len(lines)-h))
 	if selectedLine < l.offset {
@@ -128,19 +129,19 @@ func (l *recordList[T]) renderHeadings(a *App, w, h int, row func(T, int) string
 }
 
 func taskRow(a *App, t api.Task, w int) string {
-	text := fmt.Sprintf("#%d ", t.ID)
+	text := a.id("#", t.ID) + " "
 	if len(t.Reasons) > 0 {
 		reasons := make([]string, 0, len(t.Reasons))
 		for _, r := range t.Reasons {
-			reason := r.Reason
+			reason := textsafe.SanitizeLine(r.Reason)
 			if reason == "slipped" {
-				reason = fmt.Sprintf("slipped×%d", t.Slips.Lifetime)
+				reason = a.styles.Bad.Render(fmt.Sprintf("slipped×%d", t.Slips.Lifetime))
 			}
 			reasons = append(reasons, reason)
 		}
-		text += "[" + strings.Join(reasons, ",") + "] "
+		text += renderOver(a.styles.Warn, "["+strings.Join(reasons, ",")+"]") + " "
 	}
-	text += t.Title
+	text += textsafe.SanitizeLine(t.Title)
 	var labels []string
 	if t.Project != nil {
 		labels = append(labels, *t.Project)
@@ -149,16 +150,16 @@ func taskRow(a *App, t api.Task, w int) string {
 		labels = append(labels, "+"+tag)
 	}
 	if len(labels) > 0 {
-		text += "  " + strings.Join(labels, " ")
+		text += "  " + a.styles.Dim.Render(textsafe.SanitizeLine(strings.Join(labels, " ")))
 	}
 	if t.Due != nil {
-		marker := "due"
+		marker, style := "due", a.styles.Warn
 		if t.DuePhase == "overdue" {
-			marker = "overdue"
+			marker, style = "overdue", a.styles.Bad
 		}
-		text += fmt.Sprintf("  %s %.3s %s", marker, t.Due.Date.Weekday(), t.Due.Date.String()[5:])
+		text += "  " + style.Render(fmt.Sprintf("%s %.3s %s", marker, t.Due.Date.Weekday(), t.Due.Date.String()[5:]))
 	}
-	return a.line(text, w)
+	return textsafe.Truncate(text, w, "…")
 }
 
 func (a *App) openDefer(t api.Task, allowNone bool, after func(*App, *api.OpResponse) tea.Cmd) *form {

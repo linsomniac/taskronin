@@ -327,12 +327,53 @@ func TestRenderSanitizesAndClips(t *testing.T) {
 	}
 }
 
+func TestHeaderTabMarker(t *testing.T) {
+	plain := newTestApp(t, newFake())
+	if header := plain.header(120); !strings.Contains(header, "[1 Today] 2 Triage") {
+		t.Fatalf("plain header: %q", header)
+	}
+	a := newTestApp(t, newFake(), func(c *Config) { c.Color = true })
+	header := a.header(120)
+	for _, want := range []string{"\x1b[7m" + a.styles.Head.Render(" 1 Today "), a.styles.TabOff.Render("2 Triage") + "  " + a.styles.TabOff.Render("3 Backlog")} {
+		if !strings.Contains(header, want) {
+			t.Errorf("missing %q in %q", want, header)
+		}
+	}
+}
+
+func TestHelpFooterColors(t *testing.T) {
+	a := newTestApp(t, newFake(), func(c *Config) { c.Color = true })
+	if !strings.Contains(a.helpView(80), a.styles.Dim.Render("?")) {
+		t.Fatal("short help key lacks dim style")
+	}
+	plain := newTestApp(t, newFake())
+	plain.help.ShowAll, a.help.ShowAll = true, true
+	lines := strings.Split(plain.helpView(40), "\n")
+	for i, line := range lines {
+		lines[i] = a.styles.Dim.Render(line)
+	}
+	eq(t, a.helpView(40), strings.Join(lines, "\n"))
+}
+
+func TestRowPaddingFitsWidth(t *testing.T) {
+	a := newTestApp(t, newFake(), func(c *Config) { c.Color = true })
+	for _, w := range []int{1, 2, 5, 20, 100} {
+		for _, title := range []string{"x", strings.Repeat("宽", 300)} {
+			row := a.row(title, w, true)
+			if !strings.HasPrefix(row, "\x1b[7m") || lipgloss.Width(row) != w {
+				t.Errorf("width %d selected row %q", w, row)
+			}
+			if row := a.row(title, w, false); lipgloss.Width(row) > w {
+				t.Errorf("width %d unselected row %q", w, row)
+			}
+		}
+	}
+	plain := newTestApp(t, newFake())
+	eq(t, plain.row("x", 20, true), "› x")
+}
+
 func TestRenderColorFrameClips(t *testing.T) {
 	a := newTestApp(t, newFake(), func(c *Config) { c.Color = true })
-	activeTab := lipgloss.NewStyle().Reverse(true).Bold(true).Render("[1 Today]")
-	if frame := viewText(a); !strings.Contains(frame, activeTab) {
-		t.Fatalf("active tab lacks reverse video and bold: %q", strings.SplitN(frame, "\n", 2)[0])
-	}
 	a.Update(tea.WindowSizeMsg{Width: 20, Height: 8})
 	a.setTabScreen(TabToday, &shellScreen{body: a.row(strings.Repeat("宽", 40), 80, true)})
 	a.form = &shellScreen{body: a.styles.Info.Render("prompt\ninput\nhint")}
@@ -600,7 +641,7 @@ func TestRenderFormAndHeader(t *testing.T) {
 	lines := strings.Split(viewText(a), "\n")
 	eq(t, len(lines), 10)
 	eq(t, lines[6:], []string{"prompt", "input", "hint", "⚠ message"})
-	for _, part := range []string{"Taskronin  Wed 2026-10-28 10:00", "[1 Today] 2 Triage 3 Backlog 4 Upcoming 5 Log", "⚠ backup", "⚠ purge"} {
+	for _, part := range []string{"Taskronin · Wed 2026-10-28 10:00", "[1 Today] 2 Triage 3 Backlog 4 Upcoming 5 Log", "⚠ backup", "⚠ purge"} {
 		if !strings.Contains(strings.Join(lines[:2], "\n"), part) {
 			t.Fatal(lines[:2])
 		}

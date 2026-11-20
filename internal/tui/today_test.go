@@ -61,6 +61,19 @@ func TestTodayRender(t *testing.T) { // BLK-48, BLK-17/RCP-06, INT-08 (TUI side)
 	if strings.Index(v, "b8 ") > strings.Index(v, "b9 ") || strings.Index(v, "b9 ") > strings.Index(v, "b7 ") {
 		t.Fatal("blocks lost their served order")
 	}
+
+	a := newTestApp(t, fakeWithToday(todayFixture()), func(c *Config) { c.Color = true })
+	colored := viewText(a)
+	for _, token := range []string{a.styles.ID.Render("#42"), a.styles.OK.Render("◀ now"), a.styles.Warn.Render("reblock?"), a.styles.Head.Render("Blocks"), a.styles.Warn.Render("{new}")} {
+		if !strings.Contains(colored, token) {
+			t.Errorf("missing styled token %q", token)
+		}
+	}
+	for _, line := range strings.Split(colored, "\n") {
+		if lipgloss.Width(line) > 100 {
+			t.Errorf("oversized line: %q", line)
+		}
+	}
 }
 
 func TestTodayAIChangesNoticeOnce(t *testing.T) {
@@ -105,6 +118,13 @@ func TestCompletionEntryMarkers(t *testing.T) {
 			}
 			if strings.Count(body, "✓") != 1 {
 				t.Fatalf("only completion entries should be marked: %s", body)
+			}
+			a = newTestApp(t, f, func(c *Config) { c.StartTab, c.Color = tab, true })
+			body = a.current().view(a, 120, 40)
+			for _, want := range []string{a.styles.ID.Render("e7"), a.styles.OK.Render("✓"), a.styles.ID.Render("#42")} {
+				if !strings.Contains(body, want) {
+					t.Errorf("missing styled entry token %q", want)
+				}
 			}
 		})
 	}
@@ -311,11 +331,11 @@ func TestTodayFormattingHelpers(t *testing.T) {
 		70: "Overdue", 71: "Due soon", 72: "Block title", 73: "Current title"})
 	eq(t, len(titlesFrom(nil)), 0)
 	i := td.Interruptions[0]
-	eq(t, interruptionLine(i, nil, nil), "10:20 #60 interrupted #42")
+	eq(t, interruptionLine(i, nil, nil, lipgloss.NewStyle()), "10:20 #60 interrupted #42")
 	i.FromTaskID, i.FromBlockID = nil, nil
-	eq(t, interruptionLine(i, nil, nil), "10:20 #60")
+	eq(t, interruptionLine(i, nil, nil, lipgloss.NewStyle()), "10:20 #60")
 	titles[60] = "unsafe\x1b\u009b\u202e"
-	eq(t, interruptionLine(i, titles, nil), "10:20 #60 'unsafe���'")
+	eq(t, interruptionLine(i, titles, nil, lipgloss.NewStyle()), "10:20 #60 'unsafe���'")
 }
 
 func TestTodayReblockFormKeepsCapturedBlock(t *testing.T) {
