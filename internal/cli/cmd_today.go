@@ -66,6 +66,9 @@ func (e *env) today() error {
 	p := e.paint()
 	var out strings.Builder
 	fmt.Fprintf(&out, "%s · %s\n", view.Clock.Now.In(z.Location()).Format("Mon 2006-01-02 15:04"), textsafe.SanitizeLine(view.Clock.Timezone))
+	for _, banner := range view.Banners {
+		fmt.Fprintln(&out, p.warn("⚠ "+textsafe.SanitizeLine(banner.Message)))
+	}
 	focus := "no focus"
 	b := view.CurrentBlock
 	if f := view.Focus; f != nil {
@@ -77,15 +80,13 @@ func (e *env) today() error {
 	} else if b != nil {
 		focus = p.ok("▷") + " " + p.taskID(b.TaskID) + " " + p.ok(fmt.Sprintf("%s (→%s)", textsafe.SanitizeLine(b.TaskTitle), b.End))
 	}
-	empty := len(view.Blocks) == 0 && view.TriageCount == 0 && len(view.Entries) == 0 && len(view.Interruptions) == 0
-	if empty {
-		fmt.Fprintf(&out, "%s\n\n%s\n", focus, p.dim("Nothing scheduled, nothing to triage — tkr plan shapes the day"))
-	}
-	for _, banner := range view.Banners {
-		fmt.Fprintln(&out, p.warn("⚠ "+textsafe.SanitizeLine(banner.Message)))
-	}
-	if !empty {
-		fmt.Fprintf(&out, "%s\n\n", focus)
+	fmt.Fprintf(&out, "%s\n\n", focus)
+	if len(view.Blocks) == 0 && view.TriageCount == 0 && len(view.TriageTop) == 0 &&
+		len(view.Overdue) == 0 && len(view.DueSoon) == 0 && len(view.Entries) == 0 && len(view.Interruptions) == 0 {
+		fmt.Fprintln(&out, p.dim("Nothing scheduled, nothing to triage — tkr plan shapes the day"))
+		if view.AIChanges > 0 {
+			fmt.Fprintln(&out)
+		}
 	}
 	if len(view.Blocks) > 0 {
 		fmt.Fprintln(&out, p.head("Blocks"))

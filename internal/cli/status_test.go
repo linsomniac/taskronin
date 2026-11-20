@@ -449,11 +449,20 @@ func TestDashboardSections(t *testing.T) {
 	response.Store(new(view))
 	socket, token := fakeAPI(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { writeJSON(t, w, response.Load()) }))
 	args := []string{"today", "--socket", socket, "--token-file", token}
-	empty := captureRun(t, sys, "today_empty", args...)
-	view.Banners = []api.Banner{{Message: "unsafe\nnotice\x1b"}}
+	captureRun(t, sys, "today_empty", args...)
+	const clockLine = "Wed 2026-10-28 10:20 · America/Denver\n"
+	dueSoon := []api.Task{{ID: 4, Title: "Soon", Due: &api.Moment{Date: civil.MustDate("2026-10-29")}}}
+	view.DueSoon = dueSoon
+	response.Store(new(view))
+	want := clockLine + "no focus\n\nDue soon\n  #4  Soon  due Thu\n\n"
+	if out := captureRun(t, sys, "", args...); out != want {
+		t.Errorf("dashboard with only a due task = %q, want %q", out, want)
+	}
+	view.DueSoon = nil
+	view.Banners = []api.Banner{{Kind: "backup_failed", Message: "Backup failed\nnotice\x1b"}}
 	view.AIChanges = 1
 	response.Store(new(view))
-	want := empty + "⚠ unsafe�notice�\nAI changes: 1 unreviewed — run `tkr ai-changes`\n"
+	want = clockLine + "⚠ Backup failed�notice�\nno focus\n\nNothing scheduled, nothing to triage — tkr plan shapes the day\n\nAI changes: 1 unreviewed — run `tkr ai-changes`\n"
 	if out := captureRun(t, sys, "", args...); out != want {
 		t.Errorf("empty dashboard with notices = %q, want %q", out, want)
 	}
@@ -463,7 +472,7 @@ func TestDashboardSections(t *testing.T) {
 		{ID: 2, TaskID: 2, TaskTitle: "Ended", Start: 480, End: 510, NeedsReblock: true, Status: "planned"},
 		{ID: 3, TaskID: 3, TaskTitle: "Finished", Start: 420, End: 450, Status: "done"},
 	}
-	view.DueSoon = []api.Task{{ID: 4, Title: "Soon", Due: &api.Moment{Date: civil.MustDate("2026-10-29")}}}
+	view.DueSoon = dueSoon
 	view.Entries = []api.Entry{{Title: "Complete\nentry", Kind: "complete", TaskID: new(int64(3))}, {Title: "Standalone", Kind: "work"}}
 	for i := range view.Blocks {
 		view.Blocks[i].Date = view.Clock.Today
@@ -473,7 +482,7 @@ func TestDashboardSections(t *testing.T) {
 	}
 	response.Store(new(view))
 	out := captureRun(t, sys, "", args...)
-	for _, line := range []string{"⚠ unsafe�notice�", "▷ #1 Current (→11:00)", "  b1 09:00–11:00  #1 Current  ◀ now", "  b2 08:00–08:30  #2 Ended  reblock?", "  b3 07:00–07:30  #3 Finished  done", "Due soon\n  #4  Soon  due Thu", "  ✓ Complete�entry  [#3]", "  - Standalone"} {
+	for _, line := range []string{"⚠ Backup failed�notice�", "▷ #1 Current (→11:00)", "  b1 09:00–11:00  #1 Current  ◀ now", "  b2 08:00–08:30  #2 Ended  reblock?", "  b3 07:00–07:30  #3 Finished  done", "Due soon\n  #4  Soon  due Thu", "  ✓ Complete�entry  [#3]", "  - Standalone"} {
 		if !strings.Contains(out, line+"\n") {
 			t.Errorf("missing %q in:\n%s", line, out)
 		}

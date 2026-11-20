@@ -957,6 +957,8 @@ func TestLipglossOnlyInPaint(t *testing.T) {
 }
 
 func TestSchedulingJSONClockReads(t *testing.T) {
+	// For block and date-setting due/defer, e.ref caches the clock before
+	// the write. These cases check request order and JSON validity.
 	for _, tc := range []struct {
 		name     string
 		args     []string
@@ -984,12 +986,11 @@ func TestSchedulingJSONClockReads(t *testing.T) {
 				case "/tasks/1":
 					writeJSON(t, w, api.TaskDetail{Task: api.Task{ID: 1, ETag: "etag"}})
 				case "/tasks/1/block":
-					// Omit the task metadata used in the text headline.
 					writeJSON(t, w, map[string]any{"block": map[string]any{"id": 2, "date": "2026-10-29", "end": "14:00"}})
 				case "/tasks", "/tasks/1/due", "/tasks/1/defer":
 					task := &api.Task{ID: 1}
-					// Omit the moment for date-setting commands. For "none",
-					// supply a date so an eager headline would read /clock.
+					// Clear commands start with an empty clock cache. Supply
+					// a date so an eager headline would request /clock.
 					if tc.args[2] == "none" {
 						date := &api.Moment{Date: civil.MustDate("2026-10-29")}
 						task.Due, task.Defer = date, date

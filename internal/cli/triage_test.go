@@ -72,6 +72,21 @@ func TestTriageList(t *testing.T) {
 	}
 }
 
+func TestTriageClearWithoutClock(t *testing.T) {
+	sys, _ := testSys(t)
+	socket, token := fakeAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/tasks" && r.URL.Query().Get("view") == "triage" {
+			writeJSON(t, w, api.Page[api.Task]{})
+			return
+		}
+		t.Errorf("unexpected request %s", r.URL)
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	if got := captureRun(t, sys, "", "triage", "--socket", socket, "--token-file", token); got != "Triage clear\n" {
+		t.Errorf("empty triage = %q", got)
+	}
+}
+
 func TestTriageAcceptNew(t *testing.T) {
 	srv, sys := captureServer(t)
 	captureTask(t, srv, "First")

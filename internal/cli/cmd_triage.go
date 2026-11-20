@@ -49,13 +49,13 @@ func triageCommand(e *env) *cobra.Command {
 			if e.jsonOut {
 				return json.NewEncoder(e.out).Encode(page)
 			}
-			clock, err := e.clock()
-			if err != nil {
-				return err
-			}
 			p := e.paint()
 			if len(page.Items) == 0 {
 				_, err := fmt.Fprintln(e.out, p.dim("Triage clear"))
+				return err
+			}
+			clock, err := e.clock()
+			if err != nil {
 				return err
 			}
 			for _, task := range page.Items {
