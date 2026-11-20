@@ -7,7 +7,6 @@ import (
 
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 
 	"taskronin/internal/api"
 	"taskronin/internal/client"
@@ -175,7 +174,7 @@ func (s *detailScreen) view(a *App, w, h int) string {
 	if len(d.Interruptions) > 0 {
 		add("Interruptions")
 		for _, i := range d.Interruptions {
-			add(interruptionLine(i, nil, nil, lipgloss.NewStyle()))
+			lines = append(lines, interruptionLine(i, nil, nil, a.styles.ID))
 		}
 	}
 	if notice := s.state.retainedNotice("detail", true); notice != "" {

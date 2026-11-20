@@ -10,6 +10,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"taskronin/internal/api"
 	"taskronin/internal/civil"
@@ -129,7 +130,7 @@ func TestTRI17_CardSkipSendsNothing(t *testing.T) {
 	press(t, a, "k")
 	eq(t, f.count("PlaceTask"), 1)
 	eq(t, f.mustLast(t, "PlaceTask").ID, int64(2))
-	if !strings.Contains(viewText(a), "Triage clear (1 skipped)") {
+	if !strings.Contains(viewText(a), "Triage clear ✓ · 1 skipped") {
 		t.Fatal(viewText(a))
 	}
 	// The fake deliberately retains both tasks, including skipped #1.
@@ -318,10 +319,10 @@ func TestCardShowsSlips(t *testing.T) { // SLP-12 (TUI side).
 	v.Slips = api.Slips{Lifetime: 2, SinceTriage: 1}
 	f.tasks["triage"] = []api.Task{v}
 	a := cardApp(t, f)
-	if !strings.Contains(viewText(a), "slipped ×2 lifetime, ×1 since last triage") {
+	if !strings.Contains(viewText(a), "slipped ×2 lifetime, ×1 since triage") {
 		t.Fatal(viewText(a))
 	}
-	eq(t, slipText(api.Slips{}), "")
+	eq(t, slipText(api.Slips{}, "triage"), "")
 }
 
 func TestCardExit(t *testing.T) {
@@ -406,6 +407,7 @@ func TestCardStaleFallbackAndErrorClassification(t *testing.T) {
 func TestCardRender(t *testing.T) {
 	f := newFake()
 	v := task(1, "Title", "slipped", "new")
+	v.Reasons[0].Since.Time = f.clock.Now.AddDate(0, 0, -2)
 	v.Due = &api.Moment{Date: civil.MustDate("2026-10-29"), Time: ptr(civil.Minute(780))}
 	v.Defer = &api.Moment{Date: civil.MustDate("2026-10-30")}
 	v.Project, v.Priority, v.Tags = ptr("infra"), ptr("high"), []string{"db", "ops"}
@@ -414,12 +416,12 @@ func TestCardRender(t *testing.T) {
 	a := cardApp(t, f)
 	a.Update(tea.WindowSizeMsg{Width: 160, Height: 30})
 	out := viewText(a)
-	for _, want := range []string{"Card 1/1", "#1 Title", "slipped since 2026-10-28", "new since 2026-10-28", "Due: 2026-10-29 13:00", "Defer: 2026-10-30", "infra", "high", "db", "ops", "line5", "k keep · t top · b bottom · p place · d defer · B block · x done · D drop · s skip · A accept new"} {
+	for _, want := range []string{"Card 1/1", "#1 Title", "slipped · since Mon 2026-10-26", "new · since 10:00", "Due: 2026-10-29 13:00", "Defer: 2026-10-30", "infra", "high", "db", "ops", "line5", "k keep · t top · b bottom · p place · d defer · B block · x done · D drop · s skip · A accept new"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("missing %q in\n%s", want, out)
 		}
 	}
-	if strings.Contains(out, "HIDDEN") || strings.Index(out, "slipped since") > strings.Index(out, "new since") {
+	if strings.Contains(out, "HIDDEN") || strings.Index(out, "slipped · since") > strings.Index(out, "new · since") {
 		t.Fatal(out)
 	}
 	for _, color := range []bool{false, true} {
@@ -428,7 +430,7 @@ func TestCardRender(t *testing.T) {
 		v.Reasons[0].Reason = v.Title
 		f.tasks["triage"] = []api.Task{v}
 		a = newTestApp(t, f, func(c *Config) { c.StartMode, c.Color = ModeTriage, color })
-		for _, size := range []tea.WindowSizeMsg{{Width: 100, Height: 30}, {Width: 20, Height: 5}, {Width: 1, Height: 1}, {}} {
+		for _, size := range []tea.WindowSizeMsg{{Width: 100, Height: 30}, {Width: 20, Height: 5}, {Width: 20, Height: 6}, {Width: 19, Height: 30}, {Width: 40, Height: 6}, {Width: 1, Height: 1}, {}} {
 			a.Update(size)
 			out = viewText(a)
 			if strings.ContainsAny(out, "\u009b\u202e") || (!color && strings.ContainsRune(out, '\x1b')) {
@@ -446,6 +448,98 @@ func TestCardRender(t *testing.T) {
 	}
 }
 
+func TestCardBoxSizes(t *testing.T) {
+	f := newFake()
+	v := task(1, "Title", "new")
+	v.Project = ptr("infra")
+	v.Notes = "first note\nsecond note"
+	f.tasks["triage"] = []api.Task{v}
+	a := cardApp(t, f)
+	for _, size := range []struct{ w, h int }{{100, 30}, {20, 6}, {40, 6}, {19, 30}, {100, 5}} {
+		w, h := size.w, size.h
+		out := a.current().view(a, w, h)
+		lines := strings.Split(out, "\n")
+		if len(lines) > h {
+			t.Fatalf("%dx%d height overflow: %s", w, h, out)
+		}
+		for _, line := range lines {
+			if lipgloss.Width(line) > w {
+				t.Fatalf("%dx%d width overflow: %q", w, h, line)
+			}
+		}
+		eq(t, lines[len(lines)-1], a.line(cardLegend, w))
+		if w < 20 || h < 6 {
+			if strings.ContainsAny(out, "╭╮╰╯─│") {
+				t.Fatalf("unexpected box: %s", out)
+			}
+			eq(t, lines[0], "Card 1/1")
+			eq(t, lines[2], a.line("new since 2026-10-28 10:00", w))
+			continue
+		}
+		top := "╭─ Card 1/1 "
+		eq(t, lines[0], top+strings.Repeat("─", w-lipgloss.Width(top)-1)+"╮")
+		eq(t, lines[len(lines)-2], "╰"+strings.Repeat("─", w-2)+"╯")
+		if h == 6 && (!strings.Contains(out, "Project: infra") || strings.Contains(out, "first note")) {
+			t.Errorf("incorrect field/notes budget: %s", out)
+		}
+	}
+}
+
+func TestCardBoxHostileTitle(t *testing.T) {
+	for _, color := range []bool{false, true} {
+		f := newFake()
+		v := task(1, "bad\x1b\u009b\u202e"+strings.Repeat("宽", 100), "new")
+		f.tasks["triage"] = []api.Task{v}
+		a := newTestApp(t, f, func(c *Config) { c.StartMode, c.Color = ModeTriage, color })
+		for _, w := range []int{20, 41} {
+			out := a.current().view(a, w, 30)
+			if strings.ContainsAny(out, "\u009b\u202e") || (!color && strings.ContainsRune(out, '\x1b')) {
+				t.Fatalf("unsafe output: %q", out)
+			}
+			lines := strings.Split(ansi.Strip(out), "\n")
+			for i, line := range lines {
+				if lipgloss.Width(line) > w {
+					t.Errorf("width %d overflow: %q", w, line)
+				}
+				if i > 0 && i < len(lines)-2 && (!strings.HasSuffix(line, "│") || lipgloss.Width(line) != w) {
+					t.Errorf("width %d misplaced right edge: %q", w, line)
+				}
+			}
+		}
+	}
+}
+
+func TestCardBoxStyles(t *testing.T) {
+	f := newFake()
+	v := task(42, "Title", "new")
+	v.Notes = "note\tline"
+	v.Slips = api.Slips{Lifetime: 2, SinceTriage: 1}
+	f.tasks["triage"] = []api.Task{v}
+	a := newTestApp(t, f, func(c *Config) { c.StartMode, c.Color = ModeTriage, true })
+	out := a.current().view(a, 100, 30)
+	for _, want := range []string{
+		a.styles.Dim.Render("│"),
+		a.styles.ID.Render("#42"), a.styles.Head.Render("Title"),
+		a.styles.Warn.Render("new · since 10:00"),
+		a.styles.Bad.Render("slipped ×2 lifetime, ×1 since triage"),
+		a.styles.Dim.Render("note    line"), a.styles.Dim.Render(cardLegend),
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+}
+
+func TestCardClearSkipped(t *testing.T) {
+	f := newFake()
+	a := cardApp(t, f)
+	eq(t, a.current().view(a, 100, 30), "Triage clear ✓")
+	f.tasks["triage"] = []api.Task{task(1, "A", "new"), task(2, "B", "new")}
+	drain(t, a, a.current().load(a))
+	press(t, a, "s", "s")
+	eq(t, a.current().view(a, 100, 30), "Triage clear ✓ · 2 skipped")
+}
+
 func TestCardEmptyStateWaitsForSuccessfulLoad(t *testing.T) { // M1.
 	t.Run("initial pending", func(t *testing.T) {
 		f := newFake()
@@ -456,7 +550,7 @@ func TestCardEmptyStateWaitsForSuccessfulLoad(t *testing.T) { // M1.
 			t.Fatalf("pending initial load: %s", out)
 		}
 		drain(t, a, cmd)
-		if !strings.Contains(viewText(a), "Triage clear (0 skipped)") {
+		if !strings.Contains(viewText(a), "Triage clear ✓") {
 			t.Fatal(viewText(a))
 		}
 	})
@@ -469,7 +563,7 @@ func TestCardEmptyStateWaitsForSuccessfulLoad(t *testing.T) { // M1.
 			t.Fatalf("pending end reload: %s", out)
 		}
 		drain(t, a, cmd)
-		if !strings.Contains(viewText(a), "Triage clear (1 skipped)") {
+		if !strings.Contains(viewText(a), "Triage clear ✓ · 1 skipped") {
 			t.Fatal(viewText(a))
 		}
 	})
@@ -486,7 +580,7 @@ func TestCardEmptyStateWaitsForSuccessfulLoad(t *testing.T) { // M1.
 			t.Fatal(viewText(a))
 		}
 		drain(t, a, cmd)
-		if !strings.Contains(viewText(a), "Triage clear (0 skipped)") {
+		if !strings.Contains(viewText(a), "Triage clear ✓") {
 			t.Fatal(viewText(a))
 		}
 	})
@@ -563,7 +657,7 @@ func TestCardSelectedStartWrapsOnceWithDistinctTotals(t *testing.T) { // M2/M3.
 	drain(t, a, a.current().load(a))
 	_, _, ok := a.current().selection()
 	eq(t, ok, false)
-	if !strings.Contains(viewText(a), "Triage clear (3 skipped)") {
+	if !strings.Contains(viewText(a), "Triage clear ✓ · 3 skipped") {
 		t.Fatal(viewText(a))
 	}
 }
@@ -646,7 +740,7 @@ func TestCardBulkAcceptanceDoesNotMarkUnpresentedTasksSeen(t *testing.T) { // M2
 	}
 	eq(t, len(d.queue), 3)
 	press(t, a, "s")
-	if !strings.Contains(viewText(a), "Triage clear (1 skipped)") {
+	if !strings.Contains(viewText(a), "Triage clear ✓ · 1 skipped") {
 		t.Fatal(viewText(a))
 	}
 }
@@ -667,7 +761,7 @@ func TestCardEmptyDeckStaleBulkReplyCompletesReload(t *testing.T) { // M1/M6.
 	press(t, a, "y")
 	eq(t, f.count("AcceptNew"), 1)
 	eq(t, a.banner.text, "changed elsewhere — refreshed")
-	if !strings.Contains(viewText(a), "Triage clear (1 skipped)") {
+	if !strings.Contains(viewText(a), "Triage clear ✓ · 1 skipped") {
 		t.Fatal("the successful end-of-deck reload must finish: " + viewText(a))
 	}
 }

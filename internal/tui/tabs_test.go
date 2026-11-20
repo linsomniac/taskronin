@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -332,6 +333,11 @@ func TestTaskRowTokenColors(t *testing.T) {
 	v.Slips.Lifetime = 2
 	v.Project, v.Tags = ptr("infra"), []string{"db"}
 	v.Due = &api.Moment{Date: civil.MustDate("2026-10-30")}
+	short := taskRow(a, v, 3)
+	visible := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(short, "")
+	if lipgloss.Width(short) > 3 || visible != "#4…" {
+		t.Fatalf("broken styled token: %q", short)
+	}
 	row := taskRow(a, v, 100)
 	for _, want := range []string{a.styles.ID.Render("#42"), a.styles.Bad.Render("slipped×2"), a.styles.Warn.Render(",due]"),
 		"literal #42 slipped×2�[7m", a.styles.Dim.Render("infra +db"), a.styles.Warn.Render("due Fri 10-30")} {
@@ -348,7 +354,7 @@ func TestTaskRowTokenColors(t *testing.T) {
 	f.tasks["backlog"] = []api.Task{task(1, "title")}
 	a = newTestApp(t, f, func(c *Config) { c.Color, c.StartTab = true, TabBacklog })
 	row = a.current().view(a, 14, 1)
-	if !strings.HasSuffix(row, a.styles.Selected.Render(" title    ")) {
+	if !strings.HasSuffix(row, a.styles.ID.Render("#1")+a.styles.Selected.Render(" title    ")) {
 		t.Errorf("selection ended before title or padding: %q", row)
 	}
 }

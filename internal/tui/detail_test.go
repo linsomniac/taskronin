@@ -61,6 +61,19 @@ func TestDetailOverlay(t *testing.T) {
 	eq(t, a.current() == a.tabs[TabToday], true)
 }
 
+func TestDetailInterruptionIDStyle(t *testing.T) {
+	f := detailFixture()
+	d := f.details[42]
+	d.Interruptions = []api.Interruption{{At: f.clock.Now, ToTaskID: 17, FromTaskID: ptr(int64(42))}}
+	f.details[42] = d
+	a := newTestApp(t, f, func(c *Config) { c.Color = true })
+	drain(t, a, a.openDetail(42))
+	out := a.current().view(a, 100, 40)
+	if !strings.Contains(out, "10:00 "+a.styles.ID.Render("#17")+" interrupted "+a.styles.ID.Render("#42")) {
+		t.Fatalf("missing styled interruption IDs: %q", out)
+	}
+}
+
 func TestDetailEditUsesFreshETag(t *testing.T) {
 	f, runs := detailFixture(), 0
 	a := newTestApp(t, f, func(c *Config) { c.Editor.Exec = stubExec("New\n\nn1", nil, &runs) })

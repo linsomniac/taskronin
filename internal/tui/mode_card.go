@@ -218,7 +218,11 @@ func (d *cardDeck) screenView(a *App, w, h int) string {
 		if d.state != loadLoaded {
 			return a.line("loading…", w)
 		}
-		return a.line(fmt.Sprintf("Triage clear (%d skipped)", d.skipped), w)
+		text := "Triage clear ✓"
+		if d.skipped > 0 {
+			text += fmt.Sprintf(" · %d skipped", d.skipped)
+		}
+		return a.line(text, w)
 	}
 	if notice := d.state.retainedNotice("triage", true); notice != "" {
 		body := d.view(a, w, max(0, h-1))
@@ -240,15 +244,71 @@ func (d *cardDeck) view(a *App, w, h int) string {
 			total--
 		}
 	}
-	lines := []string{a.styles.Header.Render(a.line(fmt.Sprintf("Card %d/%d", len(d.seen), total), w))}
+	heading := fmt.Sprintf("Card %d/%d", len(d.seen), total)
+	// AIDEV-NOTE: below 20×6 the plain card keeps the legend and gives all
+	// remaining cells to content. Check the available body after any notice.
+	if w < 20 || h < 6 {
+		return plainCard(a, t, heading, w, h)
+	}
+
+	box := a.styles.Box
+	inner := w - 4
+	label := a.line(" "+heading+" ", w-3)
+	top := box.TL + box.H + label + strings.Repeat(box.H, w-3-textsafe.Width(label)) + box.TR
+	lines := []string{a.styles.Dim.Render(top)}
+	edge := a.styles.Dim.Render(box.V)
+	add := func(line string) {
+		if len(lines) < h-2 { // Reserve the bottom border and legend.
+			lines = append(lines, edge+" "+a.pad(line, inner)+" "+edge)
+		}
+	}
+	id, title, hasTitle := strings.Cut(a.line(fmt.Sprintf("#%d %s", t.ID, t.Title), inner), " ")
+	line := a.styles.ID.Render(id)
+	if hasTitle {
+		line += " " + a.styles.Head.Render(title)
+	}
+	add(line)
+	for _, r := range t.Reasons {
+		add(a.styles.Warn.Render(a.line(r.Reason+" · since "+a.reasonSince(r.Since), inner)))
+	}
+	if slips := slipText(t.Slips, "triage"); slips != "" {
+		add(a.styles.Bad.Render(a.line(slips, inner)))
+	}
+	for _, field := range cardFields(t) {
+		add(a.line(field, inner))
+	}
+	if t.Notes != "" {
+		for _, note := range cardNotes(t.Notes) {
+			add(a.styles.Dim.Render(a.line(note, inner)))
+		}
+	}
+	lines = append(lines, a.styles.Dim.Render(box.BL+strings.Repeat(box.H, w-2)+box.BR), a.styles.Dim.Render(a.line(cardLegend, w)))
+	return strings.Join(lines, "\n")
+}
+
+func plainCard(a *App, t api.Task, heading string, w, h int) string {
+	lines := []string{a.styles.Header.Render(a.line(heading, w))}
 	add := func(text string) { lines = append(lines, a.line(text, w)) }
 	add(fmt.Sprintf("#%d %s", t.ID, t.Title))
 	for _, r := range t.Reasons {
 		add(r.Reason + " since " + r.Since.Format("2006-01-02 15:04"))
 	}
-	if slips := slipText(t.Slips); slips != "" {
+	if slips := slipText(t.Slips, "last triage"); slips != "" {
 		add(slips)
 	}
+	for _, field := range cardFields(t) {
+		add(field)
+	}
+	for _, note := range cardNotes(t.Notes) {
+		add(note)
+	}
+	lines = lines[:min(len(lines), max(0, h-1))]
+	add(cardLegend)
+	return clip(lines, w, h)
+}
+
+func cardFields(t api.Task) []string {
+	var fields []string
 	for _, field := range []struct {
 		name  string
 		value *api.Moment
@@ -258,34 +318,35 @@ func (d *cardDeck) view(a *App, w, h int) string {
 			if field.value.Time != nil {
 				text += " " + hhmm(int(*field.value.Time))
 			}
-			add(text)
+			fields = append(fields, text)
 		}
 	}
 	if t.Project != nil {
-		add("Project: " + *t.Project)
+		fields = append(fields, "Project: "+*t.Project)
 	}
 	if len(t.Tags) > 0 {
-		add("Tags: " + strings.Join(t.Tags, ", "))
+		fields = append(fields, "Tags: "+strings.Join(t.Tags, ", "))
 	}
 	if t.Priority != nil {
-		add("Priority: " + *t.Priority)
+		fields = append(fields, "Priority: "+*t.Priority)
 	}
-	notes := strings.Split(textsafe.Sanitize(t.Notes), "\n")
-	for _, line := range notes[:min(5, len(notes))] {
-		add(strings.ReplaceAll(line, "\t", "    "))
-	}
-	// Reserve the legend's line before clipping the body. Notes are last in
-	// the body, so they give up space before the task's identifying fields.
-	lines = lines[:min(len(lines), max(0, h-1))]
-	add(cardLegend)
-	return clip(lines, w, h)
+	return fields
 }
 
-func slipText(s api.Slips) string {
+func cardNotes(notes string) []string {
+	lines := strings.SplitN(notes, "\n", 6)
+	lines = lines[:min(len(lines), 5)]
+	for i, line := range lines {
+		lines[i] = strings.ReplaceAll(line, "\t", "    ")
+	}
+	return lines
+}
+
+func slipText(s api.Slips, since string) string {
 	if s.Lifetime == 0 {
 		return ""
 	}
-	return fmt.Sprintf("slipped ×%d lifetime, ×%d since last triage", s.Lifetime, s.SinceTriage)
+	return fmt.Sprintf("slipped ×%d lifetime, ×%d since %s", s.Lifetime, s.SinceTriage, since)
 }
 
 func cardKeys(a *App, d *cardDeck, k tea.KeyPressMsg) (tea.Cmd, bool) {

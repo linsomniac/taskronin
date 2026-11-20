@@ -36,8 +36,8 @@ func (a *App) pad(s string, w int) string {
 	return s + strings.Repeat(" ", max(0, w-textsafe.Width(s)))
 }
 
-// A token's closing SGR also resets its enclosing style. Reapply the outer
-// style to each subsequent run, including any trailing cursor padding.
+// AIDEV-NOTE: Lip Gloss closes token styles with ESC[m (\x1b[m). That reset
+// also clears the selection, so reapply it to later tokens and cursor padding.
 func renderOver(style lipgloss.Style, text string) string {
 	var out strings.Builder
 	for run := range strings.SplitSeq(text, "\x1b[m") {

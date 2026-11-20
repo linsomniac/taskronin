@@ -15,6 +15,13 @@ func (a *App) ref() datespec.Ref {
 	return datespec.Ref{Today: a.clock.Today, WeekStart: weekdayOf(a.clock.WeekStart)}
 }
 
+func (a *App) reasonSince(since api.Time) string {
+	if since.Format(time.DateOnly) == a.clock.Today.String() {
+		return since.Format("15:04")
+	}
+	return since.Format("Mon 2006-01-02")
+}
+
 func weekdayOf(s string) time.Weekday {
 	switch s {
 	case "sunday":
