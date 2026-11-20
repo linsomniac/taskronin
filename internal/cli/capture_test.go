@@ -636,6 +636,19 @@ func TestCaptureEffects(t *testing.T) {
 	}
 }
 
+func TestBlockMovedSpanWording(t *testing.T) {
+	e := &env{clockLoaded: true, serverClock: &api.Clock{Today: civil.MustDate("2026-10-28")}}
+	for _, tc := range []struct{ from, to, want string }{
+		{"13:00-15:00", "2026-10-29 15:00-17:00", "b7 moved 13:00–15:00 → tomorrow 15:00–17:00"},
+		{"task_closed", "note 13:00-15:00", "b7 moved task_closed → note 13:00-15:00"},
+	} {
+		got := e.effectLine(api.Effect{Kind: "block_moved", BlockID: 7, From: tc.from, To: tc.to}, paint{})
+		if got != tc.want {
+			t.Errorf("got %q, want %q", got, tc.want)
+		}
+	}
+}
+
 func TestCaptureEffectsSanitized(t *testing.T) {
 	var out bytes.Buffer
 	e := &env{out: &out}
@@ -735,18 +748,33 @@ func TestDoneTally(t *testing.T) {
 }
 
 func TestDoneTallyOmittedOnTimeout(t *testing.T) {
-	srv, sys := captureServer(t)
-	captureTask(t, srv, "First")
-	var out, stderr bytes.Buffer
-	e := &env{ctx: t.Context(), apiClient: srv.Client, out: &out, err: &stderr, sys: sys}
-	root := newRoot(e)
-	e.tallyTimeout = 0
-	root.SetArgs([]string{"done", "1"})
-	if err := root.ExecuteContext(e.ctx); err != nil {
-		t.Fatal(err)
-	}
-	if out.String() != "✓ #1 'First' done · logged today\n" || stderr.Len() != 0 {
-		t.Fatalf("stdout=%q stderr=%q", out.String(), stderr.String())
+	for _, tc := range []struct{ name, date, want string }{
+		{"clock expires after write", "", "Wed 2026-10-28"},
+		{"pre-write clock cached, tally expires", "today", "today"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, sys := captureServer(t)
+			captureTask(t, srv, "First")
+			var out, stderr bytes.Buffer
+			e := &env{ctx: t.Context(), apiClient: srv.Client, out: &out, err: &stderr, sys: sys}
+			root := newRoot(e)
+			e.decorTimeout = 0
+			args := []string{"done", "1"}
+			if tc.date != "" {
+				args = append(args, "--date", tc.date)
+			}
+			root.SetArgs(args)
+			if err := root.ExecuteContext(e.ctx); err != nil {
+				t.Fatal(err)
+			}
+			if out.String() != "✓ #1 'First' done · logged "+tc.want+"\n" || stderr.Len() != 0 {
+				t.Fatalf("stdout=%q stderr=%q", out.String(), stderr.String())
+			}
+			task, err := srv.Client.GetTask(t.Context(), 1)
+			if err != nil || task.Status != "done" {
+				t.Fatalf("persisted completion = %+v, err=%v", task, err)
+			}
+		})
 	}
 }
 
@@ -907,6 +935,23 @@ func TestPrintOpUnsafeHeadline(t *testing.T) {
 				t.Fatalf("unsafe headline = %q, want %q", got, want)
 			}
 		})
+	}
+}
+
+func TestColorSanitizesRetitleEffect(t *testing.T) {
+	var out bytes.Buffer
+	e := &env{out: &out, color: "always", colorSet: true}
+	effect := api.Effect{Kind: "retitled", TaskID: 1, From: "Old\x1b[31m", To: "New\x1b[2J"}
+	p := e.paint()
+	want := p.taskID(1) + " retitled " + p.quotedTitle("Old�[31m") + " → " + p.quotedTitle("New�[2J") + "\n"
+	e.printOp(&api.OpResponse{Effects: []api.Effect{effect}}, plainHeadline("Changed"))
+	if got := out.String(); got != "Changed\n"+want {
+		t.Fatalf("operation output = %q", got)
+	}
+	out.Reset()
+	err := e.printAIChanges(&api.AIChanges{Ops: []api.OpSummary{{Kind: "task.update", Actor: "bot\x1b]8", Effects: []api.Effect{effect}}}})
+	if err != nil || !strings.HasSuffix(out.String(), "\n  "+want) || !strings.Contains(out.String(), "bot�]8") {
+		t.Fatalf("AI changes = %q, err=%v", out.String(), err)
 	}
 }
 

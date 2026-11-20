@@ -59,7 +59,7 @@ func dateUsage(field string, err error) error {
 		switch {
 		case input.NamesBlock:
 			detail = input.Error()
-		case field != "block" && field != "reblock" && field != "--block":
+		case input.BareClock && field != "block" && field != "reblock" && field != "--block":
 			detail = field + " " + input.Error()
 		}
 	}

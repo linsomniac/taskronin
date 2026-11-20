@@ -249,6 +249,15 @@ func TestTodayReadKeepsMutationBanner(t *testing.T) {
 	}
 }
 
+func TestRevertBannerKeepsConsequencesAndWarnings(t *testing.T) {
+	a := newTestApp(t, newFake())
+	a.Update(opMsg{label: "reverted", resp: &api.OpResponse{
+		Effects:  []api.Effect{{Kind: "updated"}, {Kind: "reverted", Via: "redo", To: "task.complete"}, {Kind: "completed", TaskID: 42}},
+		Warnings: []string{"check the task"},
+	}})
+	eq(t, a.banner.text, "✓ redid complete · #42 completed · ⚠ check the task")
+}
+
 func TestEffectsLine(t *testing.T) {
 	eq(t, effectsLine([]api.Effect{{Kind: "block_cancelled", BlockID: 7}, {Kind: "slipped", BlockID: 7},
 		{Kind: "reason_added", TaskID: 42, Reason: "slipped"}, {Kind: "updated", TaskID: 42}}), "b7 cancelled · b7 slipped · #42 needs triage (slipped)")

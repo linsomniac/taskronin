@@ -33,7 +33,8 @@ func flashLines(res *service.OpResult) []string {
 
 // AIDEV-NOTE: Mirror effectLine in internal/cli/effects.go and effectsLine in
 // internal/tui/banner.go; Plan E Task 3 holds the wording table. The CLI adds
-// terminal styling to sanitized tokens and uses relative dates. This copy uses
+// terminal styling to sanitized tokens and uses relative dates. Both render
+// block ranges with BlockSpanText; the web keeps absolute dates. This copy uses
 // service.Effect because A§1.3 forbids web importing cli or api (DF21).
 func effectLine(effect service.Effect) string {
 	id := effect.TaskID
@@ -47,9 +48,9 @@ func effectLine(effect service.Effect) string {
 	case service.EffDueCleared:
 		return fmt.Sprintf("#%d due date cleared", id)
 	case service.EffBlocked:
-		return fmt.Sprintf("b%d scheduled %s", effect.BlockID, effect.To)
+		return fmt.Sprintf("b%d scheduled %s", effect.BlockID, domain.BlockSpanText(effect.To))
 	case service.EffBlockMoved:
-		return fmt.Sprintf("b%d moved %s → %s", effect.BlockID, effect.From, effect.To)
+		return fmt.Sprintf("b%d moved %s → %s", effect.BlockID, domain.BlockSpanText(effect.From), domain.BlockSpanText(effect.To))
 	case service.EffBlockCancelled:
 		if effect.To == "" {
 			return fmt.Sprintf("b%d cancelled", effect.BlockID)

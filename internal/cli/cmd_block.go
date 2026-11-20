@@ -125,10 +125,7 @@ func unblockCommand(e *env) *cobra.Command {
 				return fmt.Errorf("server response is missing the unblocked block")
 			}
 			return e.outputOp(res, func(p paint) string {
-				if res.Block.Status != "cancelled" {
-					return p.blockID(res.Block.ID) + " resolved " + p.status(res.Block.Status)
-				}
-				return p.blockID(res.Block.ID) + " cancelled"
+				return p.blockID(res.Block.ID) + " " + p.status(res.Block.Status)
 			})
 		},
 	}
@@ -161,7 +158,7 @@ func outcomeCommand(e *env) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return e.outputOp(res, func(p paint) string { return p.blockID(id) + " outcome " + p.status(outcome) })
+			return e.outputOp(res, func(p paint) string { return p.blockID(id) + " marked " + p.status(outcome) })
 		},
 	}
 }

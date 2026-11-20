@@ -86,11 +86,11 @@ func doneCommand(e *env) *cobra.Command {
 func (e *env) printDoneTally(c *client.Client, workDate civil.Date) error {
 	// AIDEV-NOTE: the completion is already saved. Only read today's tally
 	// for today's work, and silently omit it if either decorative read fails.
-	clock, err := e.clock()
+	clock, err := e.decorativeClock()
 	if err != nil || clock == nil || workDate != clock.Today {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(e.ctx, e.tallyTimeout)
+	ctx, cancel := context.WithTimeout(e.ctx, e.decorTimeout)
 	defer cancel()
 	today, _, _, err := c.Today(ctx, "")
 	if err != nil || today == nil || today.Clock.Today != workDate {

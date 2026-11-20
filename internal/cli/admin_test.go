@@ -493,4 +493,7 @@ func TestAIChangesRevertPrefix(t *testing.T) {
 	if out := captureRun(t, sys, "", "ai-changes", "--all"); strings.Count(out, "(reverted)") != 1 {
 		t.Fatalf("expected exactly one reverted op: %q", out)
 	}
+	if out := captureRun(t, sys, "", "undo"); !strings.HasPrefix(out, "redid add (op "+full[:8]+")\n") || strings.Count(out, "(op ") != 1 {
+		t.Fatalf("undo of AI revert=%q", out)
+	}
 }

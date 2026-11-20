@@ -156,6 +156,20 @@ func TestUsagePrefixAudit(t *testing.T) {
 	}
 }
 
+func TestDateFlagCalendarOverflow(t *testing.T) {
+	sys, _ := testSys(t)
+	socket, token := fakeAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/clock" {
+			t.Errorf("unexpected request %s", r.URL.Path)
+		}
+		writeJSON(t, w, api.Clock{Today: civil.MustDate("9999-12-31"), WeekStart: "monday"})
+	}))
+	out, stderr, code := runCLI(t, sys, "", "--socket", socket, "--token-file", token, "log", "-N", "work", "--date", "tomorrow")
+	if code != 2 || out != "" || stderr != "tkr: --date: date specification \"tomorrow\" resolves outside the supported calendar\n" {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, out, stderr)
+	}
+}
+
 func TestBlockCalendarOverflowContext(t *testing.T) {
 	ref := datespec.Ref{Today: civil.MustDate("9999-12-31")}
 	_, err := datespec.ParseSpan("tomorrow 09:00-10:00", datespec.Future, ref)

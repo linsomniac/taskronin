@@ -284,7 +284,8 @@ func (s *Service) runEntered(ctx context.Context, m Meta, spec opSpec, fn func(*
 	}
 	root, err := rootOfReversal(ctx, tx, o.rec)
 	if err != nil {
-		return fail(err)
+		s.logger.DebugContext(ctx, "could not load reversal root", "op_id", o.rec.ID, "error", err)
+		root = nil
 	}
 	if _, err := tx.ExecContext(ctx, `RELEASE user_op`); err != nil {
 		return fail(err)

@@ -46,13 +46,7 @@ func (e *env) printOp(resp *api.OpResponse, headline opHeadline) {
 		return
 	}
 	p := e.paint()
-	plain := headline(paint{})
-	// AIDEV-NOTE: a whole-line sanitizer would destroy paint's own escapes.
-	// If a closure missed user input, fall back to its sanitized plain line.
-	display := textsafe.SanitizeLine(plain)
-	if p.on && display == plain {
-		display = headline(p)
-	}
+	plain, display := renderSafeLine(p, headline)
 	if _, e.opOutputErr = fmt.Fprintln(e.out, display); e.opOutputErr != nil {
 		return
 	}
@@ -66,7 +60,7 @@ func (e *env) printOp(resp *api.OpResponse, headline opHeadline) {
 }
 
 func (e *env) effectInHeadline(resp *api.OpResponse, effect api.Effect, headline string) bool {
-	if headline == e.effectLine(effect, paint{}) || schedulingEffectInHeadline(resp, effect, headline) || metadataEffectInHeadline(resp, effect, headline) {
+	if headline == e.formatEffect(effect, paint{}) || schedulingEffectInHeadline(resp, effect, headline) || metadataEffectInHeadline(resp, effect, headline) {
 		return true
 	}
 	// AIDEV-NOTE: placement implies clearing reasons and the old deferral
@@ -184,15 +178,13 @@ func schedulingEffectInHeadline(resp *api.OpResponse, effect api.Effect, headlin
 		if effect.Kind == "placed" && effect.TaskID == block.TaskID {
 			return scheduledBlockHeadline(block, headline)
 		}
-		// AIDEV-NOTE: structural matches follow the headline strings in cmd_block.go.
+		// AIDEV-NOTE: unblock's resolved status and outcome's "marked" now
+		// match their effect lines exactly. These remaining matches handle
+		// the title in a schedule headline and the omitted cancellation reason.
 		if effect.BlockID == block.ID {
 			switch effect.Kind {
 			case "blocked", "block_moved":
 				return scheduledBlockHeadline(block, headline)
-			case "block_resolved":
-				return headline == fmt.Sprintf("b%d resolved %s", block.ID, effect.To)
-			case "outcome_set":
-				return headline == fmt.Sprintf("b%d outcome %s", block.ID, effect.To)
 			case "block_cancelled":
 				return headline == fmt.Sprintf("b%d cancelled", block.ID)
 			}
@@ -201,7 +193,23 @@ func schedulingEffectInHeadline(resp *api.OpResponse, effect api.Effect, headlin
 	return false
 }
 
+// AIDEV-NOTE: a whole-line sanitizer would destroy paint's own escapes.
+// If a renderer missed user input, fall back to its sanitized plain line.
+func renderSafeLine(p paint, render func(paint) string) (plain, display string) {
+	plain = render(paint{})
+	display = textsafe.SanitizeLine(plain)
+	if p.on && display == plain {
+		display = render(p)
+	}
+	return plain, display
+}
+
 func (e *env) effectLine(effect api.Effect, p paint) string {
+	_, display := renderSafeLine(p, func(p paint) string { return e.formatEffect(effect, p) })
+	return display
+}
+
+func (e *env) formatEffect(effect api.Effect, p paint) string {
 	id := p.taskID(effect.TaskID)
 	from, to := textsafe.SanitizeLine(effect.From), textsafe.SanitizeLine(effect.To)
 	switch effect.Kind {
@@ -214,9 +222,9 @@ func (e *env) effectLine(effect api.Effect, p paint) string {
 	case "due_cleared":
 		return fmt.Sprintf("%s due date cleared", id)
 	case "blocked":
-		return fmt.Sprintf("%s scheduled %s", p.blockID(effect.BlockID), e.relDate(to))
+		return fmt.Sprintf("%s scheduled %s", p.blockID(effect.BlockID), e.relDate(domain.BlockSpanText(to)))
 	case "block_moved":
-		return fmt.Sprintf("%s moved %s → %s", p.blockID(effect.BlockID), from, to)
+		return fmt.Sprintf("%s moved %s → %s", p.blockID(effect.BlockID), e.movedSpanText(from), e.movedSpanText(to))
 	case "block_cancelled":
 		if effect.To == "" {
 			return fmt.Sprintf("%s cancelled", p.blockID(effect.BlockID))
@@ -258,6 +266,13 @@ func (e *env) effectLine(effect api.Effect, p paint) string {
 	default:
 		return fmt.Sprintf("%s %s", id, textsafe.SanitizeLine(effect.Kind))
 	}
+}
+
+func (e *env) movedSpanText(payload string) string {
+	if formatted := domain.BlockSpanText(payload); formatted != payload {
+		return e.relDate(formatted)
+	}
+	return payload
 }
 
 func (p paint) taskHeadline(task *api.Task, action string) string {

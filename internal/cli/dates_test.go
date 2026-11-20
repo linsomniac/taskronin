@@ -11,6 +11,7 @@ import (
 func TestDayWord(t *testing.T) {
 	srv, _ := captureServer(t)
 	e := &env{ctx: t.Context(), apiClient: srv.Client}
+	newRoot(e)
 	for date, want := range map[string]string{
 		"2026-10-28": "today",
 		"2026-10-27": "yesterday",

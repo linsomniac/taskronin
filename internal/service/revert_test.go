@@ -362,7 +362,46 @@ func TestRevertedEffectsNameOriginalCompletion(t *testing.T) {
 	}
 	check(page.Items[0].Effects, "redo")
 	check(s.Revert(completion).Effects, "revert")
-	check(s.Undo().Effects, "undo")
+	restored := s.Undo()
+	check(restored.Effects, "redo")
+	detail, err = s.Svc.GetOp(s.Ctx(), s.Actor, restored.OpID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check(detail.Op.Effects, "redo")
+	check(s.Redo().Effects, "undo")
+}
+
+func TestRevertOfUndoRestoresCompletion(t *testing.T) {
+	s := testutil.NewScenario(t)
+	id := s.Add("A")
+	s.Done(id)
+	root := s.Last.OpID
+	undo := s.Undo()
+	res := s.Revert(undo.OpID)
+	want := service.Effect{Kind: service.EffReverted, Via: "redo", From: root.String()[:8], To: "task.complete"}
+	if len(res.Effects) == 0 || res.Effects[0] != want || s.Task(id).Status != domain.StatusDone {
+		t.Fatalf("revert of undo: effects=%+v, status=%s", res.Effects, s.Task(id).Status)
+	}
+}
+
+func TestUndoSurvivesRootLookupError(t *testing.T) {
+	s := testutil.NewScenario(t)
+	id := s.Add("A")
+	s.Done(id)
+	target := s.Last.OpID
+	// Make only the final, decorative GetOp fail to decode the target.
+	_, err := s.Store.Writer.ExecContext(s.Ctx(), `CREATE TEMP TRIGGER break_root_decode
+		AFTER UPDATE OF state ON ops WHEN NEW.state = 'reverted'
+		BEGIN UPDATE ops SET scopes = 'unknown' WHERE op_id = NEW.op_id; END`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := s.Undo()
+	want := service.Effect{Kind: service.EffReverted, Via: "undo", From: target.String()[:8]}
+	if len(res.Effects) == 0 || res.Effects[0] != want || s.Task(id).Status != domain.StatusOpen {
+		t.Fatalf("undo: effects=%+v, status=%s", res.Effects, s.Task(id).Status)
+	}
 }
 
 func TestRevertedEffectsRootHopLimit(t *testing.T) {
@@ -374,6 +413,9 @@ func TestRevertedEffectsRootHopLimit(t *testing.T) {
 		target := s.Last.OpID
 		effects := s.Revert(target).Effects
 		want := service.Effect{Kind: service.EffReverted, Via: "revert", From: root.String()[:8], To: "task.update"}
+		if hop%2 == 0 {
+			want.Via = "redo"
+		}
 		if hop == 9 {
 			want.From, want.To = target.String()[:8], ""
 		}

@@ -149,7 +149,8 @@ func (k OpKind) ReversalText(via, opID string) string {
 	return k.ReversalLabel(via, opID)
 }
 
-// ReversalLabel accepts the complete optional operation mark, including its CLI styling.
+// ReversalLabel describes the net direction of the reversal chain given by via.
+// opMark is the complete optional operation mark, including its CLI styling.
 func (k OpKind) ReversalLabel(via, opMark string) string {
 	// AIDEV-NOTE: J§4.2 uses revert wording when Via is missing or unknown.
 	action, past := "reverted", "reverted"

@@ -172,10 +172,12 @@ func persistedEffects(ctx context.Context, q store.Q, rec domain.OpRecord, event
 	return effectsFromEvents(rec, root, events), nil
 }
 
-func rootOfReversal(ctx context.Context, q store.Q, rec domain.OpRecord) (*domain.OpRecord, error) {
+func rootOfReversal(ctx context.Context, q store.Q, rec domain.OpRecord) (*Effect, error) {
 	// AIDEV-NOTE: The root is decoration for messages. A missing root must not fail
 	// a live response, history, or replay. Limit reads even for long or cyclic chains.
-	for hop := 0; hop < 8 && rec.Via != "" && rec.RevertsOpID.Valid; hop++ {
+	// Via describes the net direction: each reversal flips the root's effect.
+	via := rec.Via
+	for hops := 1; hops <= 8 && rec.Via != "" && rec.RevertsOpID.Valid; hops++ {
 		op, err := store.GetOp(ctx, q, rec.RevertsOpID.V)
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, nil
@@ -184,7 +186,13 @@ func rootOfReversal(ctx context.Context, q store.Q, rec domain.OpRecord) (*domai
 			return nil, err
 		}
 		if op.Via == "" {
-			return &op, nil
+			switch {
+			case hops%2 == 0:
+				via = "redo"
+			case via == "redo":
+				via = "undo"
+			}
+			return &Effect{Kind: EffReverted, Via: via, From: op.ID.String()[:8], To: string(op.Kind)}, nil
 		}
 		rec = op
 	}

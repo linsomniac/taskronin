@@ -138,7 +138,7 @@ func TestFOC04_FocusWins(t *testing.T) {
 	srv, sys := logFixture(t)
 	logFocus(t, srv)
 	out, stderr, code := runCLI(t, sys, "", "log", "x")
-	if code != 0 || stderr != "" || out != "→ #1 (focus)\ne1 logged Wed 2026-10-28 on #1 'Set up keycloak'\n" {
+	if code != 0 || stderr != "" || out != "→ #1 (focus)\ne1 logged today on #1 'Set up keycloak'\n" {
 		t.Fatalf("exit=%d stdout=%q stderr=%q", code, out, stderr)
 	}
 	assertLogEntry(t, srv, 1, "2026-10-28", "x")
@@ -147,7 +147,7 @@ func TestFOC04_FocusWins(t *testing.T) {
 func TestFOC05_CurrentBlock(t *testing.T) {
 	srv, sys := logFixture(t)
 	out, stderr, code := runCLI(t, sys, "", "log", "x")
-	if code != 0 || stderr != "" || out != "→ #2 (current block)\ne1 logged Wed 2026-10-28 on #2 'Write report'\n" {
+	if code != 0 || stderr != "" || out != "→ #2 (current block)\ne1 logged today on #2 'Write report'\n" {
 		t.Fatalf("exit=%d stdout=%q stderr=%q", code, out, stderr)
 	}
 	assertLogEntry(t, srv, 2, "2026-10-28", "x")
@@ -157,7 +157,7 @@ func TestFOC06_NoTask(t *testing.T) {
 	srv, sys := logFixture(t)
 	srv.Clock.Set(testutil.Local(t, "2026-10-28 16:00"))
 	out, stderr, code := runCLI(t, sys, "", "log", "x")
-	if code != 0 || stderr != "" || out != "→ no task\ne1 logged Wed 2026-10-28 (no task)\n" {
+	if code != 0 || stderr != "" || out != "→ no task\ne1 logged today (no task)\n" {
 		t.Fatalf("exit=%d stdout=%q stderr=%q", code, out, stderr)
 	}
 	assertLogEntry(t, srv, 0, "2026-10-28", "x")
@@ -186,7 +186,7 @@ func TestFOC07_Backdated(t *testing.T) {
 				}
 				return
 			}
-			if stderr != "" || !strings.Contains(out, "logged Tue 2026-10-27") || strings.Contains(out, "→") {
+			if stderr != "" || !strings.Contains(out, "logged yesterday") || strings.Contains(out, "→") {
 				t.Fatalf("stdout=%q stderr=%q", out, stderr)
 			}
 			assertLogEntry(t, srv, tc.task, "2026-10-27", "x")
@@ -231,7 +231,7 @@ func TestFOC11_FocusClearedAtMidnight(t *testing.T) {
 	logFocus(t, srv)
 	srv.Clock.Set(testutil.Local(t, "2026-10-29 00:10"))
 	out, stderr, code := runCLI(t, sys, "", "log", "x")
-	if code != 0 || stderr != "" || out != "→ no task\ne1 logged Thu 2026-10-29 (no task)\n" {
+	if code != 0 || stderr != "" || out != "→ no task\ne1 logged today (no task)\n" {
 		t.Fatalf("exit=%d stdout=%q stderr=%q", code, out, stderr)
 	}
 	assertLogEntry(t, srv, 0, "2026-10-29", "x")

@@ -36,6 +36,8 @@ type InputError struct {
 	detail, problemDetail string
 	// NamesBlock reports whether the diagnostic itself identifies a block span or endpoint.
 	NamesBlock bool
+	// BareClock reports that the diagnostic starts with the offending clock value.
+	BareClock bool
 }
 
 func (e *InputError) Error() string { return e.detail }
@@ -142,7 +144,7 @@ func parseClock(s string, allow2400 bool, blockField string) (civil.Minute, erro
 			detail = "block " + blockField + " " + detail
 			wire = "invalid block " + blockField + ": " + wire
 		}
-		return 0, &InputError{detail: detail, problemDetail: wire, NamesBlock: blockField != ""}
+		return 0, &InputError{detail: detail, problemDetail: wire, NamesBlock: blockField != "", BareClock: blockField == ""}
 	}
 	return minute, err
 }

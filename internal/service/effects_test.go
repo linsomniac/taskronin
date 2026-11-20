@@ -55,14 +55,14 @@ func TestEffectKindsMatchDeclarations(t *testing.T) {
 func TestEffectsFromEventsRevertedCarriesRoot(t *testing.T) {
 	undoID := domain.NewOpID()
 	rec := domain.OpRecord{Via: "redo", RevertsOpID: sql.Null[domain.OpID]{V: undoID, Valid: true}}
-	root := &domain.OpRecord{ID: domain.NewOpID(), Kind: domain.OpTaskComplete}
+	root := &service.Effect{Kind: service.EffReverted, Via: "redo", From: domain.NewOpID().String()[:8], To: "task.complete"}
 	evs := []domain.Event{{Entity: domain.EntTask, Action: domain.ActUpdate,
 		Before: json.RawMessage(`{"status":"done"}`), After: json.RawMessage(`{"status":"open"}`)}}
 	for _, tt := range []struct {
-		root *domain.OpRecord
+		root *service.Effect
 		want service.Effect
 	}{
-		{root, service.Effect{Kind: service.EffReverted, Via: "redo", From: root.ID.String()[:8], To: "task.complete"}},
+		{root, *root},
 		{nil, service.Effect{Kind: service.EffReverted, Via: "redo", From: undoID.String()[:8]}},
 	} {
 		got := service.EffectsFromEventsForTest(rec, tt.root, evs)

@@ -32,7 +32,7 @@ type env struct {
 	serverClock        *api.Clock
 	clockLoaded        bool
 	clockErr           error
-	tallyTimeout       time.Duration
+	decorTimeout       time.Duration
 	executing, mutates bool
 	resending          bool // `tkr pending retry`: failures leave the saved request pending
 	draftPath          string
@@ -62,7 +62,7 @@ func envFrom(cmd *cobra.Command) *env {
 }
 
 func newRoot(e *env) *cobra.Command {
-	e.tallyTimeout = 2 * time.Second
+	e.decorTimeout = 2 * time.Second
 	root := &cobra.Command{
 		Use: "tkr", Short: "Taskronin task manager", SilenceUsage: true, SilenceErrors: true,
 		Args: cobra.NoArgs,
@@ -132,12 +132,16 @@ func (e *env) client() (*client.Client, error) {
 }
 
 func (e *env) clock() (*api.Clock, error) {
+	return e.clockWithContext(e.ctx)
+}
+
+func (e *env) clockWithContext(ctx context.Context) (*api.Clock, error) {
 	if !e.clockLoaded {
 		e.clockLoaded = true
 		var c *client.Client
 		c, e.clockErr = e.client()
 		if e.clockErr == nil {
-			e.serverClock, e.clockErr = c.Clock(e.ctx)
+			e.serverClock, e.clockErr = c.Clock(ctx)
 		}
 	}
 	return e.serverClock, e.clockErr

@@ -53,8 +53,8 @@ func undoCommand(e *env, verb string) *cobra.Command {
 	}
 	if verb == "revert" {
 		cmd.Use, cmd.Args = "revert OPID", cobra.ExactArgs(1)
-		cmd.Long = "Revert an operation by its full ID or a unique prefix of it, such as the\n" +
-			"8 characters that history, undo and ai-changes print."
+		cmd.Long = "Revert an operation by its full ID or a unique prefix of it, such as the " +
+			"8 characters that history and ai-changes print, or the op ID that undo and redo name."
 	}
 	return cmd
 }

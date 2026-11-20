@@ -119,7 +119,7 @@ func logCommand(e *env) *cobra.Command {
 			if entry == nil {
 				return fmt.Errorf("server response is missing the logged entry")
 			}
-			day := entry.WorkDate.Weekday().String()[:3] + " " + entry.WorkDate.String()
+			day := e.dayWord(entry.WorkDate)
 			if entry.TaskID == nil {
 				_, err = fmt.Fprintf(e.out, "%s logged %s (no task)\n", p.entryID(entry.ID), day)
 			} else {

@@ -29,9 +29,9 @@ $ tkr add "Renew TLS certs" --defer mon
 $ tkr block 1 "tomorrow 09:00-11:00"
 b1 tomorrow 09:00–11:00 #1 'Set up keycloak postgres cluster'
 $ tkr log 2 "Replica caught up after WAL replay"
-e1 logged Fri 2026-11-20 on #2 'Restart stuck pg replica'
+e1 logged today on #2 'Restart stuck pg replica'
 $ tkr log -N "Answered DNS question from Bob"     # interruptions count too
-e2 logged Fri 2026-11-20 (no task)
+e2 logged today (no task)
 $ tkr done 2
 ✓ #2 'Restart stuck pg replica' done · logged today
 focus cleared

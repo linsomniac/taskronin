@@ -102,10 +102,13 @@ func (e *env) printAIChanges(changes *api.AIChanges) error {
 	p := e.paint()
 	var out strings.Builder
 	for _, op := range changes.Ops {
-		line := fmt.Sprintf("%s %s %s by %s at %s", p.shortOpID(op.OpID), p.taskID(op.Seq), textsafe.SanitizeLine(op.Kind), textsafe.SanitizeLine(op.Actor), op.At.Format("2006-01-02 15:04:05Z07:00"))
-		if op.State == string(domain.OpReverted) {
-			line += " (reverted)"
-		}
+		_, line := renderSafeLine(p, func(p paint) string {
+			line := fmt.Sprintf("%s %s %s by %s at %s", p.shortOpID(op.OpID), p.taskID(op.Seq), textsafe.SanitizeLine(op.Kind), textsafe.SanitizeLine(op.Actor), op.At.Format("2006-01-02 15:04:05Z07:00"))
+			if op.State == string(domain.OpReverted) {
+				line += " (reverted)"
+			}
+			return line
+		})
 		fmt.Fprintln(&out, line)
 		for _, effect := range op.Effects {
 			fmt.Fprintln(&out, "  "+e.effectLine(effect, p))

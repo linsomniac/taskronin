@@ -16,7 +16,6 @@ func TestUndoRedo(t *testing.T) { // UND-18 (TUI side).
 	for _, mode := range []Mode{ModeTabs, ModeTriage, ModePlan, ModeRecap} {
 		t.Run(fmt.Sprint(mode), func(t *testing.T) {
 			f := newFake()
-			f.resp.Effects = []api.Effect{{Kind: "reverted"}}
 			a := newTestApp(t, f)
 			s := &recScreen{}
 			if mode == ModeTabs {
@@ -24,14 +23,15 @@ func TestUndoRedo(t *testing.T) { // UND-18 (TUI side).
 			} else {
 				drain(t, a, a.enterMode(mode, s))
 			}
-			for _, tc := range []struct{ key, method, label, code, empty string }{
-				{"u", "Undo", "undone", "nothing_to_undo", "nothing to undo"},
-				{"ctrl+r", "Redo", "redone", "nothing_to_redo", "nothing to redo"},
+			for _, tc := range []struct{ key, method, via, want, code, empty string }{
+				{"u", "Undo", "undo", "✓ undid complete", "nothing_to_undo", "nothing to undo"},
+				{"ctrl+r", "Redo", "redo", "✓ redid complete", "nothing_to_redo", "nothing to redo"},
 			} {
+				f.resp.Effects = []api.Effect{{Kind: "reverted", Via: tc.via, To: "task.complete"}}
 				loads, today := s.loads, f.count("Today")
 				press(t, a, tc.key)
 				eq(t, f.mustLast(t, tc.method), call{Method: tc.method, Mut: client.Mut{}})
-				eq(t, a.banner.text, tc.label+" · reverted")
+				eq(t, a.banner.text, tc.want)
 				eq(t, f.count("Today"), today+1)
 				eq(t, s.loads, loads+1)
 				f.errs[tc.method] = problem(tc.code, 409, "")

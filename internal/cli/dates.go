@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"context"
+
 	"taskronin/internal/api"
 	"taskronin/internal/civil"
 )
@@ -20,10 +22,19 @@ func withTime(day string, minute *civil.Minute) string {
 	return day + " " + minute.String()
 }
 
+func (e *env) decorativeClock() (*api.Clock, error) {
+	// AIDEV-NOTE: clock caches both success and failure. Bound the first
+	// decorative read so a finished write can promptly show the absolute date.
+	if e.clockLoaded {
+		return e.serverClock, e.clockErr
+	}
+	ctx, cancel := context.WithTimeout(e.ctx, e.decorTimeout)
+	defer cancel()
+	return e.clockWithContext(ctx)
+}
+
 func (e *env) dayWord(d civil.Date) string {
-	// AIDEV-NOTE: clock caches both success and failure. A write pays for at
-	// most one extra local read and can still print the absolute date on error.
-	clock, err := e.clock()
+	clock, err := e.decorativeClock()
 	if err == nil && clock != nil {
 		switch d.DaysSince(clock.Today) {
 		case 0:

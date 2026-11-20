@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os/exec"
+	"slices"
 	"strings"
 	"time"
 
@@ -225,7 +226,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		a.setBanner(bannerInfo, msg.label)
 		if msg.resp != nil {
-			a.appendBanner(effectsLine(msg.resp.Effects))
+			line := effectsLine(msg.resp.Effects)
+			if slices.ContainsFunc(msg.resp.Effects, func(e api.Effect) bool { return e.Kind == "reverted" }) {
+				a.setBanner(bannerInfo, "✓ "+line)
+			} else {
+				a.appendBanner(line)
+			}
 			for _, warning := range msg.resp.Warnings {
 				a.appendBanner("⚠ " + warning)
 			}

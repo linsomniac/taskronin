@@ -2,6 +2,7 @@ package domain
 
 import (
 	"database/sql"
+	"strings"
 	"time"
 
 	"taskronin/internal/civil"
@@ -18,6 +19,29 @@ type BlockSpan struct {
 // String returns YYYY-MM-DD HH:MM-HH:MM, allowing 24:00 as the end.
 func (b BlockSpan) String() string {
 	return b.Date.String() + " " + b.Start.String() + "-" + b.End.String()
+}
+
+// BlockSpanText uses an en dash for the clock range in a block effect payload.
+// An optional ISO date is preserved for the caller to format.
+func BlockSpanText(text string) string {
+	span := text
+	if date, clocks, ok := strings.Cut(text, " "); ok {
+		if _, err := civil.ParseDate(date); err != nil {
+			return text
+		}
+		span = clocks
+	}
+	start, end, ok := strings.Cut(span, "-")
+	if !ok || len(start) != 5 || len(end) != 5 {
+		return text
+	}
+	if _, err := civil.ParseHHMM(start, false); err != nil {
+		return text
+	}
+	if _, err := civil.ParseHHMM(end, true); err != nil {
+		return text
+	}
+	return strings.TrimSuffix(text, "-"+end) + "–" + end
 }
 
 // TimeBlock is a scheduled task interval and its resolution state.

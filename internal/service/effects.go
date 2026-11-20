@@ -134,18 +134,16 @@ func EffectKinds() []EffectKind {
 	}
 }
 
-func effectsFromEvents(rec domain.OpRecord, root *domain.OpRecord, evs []domain.Event) []Effect {
+func effectsFromEvents(rec domain.OpRecord, root *Effect, evs []domain.Event) []Effect {
 	effects := make([]Effect, 0)
 	if len(evs) == 0 {
 		return effects
 	}
 	if rec.Via != "" {
-		reverted := Effect{Kind: EffReverted, Via: rec.Via, From: rec.RevertsOpID.V.String()[:8]}
-		if root != nil {
-			reverted.From = root.ID.String()[:8]
-			reverted.To = string(root.Kind)
+		if root == nil {
+			root = &Effect{Kind: EffReverted, Via: rec.Via, From: rec.RevertsOpID.V.String()[:8]}
 		}
-		effects = append(effects, reverted)
+		effects = append(effects, *root)
 	}
 	for _, ev := range evs {
 		b, a := effectImage(ev.Before), effectImage(ev.After)
