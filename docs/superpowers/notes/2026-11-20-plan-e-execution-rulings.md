@@ -30,11 +30,12 @@ J-design §12 items 11–18; the short form:
 ## Rulings during execution
 
 - R-E1 (superseded by R-E7).
-- R-E2/R-E7: `--json` gains `to` and `via` on `reverted` effects; nothing
-  else in JSON changes.
-- R-E3: the completion tally runs after the write with a 2 s deadline; a
-  failure prints nothing and exits 0; `e.tallyTimeout` exists so a test can
-  force the omitted case.
+- R-E2/R-E7: on `reverted` effects `--json` gains `via` and `to`, and `from`
+  now names the root op instead of the immediate target; no other JSON
+  changes.
+- R-E3: the completion tally and the post-write clock read run after the
+  write with a 2 s deadline (`e.decorTimeout`); a failure prints nothing and
+  exits 0; tests set the field to zero to force the omitted case.
 - R-E4: Task 5 (color) was forbidden from changing a single plain byte; the
   plain goldens are unchanged across that commit.
 - R-E5: `civil` error texts may change if `datespec` cannot otherwise name
