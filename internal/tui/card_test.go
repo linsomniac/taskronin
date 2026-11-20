@@ -7,6 +7,7 @@ import (
 	"maps"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -319,10 +320,10 @@ func TestCardShowsSlips(t *testing.T) { // SLP-12 (TUI side).
 	v.Slips = api.Slips{Lifetime: 2, SinceTriage: 1}
 	f.tasks["triage"] = []api.Task{v}
 	a := cardApp(t, f)
-	if !strings.Contains(viewText(a), "slipped ×2 lifetime, ×1 since triage") {
+	if !strings.Contains(viewText(a), "slipped ×2 lifetime, ×1 since last triage") {
 		t.Fatal(viewText(a))
 	}
-	eq(t, slipText(api.Slips{}, "triage"), "")
+	eq(t, slipText(api.Slips{}), "")
 }
 
 func TestCardExit(t *testing.T) {
@@ -485,14 +486,27 @@ func TestCardBoxSizes(t *testing.T) {
 	}
 }
 
+func TestCardBoxLongHeading(t *testing.T) {
+	a := cardApp(t, newFake())
+	d := cardDeck{queue: make([]api.Task, 10000), seen: make(map[int64]bool)}
+	for i := range d.queue {
+		d.queue[i].ID = int64(i + 1)
+		d.seen[d.queue[i].ID] = true
+	}
+	heading, _, _ := strings.Cut(d.view(a, 20, 6), "\n")
+	eq(t, heading, "╭─ Card 10000/1000…╮")
+}
+
 func TestCardBoxHostileTitle(t *testing.T) {
 	for _, color := range []bool{false, true} {
 		f := newFake()
 		v := task(1, "bad\x1b\u009b\u202e"+strings.Repeat("宽", 100), "new")
+		v.Reasons[0].Reason, v.Tags, v.Notes = v.Title, []string{v.Title}, "\t"+v.Title
 		f.tasks["triage"] = []api.Task{v}
 		a := newTestApp(t, f, func(c *Config) { c.StartMode, c.Color = ModeTriage, color })
-		for _, w := range []int{20, 41} {
-			out := a.current().view(a, w, 30)
+		for _, size := range []struct{ w, h int }{{20, 6}, {20, 30}, {41, 30}} {
+			w := size.w
+			out := a.current().view(a, w, size.h)
 			if strings.ContainsAny(out, "\u009b\u202e") || (!color && strings.ContainsRune(out, '\x1b')) {
 				t.Fatalf("unsafe output: %q", out)
 			}
@@ -513,6 +527,7 @@ func TestCardBoxStyles(t *testing.T) {
 	f := newFake()
 	v := task(42, "Title", "new")
 	v.Notes = "note\tline"
+	v.Reasons[0].Since.Time = f.clock.Now.Add(10 * time.Hour) // 20:00 locally, 02:00 UTC the following day.
 	v.Slips = api.Slips{Lifetime: 2, SinceTriage: 1}
 	f.tasks["triage"] = []api.Task{v}
 	a := newTestApp(t, f, func(c *Config) { c.StartMode, c.Color = ModeTriage, true })
@@ -520,8 +535,8 @@ func TestCardBoxStyles(t *testing.T) {
 	for _, want := range []string{
 		a.styles.Dim.Render("│"),
 		a.styles.ID.Render("#42"), a.styles.Head.Render("Title"),
-		a.styles.Warn.Render("new · since 10:00"),
-		a.styles.Bad.Render("slipped ×2 lifetime, ×1 since triage"),
+		a.styles.Warn.Render("new · since 20:00"),
+		a.styles.Bad.Render("slipped ×2 lifetime, ×1 since last triage"),
 		a.styles.Dim.Render("note    line"), a.styles.Dim.Render(cardLegend),
 	} {
 		if !strings.Contains(out, want) {

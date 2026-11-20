@@ -245,8 +245,7 @@ func (d *cardDeck) view(a *App, w, h int) string {
 		}
 	}
 	heading := fmt.Sprintf("Card %d/%d", len(d.seen), total)
-	// AIDEV-NOTE: below 20×6 the plain card keeps the legend and gives all
-	// remaining cells to content. Check the available body after any notice.
+	// AIDEV-NOTE: draw the box only if the body after any retained notice is at least 20×6.
 	if w < 20 || h < 6 {
 		return plainCard(a, t, heading, w, h)
 	}
@@ -271,7 +270,7 @@ func (d *cardDeck) view(a *App, w, h int) string {
 	for _, r := range t.Reasons {
 		add(a.styles.Warn.Render(a.line(r.Reason+" · since "+a.reasonSince(r.Since), inner)))
 	}
-	if slips := slipText(t.Slips, "triage"); slips != "" {
+	if slips := slipText(t.Slips); slips != "" {
 		add(a.styles.Bad.Render(a.line(slips, inner)))
 	}
 	for _, field := range cardFields(t) {
@@ -293,7 +292,7 @@ func plainCard(a *App, t api.Task, heading string, w, h int) string {
 	for _, r := range t.Reasons {
 		add(r.Reason + " since " + r.Since.Format("2006-01-02 15:04"))
 	}
-	if slips := slipText(t.Slips, "last triage"); slips != "" {
+	if slips := slipText(t.Slips); slips != "" {
 		add(slips)
 	}
 	for _, field := range cardFields(t) {
@@ -302,11 +301,13 @@ func plainCard(a *App, t api.Task, heading string, w, h int) string {
 	for _, note := range cardNotes(t.Notes) {
 		add(note)
 	}
+	// Reserve the legend's row. Notes come last so they give up space first.
 	lines = lines[:min(len(lines), max(0, h-1))]
 	add(cardLegend)
 	return clip(lines, w, h)
 }
 
+// cardFields returns raw field lines. Pass each through a.line before display.
 func cardFields(t api.Task) []string {
 	var fields []string
 	for _, field := range []struct {
@@ -333,6 +334,7 @@ func cardFields(t api.Task) []string {
 	return fields
 }
 
+// cardNotes expands tabs in raw note lines. Pass each through a.line before display.
 func cardNotes(notes string) []string {
 	lines := strings.SplitN(notes, "\n", 6)
 	lines = lines[:min(len(lines), 5)]
@@ -342,11 +344,11 @@ func cardNotes(notes string) []string {
 	return lines
 }
 
-func slipText(s api.Slips, since string) string {
+func slipText(s api.Slips) string {
 	if s.Lifetime == 0 {
 		return ""
 	}
-	return fmt.Sprintf("slipped ×%d lifetime, ×%d since %s", s.Lifetime, s.SinceTriage, since)
+	return fmt.Sprintf("slipped ×%d lifetime, ×%d since last triage", s.Lifetime, s.SinceTriage)
 }
 
 func cardKeys(a *App, d *cardDeck, k tea.KeyPressMsg) (tea.Cmd, bool) {

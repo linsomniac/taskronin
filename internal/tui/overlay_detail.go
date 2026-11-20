@@ -174,6 +174,7 @@ func (s *detailScreen) view(a *App, w, h int) string {
 	if len(d.Interruptions) > 0 {
 		add("Interruptions")
 		for _, i := range d.Interruptions {
+			// The formatter emits only a time and styled IDs here. Append directly to preserve their SGR.
 			lines = append(lines, interruptionLine(i, nil, nil, a.styles.ID))
 		}
 	}
