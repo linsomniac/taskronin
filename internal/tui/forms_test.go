@@ -19,6 +19,7 @@ import (
 func TestAddTask(t *testing.T) {
 	f := newFake()
 	f.resp.Task = ptr(task(42, "Restart stuck pg replica"))
+	f.resp.Effects = []api.Effect{{Kind: "created", TaskID: 42}, {Kind: "reason_added", TaskID: 42, Reason: "new"}}
 	a := newTestApp(t, f)
 	press(t, a, "a")
 	typeText(t, a, "Restart stuck pg replica")
@@ -28,7 +29,9 @@ func TestAddTask(t *testing.T) {
 	press(t, a, "enter")
 	eq(t, f.mustLast(t, "AddTask").Req, any(api.AddTaskRequest{Title: "Restart stuck pg replica"}))
 	eq(t, a.form, nil)
-	eq(t, a.banner.text, "#42 added to triage (new)")
+	if !strings.HasSuffix(viewText(a), "\n✓ #42 added to triage (new)") {
+		t.Fatal(viewText(a))
+	}
 }
 
 func TestFormKeepsTextOnFailure(t *testing.T) { // Review Focus 3; CF03 wrapped unknown takes precedence.
@@ -795,4 +798,17 @@ func TestFormInvalidEditPreservesRetry(t *testing.T) {
 	eq(t, f.mustLast(t, "DeferTask"), first)
 	eq(t, f.count("DeferTask"), 2)
 	eq(t, a.banner.text, "deferred")
+}
+
+func TestAddBannerKeepsOtherEffectsAndWarnings(t *testing.T) {
+	f := newFake()
+	f.resp.Task = ptr(task(42, "captured"))
+	f.resp.Effects = []api.Effect{{Kind: "reason_added", TaskID: 42, Reason: "new"}, {Kind: "reason_added", TaskID: 9, Reason: "slipped"}}
+	f.resp.Warnings = []string{"check placement"}
+	a := newTestApp(t, f)
+	press(t, a, "a")
+	typeText(t, a, "captured")
+	press(t, a, "enter")
+	eq(t, a.banner.kind, bannerError)
+	eq(t, a.banner.text, "#42 added to triage (new) · #9 needs triage (slipped) · ⚠ check placement")
 }

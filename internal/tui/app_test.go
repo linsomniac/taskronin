@@ -274,8 +274,8 @@ func TestRevertBannerKeepsConsequencesAndWarnings(t *testing.T) {
 	const want = "redid complete · #42 completed · ⚠ check the task"
 	eq(t, a.banner.text, want)
 	frame := viewText(a)
-	eq(t, strings.Count(frame, "✓"), 1)
-	if !strings.HasSuffix(frame, "✓ "+want) {
+	eq(t, strings.Count(frame, "✓"), 0)
+	if !strings.HasSuffix(frame, "⚠ "+want) {
 		t.Fatal(frame)
 	}
 }
@@ -334,7 +334,7 @@ func TestHeaderTabMarker(t *testing.T) {
 	}
 	a := newTestApp(t, newFake(), func(c *Config) { c.Color = true })
 	header := a.header(120)
-	for _, want := range []string{"\x1b[7m" + a.styles.Head.Render(" 1 Today "), a.styles.TabOff.Render("2 Triage") + "  " + a.styles.TabOff.Render("3 Backlog")} {
+	for _, want := range []string{"\x1b[7m" + a.styles.Head.Render(" 1 Today "), a.styles.TabOff.Render("2 Triage") + " " + a.styles.TabOff.Render("3 Backlog")} {
 		if !strings.Contains(header, want) {
 			t.Errorf("missing %q in %q", want, header)
 		}
@@ -638,7 +638,7 @@ func TestMutateCallbacksAndBanners(t *testing.T) {
 	eq(t, after, 1)
 	eq(t, afterCmd, 1)
 	eq(t, onErr, 0)
-	eq(t, a.banner.text, "done · #42 completed · ⚠ bad��")
+	eq(t, a.banner.text, "#42 completed · ⚠ bad��")
 	eq(t, f.count("Today"), 2)
 	f.errs["Undo"] = notSent()
 	drain(t, a, a.mutate("done", call, success, failure))
@@ -726,5 +726,18 @@ func TestReadBannerClearsWhenOwnerCloses(t *testing.T) {
 			press(t, a, exit)
 			eq(t, a.banner.text, "")
 		})
+	}
+}
+
+func TestCompletionAndDraftDiscardBanners(t *testing.T) {
+	a := newTestApp(t, newFake())
+	a.Update(opMsg{label: "completed", resp: &api.OpResponse{Effects: []api.Effect{{Kind: "completed", TaskID: 3}}}})
+	if !strings.HasSuffix(viewText(a), "\n✓ #3 completed") {
+		t.Error(viewText(a))
+	}
+	a.Update(opMsg{label: "saved"})
+	a.Update(draftDiscardedMsg{path: "kept-draft", err: errors.New("permission denied")})
+	if !strings.HasSuffix(viewText(a), "\n⚠ saved · cannot discard draft: permission denied") {
+		t.Error(viewText(a))
 	}
 }

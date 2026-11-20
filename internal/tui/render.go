@@ -105,25 +105,32 @@ func fitLines(s string, h int) []string {
 }
 
 func (a *App) header(w int) string {
-	separator := " "
-	if a.cfg.Color {
-		separator = "  "
-	}
-	parts := []string{a.styles.Head.Render(a.line("Taskronin · "+a.clock.Now.Format("Mon 2006-01-02 15:04"), w))}
+	var tabs []string
 	for i, name := range tabNames {
 		label := fmt.Sprintf("%d %s", i+1, name)
 		style := a.styles.TabOff
 		if Tab(i) == a.tab {
 			if a.cfg.Color {
 				// Keep a standalone reverse-video SGR around the bold tab.
-				style = a.styles.TabOn.UnsetBold()
+				style = a.styles.TabOnBar
 				label = a.styles.Head.Render(" " + label + " ")
 			} else {
 				label = "[" + label + "]"
 			}
 		}
-		parts = append(parts, style.Render(label))
+		tabs = append(tabs, style.Render(label))
 	}
+	strip := strings.Join(tabs, " ")
+	clock := a.clock.Now.Format("Mon 2006-01-02 15:04")
+	prefix := "Taskronin · " + clock
+	available := w - lipgloss.Width(strip) - 1
+	if lipgloss.Width(prefix) > available {
+		prefix = clock
+	}
+	if lipgloss.Width(prefix) > available {
+		prefix = a.clock.Now.Format("Mon 15:04")
+	}
+	header := a.styles.Head.Render(prefix) + " " + strip
 	if a.today != nil {
 		backup, purge, timezone := !a.today.Backup.Healthy, false, false
 		var status []string
@@ -150,10 +157,10 @@ func (a *App) header(w int) string {
 			status = append(status, a.styles.Info.Render(fmt.Sprintf("ai %d", a.today.AIChanges)))
 		}
 		if len(status) > 0 {
-			return strings.Join(parts, separator) + "\n" + strings.Join(status, " · ")
+			return header + "\n" + strings.Join(status, " · ")
 		}
 	}
-	return strings.Join(parts, separator)
+	return header
 }
 
 // AIDEV-NOTE: kept drafts have a separate lifetime from transient banners.

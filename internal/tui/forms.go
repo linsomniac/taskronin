@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"time"
 
 	"charm.land/bubbles/v2/textinput"
@@ -314,14 +315,22 @@ func (f *confirmation) handle(a *App, k tea.KeyPressMsg) (tea.Cmd, bool) {
 }
 
 func (a *App) openAdd() tea.Cmd {
+	const label = "added to triage (new)"
 	return a.openForm("Add task", "enter saves · esc cancels", "", func(_ *App, value string) (string, sendFunc, error) {
 		r := api.AddTaskRequest{Title: value}
-		return "added to triage (new)", func(ctx context.Context, c API, key string) (*api.OpResponse, error) {
+		return label, func(ctx context.Context, c API, key string) (*api.OpResponse, error) {
 			return c.AddTask(ctx, client.Mut{Key: key}, r)
 		}, nil
 	}, func(a *App, r *api.OpResponse) tea.Cmd {
 		if r != nil && r.Task != nil {
-			a.setBanner(bannerInfo, fmt.Sprintf("#%d %s", r.Task.ID, a.banner.text))
+			headline := fmt.Sprintf("#%d %s", r.Task.ID, label)
+			effects := slices.DeleteFunc(slices.Clone(r.Effects), func(e api.Effect) bool {
+				return e.Kind == "reason_added" && e.TaskID == r.Task.ID
+			})
+			if line := effectsLine(effects); line != "" {
+				headline += " · " + line
+			}
+			a.setBanner(bannerOK, headline)
 		}
 		return nil
 	}).focus()

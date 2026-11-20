@@ -230,7 +230,7 @@ func (s *planMode) view(a *App, w, h int) string {
 	if s.step == 2 {
 		leftWidth := max(0, w/2)
 		rightWidth := max(0, w-leftWidth-3)
-		left := []string{a.line("Backlog top 10", leftWidth)}
+		left := []string{a.styles.Head.Render(a.line("Backlog top 10", leftWidth))}
 		if notice := s.backlogState.retainedNotice("backlog", s.backlogLoaded); notice != "" {
 			left = append(left, a.line(notice, leftWidth))
 		}
@@ -273,7 +273,7 @@ func (s *planMode) view(a *App, w, h int) string {
 	lines := []string{
 		a.line("Plan 3/3 · enter/q ends", w),
 		a.line(summary, w),
-		a.line("Today's blocks · "+a.clock.Today.String(), w),
+		a.styles.Head.Render(a.line("Today's blocks · "+a.clock.Today.String(), w)),
 	}
 	if s.blocksState != loadLoaded {
 		lines = append(lines, a.line(s.blocksState.notice("blocks"), w))

@@ -9,6 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"taskronin/internal/api"
 )
@@ -154,4 +155,53 @@ func TestFinalHelpListsVisibleActionsAt80(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestHeaderFitsTabStrip(t *testing.T) {
+	for _, color := range []bool{false, true} {
+		a := newTestApp(t, newFake(), func(c *Config) { c.Color = color })
+		for _, tc := range []struct {
+			width  int
+			prefix string
+		}{{80, "Taskronin · Wed 2026-10-28 10:00 "}, {70, "Wed 2026-10-28 10:00 "}, {60, "Wed 10:00 "}} {
+			a.Update(tea.WindowSizeMsg{Width: tc.width, Height: 24})
+			for i := range tabNames {
+				a.tab = Tab(i)
+				line, _, _ := strings.Cut(viewText(a), "\n")
+				line = ansi.Strip(line)
+				if !strings.HasPrefix(line, tc.prefix) {
+					t.Errorf("color %t width %d tab %d: %q", color, tc.width, i+1, line)
+				}
+				for j, name := range tabNames {
+					if !strings.Contains(line, fmt.Sprintf("%d %s", j+1, name)) {
+						t.Errorf("missing tab %d in %q", j+1, line)
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestModeShortHelp(t *testing.T) {
+	f := newFake()
+	f.tasks["triage"] = []api.Task{task(1, "triage")}
+	f.days[f.clock.Today] = recapFixture(f.clock.Today)
+	a := newTestApp(t, f)
+	check := func(width int, want string) {
+		t.Helper()
+		a.Update(tea.WindowSizeMsg{Width: width, Height: 24})
+		lines := strings.Split(viewText(a), "\n")
+		eq(t, lines[len(lines)-1], want)
+	}
+	check(80, "1–5/tab tabs • a add • l log • ? help • q quit/back")
+	drain(t, a, a.enterMode(ModeRecap, newRecapMode(f.clock.Today)))
+	check(80, "w worked · m missed · a auto · x done · l log · L link · ? help · q quit")
+	drain(t, a, a.enterMode(ModeTriage, newCardMode(0)))
+	check(160, cardLegend+" · ? help · q quit")
+	drain(t, a, a.enterMode(ModePlan, newPlanMode()))
+	check(160, cardLegend+" · enter skip to backlog · ? help · q quit")
+	press(t, a, "enter")
+	check(80, "j/↓ down · k/↑ up · B block today · enter summary · ? help · q quit")
+	press(t, a, "enter")
+	check(80, "enter finish · ? help · q quit")
 }

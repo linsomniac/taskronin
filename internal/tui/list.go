@@ -112,7 +112,7 @@ func (l *recordList[T]) renderHeadings(a *App, w, h int, row func(T, int) string
 	selectedLine := 0
 	for i, t := range l.items {
 		if heading := headings[i]; heading != "" {
-			lines = append(lines, a.styles.Header.Render(a.line(heading, w)))
+			lines = append(lines, a.styles.Head.Render(a.line(heading, w)))
 		}
 		if i == l.cursor {
 			selectedLine = len(lines)

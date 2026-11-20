@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"os/exec"
-	"slices"
 	"strings"
 	"time"
 
@@ -226,23 +225,24 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// schedules its refresh; forms retain their own retry/error policy.
 			return a, tea.Batch(cmd, a.current().update(a, msg))
 		}
-		a.setBanner(bannerOK, msg.label)
+		headline := msg.label
 		if msg.resp != nil {
-			line := effectsLine(msg.resp.Effects)
-			if slices.ContainsFunc(msg.resp.Effects, func(e api.Effect) bool { return e.Kind == "reverted" }) {
-				a.setBanner(bannerOK, line)
-			} else {
-				a.appendBanner(line)
-			}
-			for _, warning := range msg.resp.Warnings {
-				a.appendBanner("⚠ " + warning)
+			if line := effectsLine(msg.resp.Effects); line != "" {
+				headline = line
 			}
 		}
+		a.setBanner(bannerOK, headline)
 		var after tea.Cmd
 		// The refresh below covers any screen revealed by the success hook.
 		a.overlayDirty, a.baseDirty = false, false
 		if msg.after != nil {
 			after = msg.after(a, msg.resp)
+		}
+		// A success hook can replace the headline. Keep every response warning with it.
+		if msg.resp != nil {
+			for _, warning := range msg.resp.Warnings {
+				a.appendBanner("⚠ " + warning)
+			}
 		}
 		a.overlayDirty = len(a.overlays) > 0
 		return a, tea.Batch(a.refresh(), after)

@@ -150,7 +150,7 @@ func (s *logScreen) view(a *App, w, h int) string {
 		if notice != "" {
 			return a.line(notice, w)
 		}
-		return a.line("No entries for "+logDay(logRangeStart(s.to))+" — l logs work", w)
+		return a.line(emptyLogText(logRangeStart(s.to), s.to), w)
 	}
 	bodyHeight := h
 	if notice != "" {
@@ -177,6 +177,13 @@ func (s *logScreen) view(a *App, w, h int) string {
 
 // The Log tab includes both endpoints of its 14-day range.
 func logRangeStart(to civil.Date) civil.Date { return to.AddDays(-13) }
+
+func emptyLogText(from, to civil.Date) string {
+	if from == to {
+		return "No entries for " + logDay(from) + " — l logs work"
+	}
+	return "No entries " + logDay(from) + " – " + logDay(to) + " — l logs work"
+}
 
 func logDay(date civil.Date) string {
 	return fmt.Sprintf("%.3s %s", date.Weekday(), date.String()[5:])

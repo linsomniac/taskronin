@@ -69,6 +69,11 @@ func TestDetailInterruptionIDStyle(t *testing.T) {
 	a := newTestApp(t, f, func(c *Config) { c.Color = true })
 	drain(t, a, a.openDetail(42))
 	out := a.current().view(a, 100, 40)
+	for _, title := range []string{"Reasons", "Notes", "Blocks", "Entries", "Interruptions"} {
+		if !strings.Contains(out, a.styles.Head.Render(title)) {
+			t.Errorf("missing styled detail heading %q", title)
+		}
+	}
 	if !strings.Contains(out, "10:00 "+a.styles.ID.Render("#17")+" interrupted "+a.styles.ID.Render("#42")) {
 		t.Fatalf("missing styled interruption IDs: %q", out)
 	}

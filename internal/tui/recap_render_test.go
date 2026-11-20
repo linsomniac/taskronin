@@ -79,6 +79,10 @@ func TestRecapSummary(t *testing.T) {
 	drain(t, a, a.refresh())
 	check("Nothing to recap for Tue 10-27")
 
+	f.days[date] = api.Day{Date: date, Blocks: []api.Block{{ID: 4, Status: "cancelled"}, {ID: 5, Status: "cancelled"}}}
+	drain(t, a, a.refresh())
+	check("Nothing to review · 2 cancelled")
+
 	f.days[date] = api.Day{Date: date, Unlinked: []api.Entry{{ID: 8, WorkDate: date}}}
 	drain(t, a, a.refresh())
 	check("0 worked · 0 missed · 1 to review")

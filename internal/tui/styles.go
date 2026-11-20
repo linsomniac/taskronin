@@ -4,22 +4,23 @@ import "charm.land/lipgloss/v2"
 
 // Styles contains only trusted presentation; sanitize user text before rendering.
 type Styles struct {
-	Header, TabOn, TabOff, Selected, Dim, Warn, Err, Info, Current lipgloss.Style
-	ID, OK, Bad, Head                                              lipgloss.Style
-	Box                                                            boxChars
+	Header, TabOn, TabOnBar, TabOff, Selected, Dim, Warn, Err, Info, Current lipgloss.Style
+	ID, OK, Bad, Head                                                        lipgloss.Style
+	Box                                                                      boxChars
 }
 
 type boxChars struct{ TL, TR, BL, BR, H, V string }
 
 func newStyles(color bool) Styles {
 	plain := lipgloss.NewStyle()
-	s := Styles{Header: plain, TabOn: plain, TabOff: plain, Selected: plain,
+	s := Styles{Header: plain, TabOn: plain, TabOnBar: plain, TabOff: plain, Selected: plain,
 		Dim: plain, Warn: plain, Err: plain, Info: plain, Current: plain,
 		ID: plain, OK: plain, Bad: plain, Head: plain,
 		Box: boxChars{TL: "╭", TR: "╮", BL: "╰", BR: "╯", H: "─", V: "│"}}
 	if color {
 		s.Header = plain.Bold(true)
-		s.TabOn = plain.Reverse(true).Bold(true)
+		s.TabOnBar = plain.Reverse(true)
+		s.TabOn = s.TabOnBar.Bold(true)
 		s.TabOff = plain.Foreground(lipgloss.Color("7"))
 		s.Selected = plain.Reverse(true)
 		s.Dim = plain.Foreground(lipgloss.Color("8"))

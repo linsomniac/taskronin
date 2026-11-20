@@ -74,7 +74,8 @@ var (
 	logKeys         = appendKeys(listKeys, action("l", "l", "log"), action("L", "L", "relink"), action("X", "X", "delete"), action("e", "e", "edit"))
 	cardActions     = actionKeys{action("k", "k", "keep"), action("t", "t", "top"), action("b", "b", "bottom"), action("p", "p", "place"), action("d", "d", "defer"), action("B", "B", "block"), action("x", "x", "done"), action("D", "D", "drop"), action("s", "s", "skip"), action("A", "A", "accept new")}
 	planBacklogKeys = appendKeys(listKeys, action("B", "B", "block today"), action("enter", "enter", "summary"))
-	recapKeys       = appendKeys(listKeys, action("w", "w", "worked"), action("m", "m", "missed"), action("a", "a", "auto"), action("x", "x", "done"), action("l", "l", "log"), action("L", "L", "link"))
+	recapActions    = actionKeys{action("w", "w", "worked"), action("m", "m", "missed"), action("a", "a", "auto"), action("x", "x", "done"), action("l", "l", "log"), action("L", "L", "link")}
+	recapKeys       = appendKeys(listKeys, recapActions...)
 	detailKeys      = appendKeys(listKeys, action("e", "e", "edit"), action("h", "h", "history"), action("t", "t", "tags"))
 	searchKeys      = appendKeys(listKeys, action("r", "r", "refresh"), action("enter", "enter", "detail"))
 	aiKeys          = appendKeys(listKeys, action("A", "A", "review/retry"), action("R", "R", "revert"))
@@ -123,7 +124,19 @@ func (a *App) screenKeys() actionKeys {
 
 func (a *App) helpView(w int) string {
 	if !a.help.ShowAll {
-		return a.help.View(a.keys)
+		if a.mode == ModeTabs {
+			return a.help.View(a.keys)
+		}
+		keys := a.screenKeys()
+		if _, recap := a.current().(*recapMode); recap {
+			// Leave room for every outcome and linking key on the short line.
+			keys = recapActions
+		}
+		quit := a.keys.Quit
+		quit.SetHelp("q", "quit")
+		short := a.help
+		short.ShortSeparator = " · "
+		return short.ShortHelpView(appendKeys(keys, a.keys.Help, quit))
 	}
 	keys := appendKeys(a.screenKeys(), a.keys.Refresh, a.keys.Add, a.keys.Log, a.keys.Search, a.keys.Undo, a.keys.Redo)
 	if a.mode == ModeTabs && len(a.overlays) == 0 {

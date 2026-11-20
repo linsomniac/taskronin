@@ -51,6 +51,9 @@ func (a *App) appendBanner(s string) {
 	if s == "" {
 		return
 	}
+	if a.banner.kind == bannerOK {
+		a.banner.kind = bannerError
+	}
 	if a.banner.text != "" {
 		a.banner.text += " · "
 	}

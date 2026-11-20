@@ -240,7 +240,7 @@ func TestEmptyStatesWaitForLoad(t *testing.T) {
 		{TabTriage, ModeTabs, "ListTasks", "triage", "Triage clear"},
 		{TabBacklog, ModeTabs, "ListTasks", "backlog", "Backlog empty"},
 		{TabUpcoming, ModeTabs, "Upcoming", "upcoming", "Nothing deferred"},
-		{TabLog, ModeTabs, "ListEntries", "log", "No entries for"},
+		{TabLog, ModeTabs, "ListEntries", "log", "No entries"},
 		{TabToday, ModePlan, "ListTasks", "backlog", "Backlog empty"},
 		{TabToday, ModeRecap, "Day", "day", "Nothing to recap"},
 	} {
@@ -406,9 +406,14 @@ func TestBlockRowTokenColors(t *testing.T) {
 		a := newTestApp(t, f, func(c *Config) { c.Color, c.StartMode = true, mode })
 		tokens := []string{a.styles.ID.Render("b1"), a.styles.ID.Render("#1"), a.styles.OK.Render("worked"), a.styles.Bad.Render("missed")}
 		if mode == ModePlan {
+			if !strings.Contains(viewText(a), a.styles.Head.Render("Backlog top 10")) {
+				t.Error("missing styled backlog heading")
+			}
 			press(t, a, "enter")
+			tokens = append(tokens, a.styles.Head.Render("Today's blocks · "+day.Date.String()))
 		} else {
-			tokens = append(tokens, a.styles.Bad.Render("slipped"), a.styles.ID.Render("e6"))
+			tokens = append(tokens, a.styles.Bad.Render("slipped"), a.styles.ID.Render("e6"),
+				a.styles.Head.Render("Blocks"), a.styles.Head.Render("Unlinked entries"), a.styles.Head.Render("Interruptions"))
 		}
 		body := viewText(a)
 		for _, token := range tokens {

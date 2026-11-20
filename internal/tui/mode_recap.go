@@ -226,6 +226,9 @@ func recapSummary(day *api.Day) string {
 	if worked+missed > 0 {
 		return fmt.Sprintf("Recap complete · %d worked · %d missed", worked, missed)
 	}
+	if len(day.Blocks) > 0 {
+		return fmt.Sprintf("Nothing to review · %d cancelled", len(day.Blocks))
+	}
 	return "Nothing to recap for " + logDay(day.Date)
 }
 
@@ -247,7 +250,7 @@ func (s *recapMode) view(a *App, w, h int) string {
 		var text string
 		if b := row.block; b != nil {
 			if i == 0 {
-				lines = append(lines, a.line("Blocks", w))
+				lines = append(lines, a.styles.Head.Render(a.line("Blocks", w)))
 			}
 			text = a.blockText(*b) + "  " + a.blockStatus(b.Status)
 			if b.OutcomeSource != nil {
@@ -258,7 +261,7 @@ func (s *recapMode) view(a *App, w, h int) string {
 			}
 		} else if e := row.entry; e != nil {
 			if i == len(s.day.Blocks) {
-				lines = append(lines, a.line("Unlinked entries", w))
+				lines = append(lines, a.styles.Head.Render(a.line("Unlinked entries", w)))
 			}
 			text = a.id("e", e.ID) + " " + textsafe.SanitizeLine(e.Title)
 		}
@@ -268,7 +271,7 @@ func (s *recapMode) view(a *App, w, h int) string {
 		lines = append(lines, a.styledRow(text, w, i == s.cursor))
 	}
 	if len(s.day.Interruptions) > 0 {
-		lines = append(lines, a.line("Interruptions", w))
+		lines = append(lines, a.styles.Head.Render(a.line("Interruptions", w)))
 		titles := titlesFrom(&api.Today{Blocks: s.day.Blocks, Entries: s.day.Entries})
 		blocks := make(map[int64]api.Block)
 		for _, b := range s.day.Blocks {

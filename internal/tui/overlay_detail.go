@@ -120,6 +120,7 @@ func (s *detailScreen) view(a *App, w, h int) string {
 	d := s.detail
 	var lines []string
 	add := func(text string) { lines = append(lines, textsafe.SanitizeLine(text)) }
+	heading := func(title string) { lines = append(lines, a.styles.Head.Render(a.line(title, w))) }
 	add(fmt.Sprintf("#%d %s", s.id, d.Title))
 	add("e edit · t tags · h history · j/k scroll · esc back")
 	add("Status: " + d.Status + " · View: " + d.View)
@@ -146,13 +147,13 @@ func (s *detailScreen) view(a *App, w, h int) string {
 		}
 	}
 	add(fmt.Sprintf("Slips: %d lifetime, %d since triage", d.Slips.Lifetime, d.Slips.SinceTriage))
-	add("Reasons")
+	heading("Reasons")
 	for _, r := range d.Reasons {
 		add(r.Reason + " since " + r.Since.Format("2006-01-02 15:04"))
 	}
-	add("Notes")
+	heading("Notes")
 	lines = append(lines, strings.Split(textsafe.Sanitize(d.Notes), "\n")...)
-	add("Blocks")
+	heading("Blocks")
 	for _, b := range d.Blocks {
 		text := fmt.Sprintf("b%d %s %s %s", b.ID, b.Date, spanText(b.Start, b.End), b.Status)
 		if b.Slipped {
@@ -163,7 +164,7 @@ func (s *detailScreen) view(a *App, w, h int) string {
 		}
 		add(text)
 	}
-	add("Entries")
+	heading("Entries")
 	for _, e := range d.Entries {
 		text := fmt.Sprintf("e%d %s", e.ID, e.WorkDate)
 		if e.Time != nil {
@@ -172,7 +173,7 @@ func (s *detailScreen) view(a *App, w, h int) string {
 		add(text + " " + e.Title + " (" + e.Kind + ")")
 	}
 	if len(d.Interruptions) > 0 {
-		add("Interruptions")
+		heading("Interruptions")
 		for _, i := range d.Interruptions {
 			// The formatter emits only a time and styled IDs here. Append directly to preserve their SGR.
 			lines = append(lines, interruptionLine(i, nil, nil, a.styles.ID))
