@@ -286,6 +286,21 @@ func TestUndoRedo(t *testing.T) {
 	}
 }
 
+func TestUndoJSONCarriesVia(t *testing.T) {
+	srv, sys := captureServer(t)
+	captureTask(t, srv, "Set up keycloak")
+	out := captureRun(t, sys, "", "undo", "--json")
+	var res struct {
+		Effects []map[string]any `json:"effects"`
+	}
+	if err := json.Unmarshal([]byte(out), &res); err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Effects) == 0 || res.Effects[0]["kind"] != "reverted" || res.Effects[0]["via"] != "undo" {
+		t.Fatalf("undo --json effects = %v", res.Effects)
+	}
+}
+
 func TestRevert(t *testing.T) {
 	srv, sys := captureServer(t)
 	res, err := srv.Client.AddTask(t.Context(), client.Mut{}, api.AddTaskRequest{Title: "Revert me"})

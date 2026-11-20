@@ -189,6 +189,7 @@ type Effect struct {
 	BlockID int64  `json:"block_id,omitempty"`
 	EntryID int64  `json:"entry_id,omitempty"`
 	Reason  string `json:"reason,omitempty"`
+	Via     string `json:"via,omitempty"`
 	From    string `json:"from,omitempty"`
 	To      string `json:"to,omitempty"`
 }

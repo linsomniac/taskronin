@@ -16,6 +16,7 @@ type Effect struct {
 	BlockID  domain.BlockID
 	EntryID  domain.EntryID
 	Reason   domain.TriageReason
+	Via      string
 	From, To string
 }
 
@@ -133,15 +134,16 @@ func EffectKinds() []EffectKind {
 	}
 }
 
-func effectsFromEvents(rec domain.OpRecord, target *domain.OpRecord, evs []domain.Event) []Effect {
+func effectsFromEvents(rec domain.OpRecord, root *domain.OpRecord, evs []domain.Event) []Effect {
 	effects := make([]Effect, 0)
 	if len(evs) == 0 {
 		return effects
 	}
 	if rec.Via != "" {
-		reverted := Effect{Kind: EffReverted, From: rec.RevertsOpID.V.String()[:8]}
-		if target != nil {
-			reverted.To = string(target.Kind)
+		reverted := Effect{Kind: EffReverted, Via: rec.Via, From: rec.RevertsOpID.V.String()[:8]}
+		if root != nil {
+			reverted.From = root.ID.String()[:8]
+			reverted.To = string(root.Kind)
 		}
 		effects = append(effects, reverted)
 	}

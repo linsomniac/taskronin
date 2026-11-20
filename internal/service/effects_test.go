@@ -52,23 +52,22 @@ func TestEffectKindsMatchDeclarations(t *testing.T) {
 	}
 }
 
-func TestEffectsFromEventsRevertedCarriesKind(t *testing.T) {
-	id := domain.NewOpID()
-	rec := domain.OpRecord{Via: "undo", RevertsOpID: sql.Null[domain.OpID]{V: id, Valid: true}}
-	target := &domain.OpRecord{ID: id, Kind: domain.OpTaskComplete}
+func TestEffectsFromEventsRevertedCarriesRoot(t *testing.T) {
+	undoID := domain.NewOpID()
+	rec := domain.OpRecord{Via: "redo", RevertsOpID: sql.Null[domain.OpID]{V: undoID, Valid: true}}
+	root := &domain.OpRecord{ID: domain.NewOpID(), Kind: domain.OpTaskComplete}
 	evs := []domain.Event{{Entity: domain.EntTask, Action: domain.ActUpdate,
 		Before: json.RawMessage(`{"status":"done"}`), After: json.RawMessage(`{"status":"open"}`)}}
 	for _, tt := range []struct {
-		target *domain.OpRecord
-		wantTo string
+		root *domain.OpRecord
+		want service.Effect
 	}{
-		{target, "task.complete"},
-		{nil, ""},
+		{root, service.Effect{Kind: service.EffReverted, Via: "redo", From: root.ID.String()[:8], To: "task.complete"}},
+		{nil, service.Effect{Kind: service.EffReverted, Via: "redo", From: undoID.String()[:8]}},
 	} {
-		got := service.EffectsFromEventsForTest(rec, tt.target, evs)
-		want := service.Effect{Kind: service.EffReverted, From: id.String()[:8], To: tt.wantTo}
-		if len(got) == 0 || got[0] != want {
-			t.Errorf("target %v: effects = %+v, want first effect %+v", tt.target, got, want)
+		got := service.EffectsFromEventsForTest(rec, tt.root, evs)
+		if len(got) == 0 || got[0] != tt.want {
+			t.Errorf("effects = %+v, want first effect %+v", got, tt.want)
 		}
 	}
 }
@@ -135,7 +134,7 @@ func TestEffectsFromEvents(t *testing.T) {
 	})
 	t.Run("undo with focus", func(t *testing.T) {
 		evs := []domain.Event{{Entity: domain.EntFocus, Action: domain.ActSet, TaskID: sql.Null[domain.TaskID]{V: 7, Valid: true}, After: json.RawMessage(`{"task_id":7}`)}}
-		want := []service.Effect{{Kind: service.EffReverted, From: id.String()[:8]}, {Kind: service.EffFocusSet, TaskID: 7}}
+		want := []service.Effect{{Kind: service.EffReverted, Via: "undo", From: id.String()[:8]}, {Kind: service.EffFocusSet, TaskID: 7}}
 		if got := service.EffectsFromEventsForTest(undo, nil, evs); !reflect.DeepEqual(got, want) {
 			t.Fatalf("effects = %+v, want %+v", got, want)
 		}

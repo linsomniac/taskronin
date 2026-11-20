@@ -133,7 +133,8 @@ func (s *Server) eventResponse(v service.EventView) api.EventView {
 }
 
 func effectResponse(v service.Effect) api.Effect {
-	return api.Effect{Kind: string(v.Kind), TaskID: int64(v.TaskID), BlockID: int64(v.BlockID), EntryID: int64(v.EntryID), Reason: string(v.Reason), From: v.From, To: v.To}
+	return api.Effect{Kind: string(v.Kind), TaskID: int64(v.TaskID), BlockID: int64(v.BlockID), EntryID: int64(v.EntryID),
+		Reason: string(v.Reason), Via: v.Via, From: v.From, To: v.To}
 }
 
 func convertSlice[T, U any](values []T, convert func(T) U) []U {

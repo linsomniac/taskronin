@@ -282,6 +282,10 @@ func (s *Service) runEntered(ctx context.Context, m Meta, spec opSpec, fn func(*
 			return fail(err)
 		}
 	}
+	root, err := rootOfReversal(ctx, tx, o.rec)
+	if err != nil {
+		return fail(err)
+	}
 	if _, err := tx.ExecContext(ctx, `RELEASE user_op`); err != nil {
 		return fail(err)
 	}
@@ -292,7 +296,7 @@ func (s *Service) runEntered(ctx context.Context, m Meta, spec opSpec, fn func(*
 	// reader pool; done is idempotent so the deferred call is harmless.
 	done()
 	r := &OpResult{OpID: o.rec.ID, Created: o.created, NoChange: noChange, Refs: o.refs,
-		Effects: effectsFromEvents(o.rec, o.target, o.events), Warnings: o.warnings}
+		Effects: effectsFromEvents(o.rec, root, o.events), Warnings: o.warnings}
 	if noChange {
 		r.OpID = domain.OpID{}
 		r.Created = false

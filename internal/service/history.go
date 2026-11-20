@@ -165,18 +165,30 @@ func (s *Service) GetOp(ctx context.Context, a domain.Actor, id domain.OpID) (Op
 }
 
 func persistedEffects(ctx context.Context, q store.Q, rec domain.OpRecord, events []domain.Event) ([]Effect, error) {
-	var target *domain.OpRecord
-	if rec.RevertsOpID.Valid {
-		// AIDEV-NOTE: The target kind is decoration. A missing target must not fail history or a replay.
+	root, err := rootOfReversal(ctx, q, rec)
+	if err != nil {
+		return nil, err
+	}
+	return effectsFromEvents(rec, root, events), nil
+}
+
+func rootOfReversal(ctx context.Context, q store.Q, rec domain.OpRecord) (*domain.OpRecord, error) {
+	// AIDEV-NOTE: The root is decoration for messages. A missing root must not fail
+	// a live response, history, or replay. Limit reads even for long or cyclic chains.
+	for hop := 0; hop < 8 && rec.Via != "" && rec.RevertsOpID.Valid; hop++ {
 		op, err := store.GetOp(ctx, q, rec.RevertsOpID.V)
-		switch {
-		case err == nil:
-			target = &op
-		case !errors.Is(err, store.ErrNotFound):
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, nil
+		}
+		if err != nil {
 			return nil, err
 		}
+		if op.Via == "" {
+			return &op, nil
+		}
+		rec = op
 	}
-	return effectsFromEvents(rec, target, events), nil
+	return nil, nil
 }
 
 func opSummary(ctx context.Context, q store.Q, rec domain.OpRecord) (OpSummary, error) {

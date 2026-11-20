@@ -335,6 +335,54 @@ func TestRevertEveryOpKind(t *testing.T) {
 	}
 }
 
+func TestRevertedEffectsNameOriginalCompletion(t *testing.T) {
+	s := testutil.NewScenario(t)
+	s.Done(s.Add("A"))
+	completion := s.Last.OpID
+	check := func(effects []service.Effect, via string) {
+		t.Helper()
+		want := service.Effect{Kind: service.EffReverted, Via: via, From: completion.String()[:8], To: "task.complete"}
+		if len(effects) == 0 || effects[0] != want {
+			t.Fatalf("effects = %+v, want first effect %+v", effects, want)
+		}
+	}
+	check(s.Undo().Effects, "undo")
+	m := s.Meta()
+	redo := s.Must(s.Svc.Redo(s.Ctx(), m))
+	check(redo.Effects, "redo")
+	check(s.Must(s.Svc.Redo(s.Ctx(), m)).Effects, "redo")
+	detail, err := s.Svc.GetOp(s.Ctx(), s.Actor, redo.OpID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check(detail.Op.Effects, "redo")
+	page, err := s.Svc.ListOps(s.Ctx(), s.Actor, service.ListOpsIn{OpPrefix: redo.OpID.String()})
+	if err != nil || len(page.Items) != 1 {
+		t.Fatalf("redo op page = %+v, err = %v", page, err)
+	}
+	check(page.Items[0].Effects, "redo")
+	check(s.Revert(completion).Effects, "revert")
+	check(s.Undo().Effects, "undo")
+}
+
+func TestRevertedEffectsRootHopLimit(t *testing.T) {
+	s := testutil.NewScenario(t)
+	id := s.Add("A")
+	s.Update(id, func(in *service.UpdateTaskIn) { in.Title = new("B") })
+	root := s.Last.OpID
+	for hop := 1; hop <= 9; hop++ {
+		target := s.Last.OpID
+		effects := s.Revert(target).Effects
+		want := service.Effect{Kind: service.EffReverted, Via: "revert", From: root.String()[:8], To: "task.update"}
+		if hop == 9 {
+			want.From, want.To = target.String()[:8], ""
+		}
+		if len(effects) == 0 || effects[0] != want {
+			t.Fatalf("hop %d: effects = %+v, want first effect %+v", hop, effects, want)
+		}
+	}
+}
+
 func TestRevertNetZeroAndStateChain(t *testing.T) {
 	s := testutil.NewScenario(t)
 	s.Add("A")
