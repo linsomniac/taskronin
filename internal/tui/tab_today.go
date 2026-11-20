@@ -195,7 +195,10 @@ func (s *todayScreen) view(a *App, w, h int) string {
 		focus = "▷ " + a.id("#", b.TaskID) + " " + textsafe.SanitizeLine(b.TaskTitle) + " (→" + hhmm(int(b.End)) + ")"
 	}
 	lines := []string{renderOver(a.styles.Current, textsafe.Truncate(focus, w, "…"))}
-	quiet := len(td.Blocks) == 0 && td.TriageCount == 0 && len(td.Entries) == 0 && len(td.Interruptions) == 0
+	// AIDEV-NOTE: match the CLI Today rule. A triage preview or a due task
+	// still needs its section even on a day without scheduled blocks.
+	quiet := len(td.Blocks) == 0 && td.TriageCount == 0 && len(td.TriageTop) == 0 &&
+		len(td.Overdue) == 0 && len(td.DueSoon) == 0 && len(td.Entries) == 0 && len(td.Interruptions) == 0
 	if quiet {
 		if a.todayLoad == loadLoaded {
 			lines = append(lines, a.styles.Dim.Render(a.line("Nothing scheduled, nothing to triage · a adds · 2 opens triage", w)))

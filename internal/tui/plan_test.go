@@ -100,7 +100,7 @@ func TestPlanEmptyBacklogAndSummaryLoad(t *testing.T) {
 	f.errs["Today"] = notSent()
 	press(t, a, "enter")
 	out := viewText(a)
-	if !strings.Contains(out, "Today not loaded · r retries") || strings.Contains(out, "triage clear") {
+	if !strings.Contains(out, "Plan done · placed 0 · blocked 0 · Today not loaded · r retries") || strings.Contains(out, "triage clear") {
 		t.Fatal(out)
 	}
 	press(t, a, "r")

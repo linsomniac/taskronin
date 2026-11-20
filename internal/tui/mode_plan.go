@@ -257,13 +257,18 @@ func (s *planMode) view(a *App, w, h int) string {
 		lines = append(lines, left...)
 		return clip(lines, w, h)
 	}
-	summary := a.todayLoad.notice("Today")
+	// AIDEV-NOTE: placed and blocked are session counters. Only the triage
+	// count depends on a successful Today read.
+	summary := fmt.Sprintf("Plan done · placed %d · blocked %d", s.deck.placed, s.deck.blocked+s.step2Blocked)
+	triage := a.todayLoad.notice("Today")
 	if a.todayLoad == loadLoaded && a.today != nil {
-		triage := "triage clear"
+		triage = "triage clear"
 		if a.today.TriageCount > 0 {
 			triage = fmt.Sprintf("triage left %d", a.today.TriageCount)
 		}
-		summary = fmt.Sprintf("Plan done · placed %d · blocked %d · %s", s.deck.placed, s.deck.blocked+s.step2Blocked, triage)
+	}
+	if triage != "" {
+		summary += " · " + triage
 	}
 	lines := []string{
 		a.line("Plan 3/3 · enter/q ends", w),

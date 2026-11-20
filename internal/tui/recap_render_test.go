@@ -78,6 +78,20 @@ func TestRecapSummary(t *testing.T) {
 	f.days[date] = api.Day{Date: date}
 	drain(t, a, a.refresh())
 	check("Nothing to recap for Tue 10-27")
+
+	f.days[date] = api.Day{Date: date, Unlinked: []api.Entry{{ID: 8, WorkDate: date}}}
+	drain(t, a, a.refresh())
+	check("0 worked · 0 missed · 1 to review")
+
+	day := api.Day{Date: date, Blocks: []api.Block{{ID: 6, Date: date, Status: "planned"}}}
+	f.days[date] = day
+	drain(t, a, a.refresh())
+	check("0 worked · 0 missed · 1 to review")
+	day.Blocks = slices.Clone(day.Blocks)
+	day.Blocks[0].Status = "worked"
+	f.days[date] = day
+	drain(t, a, a.refresh())
+	check("Recap complete · 1 worked · 0 missed")
 }
 
 func TestRecapDateHeader(t *testing.T) {

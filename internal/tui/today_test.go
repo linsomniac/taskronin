@@ -58,10 +58,9 @@ func TestTodayQuietDay(t *testing.T) {
 		}
 
 		f.today.Backup = api.BackupHealth{LastSuccessAt: &f.clock.Now, LastError: "disk full"}
-		f.today.DueSoon = []api.Task{task(7, "renew certificate")}
 		drain(t, a, a.fetchToday(false))
 		out = viewText(a)
-		for _, want := range []string{quiet, "renew certificate", "Backup: needs attention · last success 2026-10-28 10:00 · disk full"} {
+		for _, want := range []string{quiet, "Backup: needs attention · last success 2026-10-28 10:00 · disk full"} {
 			if !strings.Contains(out, want) {
 				t.Errorf("missing %q:\n%s", want, out)
 			}
@@ -73,6 +72,40 @@ func TestTodayQuietDay(t *testing.T) {
 		if !strings.Contains(out, a.styles.Head.Render("Blocks")+"\n"+a.styles.Dim.Render("  none planned today")) || strings.Contains(out, quiet) {
 			t.Errorf("empty Blocks section:\n%s", out)
 		}
+	}
+}
+
+func TestTodayQuietDayRequiresEmptyTaskSections(t *testing.T) {
+	for _, tc := range []struct {
+		name, heading string
+		populate      func(*api.Today, api.Task)
+	}{
+		{"due tomorrow", "Due soon", func(td *api.Today, task api.Task) {
+			task.Due = &api.Moment{Date: td.Clock.Today.AddDays(1)}
+			td.DueSoon = []api.Task{task}
+		}},
+		{"overdue", "Overdue", func(td *api.Today, task api.Task) {
+			task.Due = &api.Moment{Date: td.Clock.Today.AddDays(-1)}
+			td.Overdue = []api.Task{task}
+		}},
+		{"triage preview with zero count", "Triage 0", func(td *api.Today, task api.Task) {
+			td.TriageTop = []api.Task{task}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFake()
+			f.today.Backup.Healthy = true
+			tc.populate(&f.today, task(7, "renew certificate"))
+			out := viewText(newTestApp(t, f))
+			if strings.Contains(out, "Nothing scheduled, nothing to triage") {
+				t.Errorf("quiet-day message above %s:\n%s", tc.heading, out)
+			}
+			for _, want := range []string{"\nBlocks\n  none planned today\nTriage 0\n", "\n" + tc.heading + "\n  #7 renew certificate\n", "\nLog\n"} {
+				if !strings.Contains(out, want) {
+					t.Errorf("missing %q:\n%s", want, out)
+				}
+			}
+		})
 	}
 }
 
