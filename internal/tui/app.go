@@ -99,8 +99,10 @@ func NewApp(cfg Config) *App {
 		tab: cfg.StartTab, mode: cfg.StartMode, exitWithMode: cfg.StartMode != ModeTabs,
 		reqSeq: make(map[string]int), styles: newStyles(cfg.Color), keys: newKeys(), help: help.New(),
 	}
-	if !cfg.Color {
-		a.help.Styles = help.Styles{}
+	dim := a.styles.Dim
+	a.help.Styles = help.Styles{
+		ShortKey: dim, ShortDesc: dim, ShortSeparator: dim,
+		FullKey: dim, FullDesc: dim, FullSeparator: dim, Ellipsis: dim,
 	}
 	for i, name := range tabNames {
 		a.tabs[i] = stubScreen{name: name}
@@ -224,11 +226,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// schedules its refresh; forms retain their own retry/error policy.
 			return a, tea.Batch(cmd, a.current().update(a, msg))
 		}
-		a.setBanner(bannerInfo, msg.label)
+		a.setBanner(bannerOK, msg.label)
 		if msg.resp != nil {
 			line := effectsLine(msg.resp.Effects)
 			if slices.ContainsFunc(msg.resp.Effects, func(e api.Effect) bool { return e.Kind == "reverted" }) {
-				a.setBanner(bannerInfo, "✓ "+line)
+				a.setBanner(bannerOK, line)
 			} else {
 				a.appendBanner(line)
 			}
@@ -367,11 +369,15 @@ func (a *App) View() tea.View {
 	w, h := a.width, a.height
 	footer := a.helpView(w)
 	if a.banner.text != "" {
-		style := a.styles.Info
-		if a.banner.kind == bannerError {
-			style = a.styles.Err
+		style, prefix := a.styles.Info, ""
+		switch a.banner.kind {
+		case bannerInfo:
+		case bannerOK:
+			style, prefix = a.styles.OK, "✓ "
+		case bannerError:
+			style, prefix = a.styles.Err, "⚠ "
 		}
-		notice := style.Render(a.line(a.banner.text, w))
+		notice := style.Render(a.line(prefix+a.banner.text, w))
 		if a.help.ShowAll {
 			footer = notice + "\n" + footer
 		} else {

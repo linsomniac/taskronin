@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -31,7 +32,8 @@ func TestUndoRedo(t *testing.T) { // UND-18 (TUI side).
 				loads, today := s.loads, f.count("Today")
 				press(t, a, tc.key)
 				eq(t, f.mustLast(t, tc.method), call{Method: tc.method, Mut: client.Mut{}})
-				eq(t, a.banner.text, tc.want)
+				frame := viewText(a)
+				eq(t, frame[strings.LastIndexByte(frame, '\n')+1:], tc.want)
 				eq(t, f.count("Today"), today+1)
 				eq(t, s.loads, loads+1)
 				f.errs[tc.method] = problem(tc.code, 409, "")

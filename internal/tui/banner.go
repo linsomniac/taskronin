@@ -14,11 +14,14 @@ import (
 	"taskronin/internal/textsafe"
 )
 
+// AIDEV-NOTE: View adds the status prefix from the kind so mutation labels
+// and reversal effects can share the same success marker.
 type bannerKind int
 
 const (
 	bannerInfo bannerKind = iota
 	bannerError
+	bannerOK
 )
 
 type banner struct {

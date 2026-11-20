@@ -249,13 +249,35 @@ func TestTodayReadKeepsMutationBanner(t *testing.T) {
 	}
 }
 
+func TestBannerPrefixesWithoutColor(t *testing.T) {
+	f := newFake()
+	a := newTestApp(t, f)
+	f.errs["Undo"] = problem("nothing_to_undo", 409, "")
+	for _, tc := range []struct{ key, want string }{
+		{"ctrl+r", "✓ redone"},
+		{"u", "⚠ nothing to undo"},
+	} {
+		press(t, a, tc.key)
+		frame := viewText(a)
+		if !strings.HasSuffix(frame, tc.want) || strings.ContainsRune(frame, '\x1b') {
+			t.Errorf("after %s, want plain footer %q, got %q", tc.key, tc.want, frame)
+		}
+	}
+}
+
 func TestRevertBannerKeepsConsequencesAndWarnings(t *testing.T) {
 	a := newTestApp(t, newFake())
 	a.Update(opMsg{label: "reverted", resp: &api.OpResponse{
 		Effects:  []api.Effect{{Kind: "updated"}, {Kind: "reverted", Via: "redo", To: "task.complete"}, {Kind: "completed", TaskID: 42}},
 		Warnings: []string{"check the task"},
 	}})
-	eq(t, a.banner.text, "✓ redid complete · #42 completed · ⚠ check the task")
+	const want = "redid complete · #42 completed · ⚠ check the task"
+	eq(t, a.banner.text, want)
+	frame := viewText(a)
+	eq(t, strings.Count(frame, "✓"), 1)
+	if !strings.HasSuffix(frame, "✓ "+want) {
+		t.Fatal(frame)
+	}
 }
 
 func TestEffectsLine(t *testing.T) {
@@ -307,6 +329,10 @@ func TestRenderSanitizesAndClips(t *testing.T) {
 
 func TestRenderColorFrameClips(t *testing.T) {
 	a := newTestApp(t, newFake(), func(c *Config) { c.Color = true })
+	activeTab := lipgloss.NewStyle().Reverse(true).Bold(true).Render("[1 Today]")
+	if frame := viewText(a); !strings.Contains(frame, activeTab) {
+		t.Fatalf("active tab lacks reverse video and bold: %q", strings.SplitN(frame, "\n", 2)[0])
+	}
 	a.Update(tea.WindowSizeMsg{Width: 20, Height: 8})
 	a.setTabScreen(TabToday, &shellScreen{body: a.row(strings.Repeat("宽", 40), 80, true)})
 	a.form = &shellScreen{body: a.styles.Info.Render("prompt\ninput\nhint")}
@@ -573,7 +599,7 @@ func TestRenderFormAndHeader(t *testing.T) {
 	a.setBanner(bannerError, "message")
 	lines := strings.Split(viewText(a), "\n")
 	eq(t, len(lines), 10)
-	eq(t, lines[6:], []string{"prompt", "input", "hint", "message"})
+	eq(t, lines[6:], []string{"prompt", "input", "hint", "⚠ message"})
 	for _, part := range []string{"Taskronin  Wed 2026-10-28 10:00", "[1 Today] 2 Triage 3 Backlog 4 Upcoming 5 Log", "⚠ backup", "⚠ purge"} {
 		if !strings.Contains(strings.Join(lines[:2], "\n"), part) {
 			t.Fatal(lines[:2])
