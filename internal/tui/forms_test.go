@@ -809,6 +809,19 @@ func TestAddBannerKeepsOtherEffectsAndWarnings(t *testing.T) {
 	press(t, a, "a")
 	typeText(t, a, "captured")
 	press(t, a, "enter")
-	eq(t, a.banner.kind, bannerError)
-	eq(t, a.banner.text, "#42 added to triage (new) · #9 needs triage (slipped) · ⚠ check placement")
+	if !strings.HasSuffix(viewText(a), "\n✓ #42 added to triage (new) · #9 needs triage (slipped) · ⚠ check placement") {
+		t.Fatal(viewText(a))
+	}
+}
+
+func TestLogBannerWithResponseWarning(t *testing.T) {
+	a, f, _ := historicalRecap(t)
+	f.resp.Effects = []api.Effect{{Kind: "entry_logged", EntryID: 9}}
+	f.resp.Warnings = []string{"logged against a done task"}
+	press(t, a, "l")
+	typeText(t, a, "finished paperwork")
+	press(t, a, "enter")
+	if !strings.HasSuffix(viewText(a), "\n✓ e9 logged · ⚠ logged against a done task") {
+		t.Fatal(viewText(a))
+	}
 }

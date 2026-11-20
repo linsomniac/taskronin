@@ -274,8 +274,8 @@ func TestRevertBannerKeepsConsequencesAndWarnings(t *testing.T) {
 	const want = "redid complete · #42 completed · ⚠ check the task"
 	eq(t, a.banner.text, want)
 	frame := viewText(a)
-	eq(t, strings.Count(frame, "✓"), 0)
-	if !strings.HasSuffix(frame, "⚠ "+want) {
+	eq(t, strings.Count(frame, "✓"), 1)
+	if !strings.HasSuffix(frame, "✓ "+want) {
 		t.Fatal(frame)
 	}
 }
@@ -638,7 +638,7 @@ func TestMutateCallbacksAndBanners(t *testing.T) {
 	eq(t, after, 1)
 	eq(t, afterCmd, 1)
 	eq(t, onErr, 0)
-	eq(t, a.banner.text, "#42 completed · ⚠ bad��")
+	eq(t, a.banner.text, "done · #42 completed · ⚠ bad��")
 	eq(t, f.count("Today"), 2)
 	f.errs["Undo"] = notSent()
 	drain(t, a, a.mutate("done", call, success, failure))

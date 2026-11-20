@@ -87,6 +87,26 @@ func TestBacklogReorder(t *testing.T) {
 	eq(t, f.count("PlaceTask"), 0)
 }
 
+func TestBacklogMutationBanner(t *testing.T) {
+	for _, tc := range []struct {
+		key     string
+		effects []api.Effect
+		want    string
+	}{
+		{"D", []api.Effect{{Kind: "dropped", TaskID: 3}, {Kind: "block_cancelled", BlockID: 5}}, "✓ dropped · b5 cancelled"},
+		{"x", []api.Effect{{Kind: "completed", TaskID: 3}, {Kind: "block_resolved", BlockID: 5, To: "done"}}, "✓ #3 completed · b5 done"},
+	} {
+		t.Run(tc.key, func(t *testing.T) {
+			a, f := backlogApp(t)
+			f.resp.Effects = tc.effects
+			press(t, a, "j", "j", tc.key)
+			if !strings.HasSuffix(viewText(a), "\n"+tc.want) {
+				t.Fatal(viewText(a))
+			}
+		})
+	}
+}
+
 func TestBacklogKeys(t *testing.T) {
 	for _, k := range []string{"D", "f", "d", "B", "e", "enter"} {
 		t.Run(k, func(t *testing.T) {

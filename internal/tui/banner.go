@@ -51,13 +51,17 @@ func (a *App) appendBanner(s string) {
 	if s == "" {
 		return
 	}
-	if a.banner.kind == bannerOK {
-		a.banner.kind = bannerError
-	}
 	if a.banner.text != "" {
 		a.banner.text += " · "
 	}
 	a.banner.text += textsafe.SanitizeLine(s)
+}
+
+// AIDEV-NOTE: A failed follow-up changes the banner kind. Server warnings
+// describe a successful mutation and keep their own inline warning mark.
+func (a *App) appendBannerError(s string) {
+	a.banner.kind = bannerError
+	a.appendBanner(s)
 }
 
 // handleReadErr is the error policy for every screen load, including polling.
@@ -134,6 +138,31 @@ func (a *App) handleErr(err error) tea.Cmd {
 		a.setBanner(bannerError, err.Error())
 	}
 	return nil
+}
+
+func mutationHeadline(label string, effects []api.Effect) string {
+	line := effectsLine(effects)
+	if line == "" {
+		return label
+	}
+	if strings.Contains(line, label) {
+		return line
+	}
+	for _, e := range effects {
+		// Log labels include the link target. Reversal effects use the
+		// specific action ("undid complete") in place of the fallback ("undone").
+		switch e.Kind {
+		case "entry_logged":
+			if strings.HasPrefix(label, "logged ") {
+				return line
+			}
+		case "reverted":
+			if label == "undone" || label == "redone" || label == "reverted" {
+				return line
+			}
+		}
+	}
+	return label + " · " + line
 }
 
 func effectsLine(effs []api.Effect) string {

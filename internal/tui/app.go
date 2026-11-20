@@ -159,7 +159,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case draftDiscardedMsg:
 		if msg.err != nil {
 			a.keepDraft(msg.path)
-			a.appendBanner("cannot discard draft: " + msg.err.Error())
+			a.appendBannerError("cannot discard draft: " + msg.err.Error())
 		}
 		return a, nil
 	case todayMsg:
@@ -227,9 +227,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		headline := msg.label
 		if msg.resp != nil {
-			if line := effectsLine(msg.resp.Effects); line != "" {
-				headline = line
-			}
+			headline = mutationHeadline(msg.label, msg.resp.Effects)
 		}
 		a.setBanner(bannerOK, headline)
 		var after tea.Cmd
