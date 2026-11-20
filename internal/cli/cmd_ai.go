@@ -140,8 +140,5 @@ func (e *env) revertAIChange(c *client.Client, id string) error {
 	if err != nil {
 		return err
 	}
-	if res.OpID == nil {
-		return fmt.Errorf("server response is missing the reverted operation")
-	}
-	return e.outputOp(res, fmt.Sprintf("reverted (op %.8s)", *res.OpID))
+	return e.outputReversal(res, "reverted")
 }

@@ -48,10 +48,7 @@ func undoCommand(e *env, verb string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if res.OpID == nil {
-				return fmt.Errorf("server response is missing the %s operation", action)
-			}
-			return e.outputOp(res, fmt.Sprintf("%s (op %.8s)", action, *res.OpID))
+			return e.outputReversal(res, action)
 		},
 	}
 	if verb == "revert" {
@@ -60,6 +57,18 @@ func undoCommand(e *env, verb string) *cobra.Command {
 			"8 characters that history, undo and ai-changes print."
 	}
 	return cmd
+}
+
+func (e *env) outputReversal(res *api.OpResponse, fallback string) error {
+	for _, effect := range res.Effects {
+		if effect.Kind == "reverted" {
+			return e.outputOp(res, e.effectLine(effect))
+		}
+	}
+	if res.OpID == nil {
+		return fmt.Errorf("server response is missing the %s operation", fallback)
+	}
+	return e.outputOp(res, fmt.Sprintf("%s (op %.8s)", fallback, *res.OpID))
 }
 
 // maxPrefixMatches bounds the candidates an ambiguous prefix lists.

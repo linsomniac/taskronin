@@ -112,7 +112,7 @@ func TestAddFalsePlacementFlags(t *testing.T) {
 		{"now false", "added to triage (new)", "triage", []string{"--now=false"}},
 		{"all false", "added to triage (new)", "triage", []string{"--top=false", "--bottom=false", "--now=false"}},
 		{"false with true", "added to backlog (top)", "backlog", []string{"--top=true", "--bottom=false", "--now=false"}},
-		{"false with date", "added, deferred to Thu 2026-10-29", "upcoming", []string{"--top=false", "--bottom=false", "--now=false", "--defer", "tomorrow"}},
+		{"false with date", "added, deferred to tomorrow", "upcoming", []string{"--top=false", "--bottom=false", "--now=false", "--defer", "tomorrow"}},
 		{"true then false", "added to triage (new)", "triage", []string{"--now", "--now=false"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -275,7 +275,7 @@ func TestUndoRedo(t *testing.T) {
 	captureRun(t, sys, "", "add", "Set up keycloak")
 	for _, verb := range []string{"undo", "redo"} {
 		out := captureRun(t, sys, "", verb)
-		if !strings.HasPrefix(out, map[string]string{"undo": "undone", "redo": "redone"}[verb]+" (op ") || !captureOpID.MatchString(out) {
+		if !strings.HasPrefix(out, map[string]string{"undo": "undid add", "redo": "redid add"}[verb]+" (op ") || !captureOpID.MatchString(out) {
 			t.Fatalf("%s: %q", verb, out)
 		}
 		testutil.Golden(t, verb, []byte(captureOpID.ReplaceAllString(out, "<opid>")))
@@ -523,7 +523,7 @@ func TestCaptureDateValidation(t *testing.T) {
 		t.Fatal("invalid command saved a task")
 	}
 	out := captureRun(t, sys, "", "done", "1", "--date", "wed")
-	if !strings.Contains(out, "logged Wed 2026-10-28") {
+	if !strings.Contains(out, "logged today") {
 		t.Fatalf("Past mode resolved weekday incorrectly: %q", out)
 	}
 }
@@ -663,6 +663,7 @@ func TestCaptureOutputFailure(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			srv, sys := captureServer(t)
 			captureTask(t, srv, "Set up keycloak")
+			logFocus(t, srv)
 			writeErr := errors.New("output destination is full")
 			out := &captureFailWriter{remaining: tc.remaining, err: writeErr}
 			var stderr bytes.Buffer
@@ -673,7 +674,7 @@ func TestCaptureOutputFailure(t *testing.T) {
 			if out.writes != tc.remaining+1 {
 				t.Errorf("writes=%d; want %d (stop on failure)", out.writes, tc.remaining+1)
 			}
-			if tc.remaining == 1 && out.String() != "#1 'Set up keycloak' completed; ✓ logged Wed 2026-10-28\n" {
+			if tc.remaining == 1 && out.String() != "✓ #1 'Set up keycloak' done · logged today\n" {
 				t.Errorf("headline=%q", out.String())
 			}
 			task, err := srv.Client.GetTask(t.Context(), 1)
@@ -696,5 +697,123 @@ func TestCapturePrintOpPreservesError(t *testing.T) {
 	}
 	if out.writes != 1 {
 		t.Fatalf("writes=%d; want no more writes after the first failure", out.writes)
+	}
+}
+
+func TestDoneTally(t *testing.T) {
+	srv, sys := captureServer(t)
+	captureTask(t, srv, "First")
+	captureTask(t, srv, "Second")
+	captureRun(t, sys, "", "log", "-N", "Standalone work")
+	if out := captureRun(t, sys, "", "done", "1"); !strings.HasSuffix(out, "one done today\n") {
+		t.Errorf("first completion: %q", out)
+	}
+	if out := captureRun(t, sys, "", "done", "2"); !strings.HasSuffix(out, "2 done today\n") {
+		t.Errorf("second completion: %q", out)
+	}
+	captureRun(t, sys, "", "reopen", "1")
+	if out := captureRun(t, sys, "", "done", "1"); !strings.HasSuffix(out, "2 done today\n") {
+		t.Errorf("after reopening and completing again: %q", out)
+	}
+}
+
+func TestDoneTallyOmittedOnTimeout(t *testing.T) {
+	srv, sys := captureServer(t)
+	captureTask(t, srv, "First")
+	var out, stderr bytes.Buffer
+	e := &env{ctx: t.Context(), apiClient: srv.Client, out: &out, err: &stderr, sys: sys}
+	root := newRoot(e)
+	e.tallyTimeout = 0
+	root.SetArgs([]string{"done", "1"})
+	if err := root.ExecuteContext(e.ctx); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != "✓ #1 'First' done · logged today\n" || stderr.Len() != 0 {
+		t.Fatalf("stdout=%q stderr=%q", out.String(), stderr.String())
+	}
+}
+
+func TestDoneBackdatedHasNoTally(t *testing.T) {
+	srv, sys := captureServer(t)
+	captureTask(t, srv, "First")
+	if out := captureRun(t, sys, "", "done", "1", "--date", "yesterday"); out != "✓ #1 'First' done · logged yesterday\n" {
+		t.Fatalf("stdout=%q", out)
+	}
+}
+
+func TestDoneOnDeferredTaskPrintsNoDeferLine(t *testing.T) {
+	_, sys := captureServer(t)
+	captureRun(t, sys, "", "add", "First", "--defer", "tomorrow")
+	if out := captureRun(t, sys, "", "done", "1"); out != "✓ #1 'First' done · logged today\none done today\n" {
+		t.Fatalf("stdout=%q", out)
+	}
+}
+
+func captureRootOp(t *testing.T, sys sysDeps, args ...string) string {
+	t.Helper()
+	out := captureRun(t, sys, "", append(args, "--json")...)
+	var res api.OpResponse
+	if err := json.Unmarshal([]byte(out), &res); err != nil || res.OpID == nil || len(*res.OpID) < 8 {
+		t.Fatalf("expected operation ID, got %q (%v)", out, err)
+	}
+	return (*res.OpID)[:8]
+}
+
+func TestRedoPrintsVerbAndRootOp(t *testing.T) {
+	srv, sys := captureServer(t)
+	captureTask(t, srv, "First")
+	id := captureRootOp(t, sys, "done", "1")
+	captureRun(t, sys, "", "undo")
+	out := captureRun(t, sys, "", "redo")
+	if !strings.HasPrefix(out, "redid complete (op "+id+")\n") || strings.Count(out, "(op ") != 1 {
+		t.Fatalf("redo of %s: %q", id, out)
+	}
+}
+
+func TestKeepPrintsOneLine(t *testing.T) {
+	srv, sys := captureServer(t)
+	for _, title := range []string{"First", "Second", "Third"} {
+		captureTask(t, srv, title)
+	}
+	if out := captureRun(t, sys, "", "keep", "3"); out != "#3 kept in place\n" {
+		t.Fatalf("stdout=%q", out)
+	}
+}
+
+func TestUndoKeepPrintsNeedsTriage(t *testing.T) {
+	srv, sys := captureServer(t)
+	for _, title := range []string{"First", "Second", "Third"} {
+		captureTask(t, srv, title)
+	}
+	id := captureRootOp(t, sys, "keep", "3")
+	if out := captureRun(t, sys, "", "undo"); out != "undid place (op "+id+")\n#3 placed\n#3 needs triage (new)\n" {
+		t.Fatalf("undo of %s: %q", id, out)
+	}
+}
+
+func TestAddMetadataHeadline(t *testing.T) {
+	_, sys := captureServer(t)
+	if out := captureRun(t, sys, "", "add", "Fix", "--top", "-t", "ci", "-P", "infra.ci", "-p", "H"); out != "#1 'Fix' added to backlog (top) · infra.ci +ci prio H\n" {
+		t.Fatalf("stdout=%q", out)
+	}
+}
+
+func TestPlacementSuppressesOnlyAffectedTasks(t *testing.T) {
+	e := &env{}
+	resp := &api.OpResponse{Tasks: []api.Task{{ID: 3}, {ID: 7}}}
+	headline := "accepted 2 new tasks into the backlog"
+	for _, tc := range []struct {
+		kind   string
+		taskID int64
+		hidden bool
+	}{
+		{"reason_removed", 3, true}, {"undeferred", 7, true},
+		{"reason_removed", 8, false}, {"undeferred", 8, false},
+		{"reason_added", 3, false}, {"deferred", 7, false},
+	} {
+		effect := api.Effect{Kind: tc.kind, TaskID: tc.taskID, Reason: "manual"}
+		if hidden := e.effectInHeadline(resp, effect, headline); hidden != tc.hidden {
+			t.Errorf("%s on #%d: hidden=%t, want %t", tc.kind, tc.taskID, hidden, tc.hidden)
+		}
 	}
 }

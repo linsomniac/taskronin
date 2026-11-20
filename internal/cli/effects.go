@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	"taskronin/internal/api"
@@ -47,26 +48,37 @@ func (e *env) effectInHeadline(resp *api.OpResponse, effect api.Effect, headline
 	if headline == e.effectLine(effect) || schedulingEffectInHeadline(resp, effect, headline) || metadataEffectInHeadline(resp, effect, headline) {
 		return true
 	}
+	// AIDEV-NOTE: placement implies clearing reasons and the old deferral
+	// on the placed tasks. New reasons and new deferrals are never implied.
+	switch effect.Kind {
+	case "reason_removed", "undeferred", "placed":
+		if placementHeadline(resp, headline) && ((resp.Task != nil && resp.Task.ID == effect.TaskID) || taskInBatch(resp, effect.TaskID)) {
+			return true
+		}
+	case "moved":
+		if taskInBatch(resp, effect.TaskID) && placementHeadline(resp, headline) {
+			return true
+		}
+	}
 	if resp.Task == nil || effect.TaskID != resp.Task.ID {
 		return false
 	}
-	// AIDEV-NOTE: compare the rendered effect above, then match the task prefix
-	// before examining its action. Words in a title must never hide a slip.
-	action, ok := strings.CutPrefix(headline, taskHeadline(resp.Task, ""))
-	if !ok {
-		return false
-	}
+	action := titledAction(resp.Task, headline)
 	added := strings.HasPrefix(action, "added")
-	completed := strings.HasPrefix(action, "completed; ✓ logged ")
+	if added {
+		action, _, _ = strings.Cut(action, " · ")
+	}
+	completed := strings.HasPrefix(action, "done · logged ")
 	switch effect.Kind {
-	case "created":
+	case "created", "updated":
 		return added
-	case "placed", "moved":
-		return (added && action != "added to triage (new)") || completed || action == "dropped"
+	case "moved":
+		return (added && action != "added to triage (new)") || completed || action == "dropped" ||
+			strings.HasPrefix(headline, fmt.Sprintf("#%d moved ", effect.TaskID))
 	case "reason_added":
 		return effect.Reason == "new" && action == "added to triage (new)"
 	case "deferred":
-		return strings.HasPrefix(action, "added, deferred to ")
+		return action == "added, deferred to "+e.relDate(effect.To)
 	case "blocked":
 		return strings.HasPrefix(action, fmt.Sprintf("added, blocked b%d ", effect.BlockID))
 	case "focus_set":
@@ -84,6 +96,42 @@ func (e *env) effectInHeadline(resp *api.OpResponse, effect api.Effect, headline
 	}
 }
 
+// AIDEV-NOTE: strip the completion checkmark, then match the whole ID and
+// title so words inside a user title cannot hide an unrelated effect (especially slips).
+func titledAction(task *api.Task, headline string) string {
+	action, ok := strings.CutPrefix(strings.TrimPrefix(headline, "✓ "), taskHeadline(task, ""))
+	if !ok {
+		return ""
+	}
+	return action
+}
+
+func taskInBatch(resp *api.OpResponse, id int64) bool {
+	return slices.ContainsFunc(resp.Tasks, func(task api.Task) bool { return task.ID == id })
+}
+
+func placementHeadline(resp *api.OpResponse, headline string) bool {
+	if resp.Block != nil && scheduledBlockHeadline(resp.Block, headline) {
+		return true
+	}
+	if strings.HasPrefix(headline, "accepted ") && headline == fmt.Sprintf("accepted %d new tasks into the backlog", len(resp.Tasks)) {
+		return true
+	}
+	if resp.Task == nil {
+		return false
+	}
+	action := titledAction(resp.Task, headline)
+	if strings.HasPrefix(action, "added") || strings.HasPrefix(action, "done · logged ") || action == "dropped" {
+		return true
+	}
+	action, ok := strings.CutPrefix(headline, fmt.Sprintf("#%d ", resp.Task.ID))
+	if !ok {
+		return false
+	}
+	// AIDEV-NOTE: changing a deferral places the task before setting the new moment.
+	return action == "kept in place" || strings.HasPrefix(action, "moved ") || strings.HasPrefix(action, "deferred to ") || action == "defer cleared"
+}
+
 func metadataEffectInHeadline(resp *api.OpResponse, effect api.Effect, headline string) bool {
 	if task := resp.Task; task != nil && effect.TaskID == task.ID {
 		if effect.Kind == "reason_added" && effect.Reason == "manual" {
@@ -97,14 +145,13 @@ func metadataEffectInHeadline(resp *api.OpResponse, effect api.Effect, headline 
 			}
 		}
 	}
-	if len(resp.Tasks) > 0 && headline == fmt.Sprintf("accepted %d new tasks into the backlog", len(resp.Tasks)) {
-		for _, task := range resp.Tasks {
-			if effect.TaskID == task.ID {
-				return effect.Kind == "placed" || effect.Kind == "moved" || (effect.Kind == "reason_removed" && effect.Reason == "new")
-			}
-		}
-	}
 	return false
+}
+
+// Only block and reblock end in the quoted task title after the block ID.
+func scheduledBlockHeadline(block *api.Block, headline string) bool {
+	return strings.HasPrefix(headline, fmt.Sprintf("b%d ", block.ID)) &&
+		strings.HasSuffix(headline, fmt.Sprintf(" #%d '%s'", block.TaskID, block.TaskTitle))
 }
 
 func schedulingEffectInHeadline(resp *api.OpResponse, effect api.Effect, headline string) bool {
@@ -112,14 +159,14 @@ func schedulingEffectInHeadline(resp *api.OpResponse, effect api.Effect, headlin
 		return strings.HasPrefix(headline, fmt.Sprintf("focus → #%d '", effect.TaskID))
 	}
 	if block := resp.Block; block != nil {
-		scheduled := headline == blockHeadline(block)
-		if effect.Kind == "placed" && effect.TaskID == block.TaskID && scheduled {
-			return true
+		if effect.Kind == "placed" && effect.TaskID == block.TaskID {
+			return scheduledBlockHeadline(block, headline)
 		}
+		// AIDEV-NOTE: structural matches follow the headline strings in cmd_block.go.
 		if effect.BlockID == block.ID {
 			switch effect.Kind {
 			case "blocked", "block_moved":
-				return scheduled
+				return scheduledBlockHeadline(block, headline)
 			case "block_resolved":
 				return headline == fmt.Sprintf("b%d resolved %s", block.ID, effect.To)
 			case "outcome_set":
@@ -129,31 +176,7 @@ func schedulingEffectInHeadline(resp *api.OpResponse, effect api.Effect, headlin
 			}
 		}
 	}
-	if resp.Task == nil || effect.TaskID != resp.Task.ID {
-		return false
-	}
-	task := resp.Task
-	prefix := fmt.Sprintf("#%d ", task.ID)
-	deferred := task.Defer != nil && headline == prefix+"deferred to "+formatMoment(task.Defer)
-	undeferred := headline == prefix+"no longer deferred"
-	switch effect.Kind {
-	case "placed":
-		return headline == prefix+"kept" || strings.HasPrefix(headline, prefix+"moved ") || deferred || undeferred
-	case "moved":
-		return strings.HasPrefix(headline, prefix+"moved ")
-	case "deferred":
-		return deferred
-	case "undeferred":
-		// AIDEV-NOTE: changing a deferral places the task (clearing the
-		// old defer) before setting the new one. Echo the final moment.
-		return deferred || undeferred
-	case "due_set":
-		return task.Due != nil && headline == prefix+"due "+formatMoment(task.Due)
-	case "due_cleared":
-		return headline == prefix+"due date cleared"
-	default:
-		return false
-	}
+	return false
 }
 
 func (e *env) effectLine(effect api.Effect) string {

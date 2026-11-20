@@ -437,7 +437,7 @@ func TestAIChangesRevertPrefix(t *testing.T) {
 		t.Fatalf("a rejected prefix reverted something: %q", out)
 	}
 	full := page.Ops[0].OpID
-	if out := captureRun(t, sys, "", "ai-changes", "--revert", full); !strings.Contains(out, "reverted") {
+	if out := captureRun(t, sys, "", "ai-changes", "--revert", full); !strings.HasPrefix(out, "reverted add (op "+full[:8]+")\n") || strings.Count(out, "(op ") != 1 {
 		t.Fatalf("full ID revert=%q", out)
 	}
 	if out := captureRun(t, sys, "", "ai-changes", "--all"); strings.Count(out, "(reverted)") != 1 {

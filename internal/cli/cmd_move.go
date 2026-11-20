@@ -56,7 +56,7 @@ func keepCommand(e *env) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return e.placeTask(id, api.PlaceRequest{How: "keep"}, fmt.Sprintf("#%d kept", id))
+			return e.placeTask(id, api.PlaceRequest{How: "keep"}, fmt.Sprintf("#%d kept in place", id))
 		},
 	}
 }

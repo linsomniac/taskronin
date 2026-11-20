@@ -143,6 +143,7 @@ func (k OpKind) Verb() string {
 // ReversalText describes a reversal of the root operation. A caller can omit
 // the operation ID for a compact banner.
 func (k OpKind) ReversalText(via, opID string) string {
+	// AIDEV-NOTE: J§4.2 uses revert wording when Via is missing or unknown.
 	action, past := "reverted", "reverted"
 	switch via {
 	case "undo":
@@ -157,7 +158,7 @@ func (k OpKind) ReversalText(via, opID string) string {
 	if opID == "" {
 		return line
 	}
-	if line == "reverted" {
+	if k == "" && action == "reverted" {
 		return line + " op " + opID
 	}
 	return line + " (op " + opID + ")"

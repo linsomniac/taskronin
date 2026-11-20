@@ -89,15 +89,15 @@ func scheduleBlockCommand(e *env, verb string) *cobra.Command {
 			if res.Block == nil {
 				return fmt.Errorf("server response is missing the scheduled block")
 			}
-			return e.outputOp(res, blockHeadline(res.Block))
+			return e.outputOp(res, e.blockHeadline(res.Block))
 		},
 	}
 	cmd.Flags().StringVar(&date, "date", "", "Block date (default today)")
 	return cmd
 }
 
-func blockHeadline(block *api.Block) string {
-	return fmt.Sprintf("b%d %s %s–%s #%d '%s'", block.ID, formatDate(block.Date), block.Start, block.End, block.TaskID, block.TaskTitle)
+func (e *env) blockHeadline(block *api.Block) string {
+	return fmt.Sprintf("b%d %s %s–%s #%d '%s'", block.ID, e.dayWord(block.Date), block.Start, block.End, block.TaskID, block.TaskTitle)
 }
 
 func unblockCommand(e *env) *cobra.Command {

@@ -36,7 +36,7 @@ func TestMoveKeep(t *testing.T) {
 		want, order string
 	}{
 		{[]string{"move", "3", "before", "1"}, "#3 moved before #1\n", "[3 1 2]"},
-		{[]string{"keep", "2"}, "#2 kept\n", "[3 1 2]"},
+		{[]string{"keep", "2"}, "#2 kept in place\n", "[3 1 2]"},
 		{[]string{"move", "#3", "after", "#2"}, "#3 moved after #2\n", "[1 2 3]"},
 		{[]string{"move", "2", "top"}, "#2 moved top\n", "[2 1 3]"},
 		{[]string{"move", "2", "bottom"}, "#2 moved bottom\n", "[1 3 2]"},
@@ -65,7 +65,7 @@ func TestDeferNone(t *testing.T) {
 	for _, tc := range []struct{ date, want string }{
 		{"fri", "#1 deferred to Fri 2026-10-30\n"},
 		{"fri 9:00", "#1 deferred to Fri 2026-10-30 09:00\n"},
-		{"none", "#1 no longer deferred\n"},
+		{"none", "#1 defer cleared\n"},
 	} {
 		if out := captureRun(t, sys, "", "defer", "1", tc.date); out != tc.want {
 			t.Errorf("%s: stdout=%q; want %q", tc.date, out, tc.want)
@@ -112,7 +112,7 @@ func TestDueNone(t *testing.T) {
 func TestBlockSpans(t *testing.T) {
 	srv, sys := captureServer(t)
 	scheduleTask(t, srv, "First")
-	if out := captureRun(t, sys, "", "block", "1", "13:00-15:00"); out != "b1 Wed 2026-10-28 13:00–15:00 #1 'First'\n" {
+	if out := captureRun(t, sys, "", "block", "1", "13:00-15:00"); out != "b1 today 13:00–15:00 #1 'First'\n" {
 		t.Fatalf("stdout=%q", out)
 	}
 	for _, span := range []string{"15:00-13:00", "1pm-3pm"} {
@@ -155,7 +155,7 @@ func TestReblockSendsTaskETag(t *testing.T) {
 	srv, sys := captureServer(t)
 	scheduleTask(t, srv, "First")
 	captureRun(t, sys, "", "block", "1", "13:00-15:00")
-	if out := captureRun(t, sys, "", "reblock", "b1", "16:00-17:00"); out != "b1 Wed 2026-10-28 16:00–17:00 #1 'First'\n" {
+	if out := captureRun(t, sys, "", "reblock", "b1", "16:00-17:00"); out != "b1 today 16:00–17:00 #1 'First'\n" {
 		t.Errorf("stdout=%q", out)
 	}
 	block, err := srv.Client.GetBlock(t.Context(), 1)
@@ -191,7 +191,7 @@ func TestUnblockOutcome(t *testing.T) {
 	srv.Clock.Set(testutil.Local(t, "2026-10-29 10:00"))
 	for _, outcome := range []string{"worked", "missed", "auto"} {
 		out = captureRun(t, sys, "", "outcome", "b2", outcome)
-		if !strings.HasPrefix(out, "b2 outcome "+outcome+"\n") || strings.Contains(out, "b2 marked "+outcome+"\n") {
+		if !strings.HasPrefix(out, "b2 outcome "+outcome+"\n") || strings.Contains(out, "b2 marked ") {
 			t.Errorf("%s: stdout=%q", outcome, out)
 		}
 		block, err := srv.Client.GetBlock(t.Context(), 2)
@@ -327,7 +327,7 @@ func TestReblockFreshTaskETag(t *testing.T) {
 		}
 	}))
 	out, stderr, code := runCLI(t, sys, "", "--socket", socket, "--token-file", token, "reblock", "b1", "16:00-17:00")
-	if code != 0 || stderr != "" || posts.Load() != 1 || out != "b1 Wed 2026-10-28 16:00–17:00 #7 'First'\n" {
+	if code != 0 || stderr != "" || posts.Load() != 1 || out != "b1 today 16:00–17:00 #7 'First'\n" {
 		t.Fatalf("exit=%d stdout=%q stderr=%q POSTs=%d", code, out, stderr, posts.Load())
 	}
 }

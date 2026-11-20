@@ -1,11 +1,14 @@
 package cli
 
 import (
+	"context"
 	"fmt"
+	"strconv"
 
 	"github.com/spf13/cobra"
 
 	"taskronin/internal/api"
+	"taskronin/internal/civil"
 	"taskronin/internal/client"
 	"taskronin/internal/datespec"
 	"taskronin/internal/domain"
@@ -59,7 +62,14 @@ func doneCommand(e *env) *cobra.Command {
 			if res.Task == nil || res.Entry == nil {
 				return fmt.Errorf("server response is missing the completed task or entry")
 			}
-			return e.outputOp(res, taskHeadline(res.Task, "completed; ✓ logged "+formatDate(res.Entry.WorkDate)))
+			if e.jsonOut {
+				return e.outputOp(res, "")
+			}
+			headline := "✓ " + taskHeadline(res.Task, "done · logged "+e.dayWord(res.Entry.WorkDate))
+			if err := e.outputOp(res, headline); err != nil {
+				return err
+			}
+			return e.printDoneTally(c, res.Entry.WorkDate)
 		},
 	}
 	f := cmd.Flags()
@@ -68,4 +78,31 @@ func doneCommand(e *env) *cobra.Command {
 	f.StringVar(&req.Log, "log", "", "Completion entry title")
 	f.StringVarP(&req.Notes, "message", "m", "", "Completion entry notes")
 	return cmd
+}
+
+func (e *env) printDoneTally(c *client.Client, workDate civil.Date) error {
+	// AIDEV-NOTE: the completion is already saved. Only read today's tally
+	// for today's work, and silently omit it if either decorative read fails.
+	clock, err := e.clock()
+	if err != nil || clock == nil || workDate != clock.Today {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(e.ctx, e.tallyTimeout)
+	defer cancel()
+	today, _, _, err := c.Today(ctx, "")
+	if err != nil || today == nil || today.Clock.Today != workDate {
+		return nil
+	}
+	count := 0
+	for _, entry := range today.Entries {
+		if entry.Kind == "complete" && !entry.Reopened {
+			count++
+		}
+	}
+	word := strconv.Itoa(count)
+	if count == 1 {
+		word = "one"
+	}
+	_, err = fmt.Fprintln(e.out, word+" done today")
+	return err
 }

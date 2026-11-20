@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -111,7 +112,7 @@ func addCommand(e *env) *cobra.Command {
 				}
 				e.draftPath = ""
 			}
-			headline, err := addHeadline(res, req.Place)
+			headline, err := e.addHeadline(res, req.Place)
 			if err != nil {
 				return err
 			}
@@ -164,7 +165,7 @@ func (e *env) editAddNotes(req *api.AddTaskRequest) (*editor.Draft, error) {
 	return draft, err
 }
 
-func addHeadline(res *api.OpResponse, place *api.AddPlacement) (string, error) {
+func (e *env) addHeadline(res *api.OpResponse, place *api.AddPlacement) (string, error) {
 	if res.Task == nil {
 		return "", fmt.Errorf("server response is missing the added task")
 	}
@@ -179,24 +180,44 @@ func addHeadline(res *api.OpResponse, place *api.AddPlacement) (string, error) {
 			if res.Task.Defer == nil {
 				return "", fmt.Errorf("server response is missing the task's deferral")
 			}
-			action = "added, deferred to " + formatMoment(res.Task.Defer)
+			action = "added, deferred to " + e.momentWord(res.Task.Defer)
 		case "block":
-			// AddTask returns its task plus effects; the block is not necessarily
-			// a top-level response entity. Its effect carries the resolved span.
-			for _, effect := range res.Effects {
-				if effect.Kind == "blocked" && effect.TaskID == res.Task.ID {
-					span, err := datespec.ParseSpan(effect.To, datespec.Future, datespec.Ref{})
-					if err != nil {
-						return "", fmt.Errorf("invalid block in server response: %w", err)
-					}
-					action = fmt.Sprintf("added, blocked b%d %s %s–%s", effect.BlockID, formatDate(span.Date), span.Start, span.End)
-					return taskHeadline(res.Task, action), nil
-				}
+			var err error
+			action, err = e.addBlockAction(res)
+			if err != nil {
+				return "", err
 			}
-			return "", fmt.Errorf("server response is missing the added block")
 		case "now":
 			action = fmt.Sprintf("added, focus → #%d", res.Task.ID)
 		}
 	}
+	var metadata []string
+	if res.Task.Project != nil {
+		metadata = append(metadata, *res.Task.Project)
+	}
+	for _, tag := range res.Task.Tags {
+		metadata = append(metadata, "+"+tag)
+	}
+	if res.Task.Priority != nil {
+		metadata = append(metadata, "prio "+*res.Task.Priority)
+	}
+	if len(metadata) > 0 {
+		action += " · " + strings.Join(metadata, " ")
+	}
 	return taskHeadline(res.Task, action), nil
+}
+
+func (e *env) addBlockAction(res *api.OpResponse) (string, error) {
+	// AddTask returns its task plus effects. The block's resolved span is
+	// available even when the block is absent as a top-level response entity.
+	for _, effect := range res.Effects {
+		if effect.Kind == "blocked" && effect.TaskID == res.Task.ID {
+			span, err := datespec.ParseSpan(effect.To, datespec.Future, datespec.Ref{})
+			if err != nil {
+				return "", fmt.Errorf("invalid block in server response: %w", err)
+			}
+			return fmt.Sprintf("added, blocked b%d %s %s–%s", effect.BlockID, e.dayWord(span.Date), span.Start, span.End), nil
+		}
+	}
+	return "", fmt.Errorf("server response is missing the added block")
 }

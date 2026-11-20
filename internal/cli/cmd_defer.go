@@ -61,12 +61,12 @@ func momentCommand(e *env, verb string) *cobra.Command {
 			}
 			headline := fmt.Sprintf("#%d due date cleared", res.Task.ID)
 			if verb == "defer" {
-				headline = fmt.Sprintf("#%d no longer deferred", res.Task.ID)
+				headline = fmt.Sprintf("#%d defer cleared", res.Task.ID)
 				if res.Task.Defer != nil {
-					headline = fmt.Sprintf("#%d deferred to %s", res.Task.ID, formatMoment(res.Task.Defer))
+					headline = fmt.Sprintf("#%d deferred to %s", res.Task.ID, e.momentWord(res.Task.Defer))
 				}
 			} else if res.Task.Due != nil {
-				headline = fmt.Sprintf("#%d due %s", res.Task.ID, formatMoment(res.Task.Due))
+				headline = fmt.Sprintf("#%d due %s", res.Task.ID, e.momentWord(res.Task.Due))
 			}
 			return e.outputOp(res, headline)
 		},
