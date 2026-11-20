@@ -58,6 +58,16 @@ func lsCommand(e *env) *cobra.Command {
 					fmt.Fprintln(&out)
 				}
 				fmt.Fprintln(&out, p.head(titles[views[i]]))
+				if len(page.Items) == 0 {
+					message := "none"
+					switch views[i] {
+					case "triage":
+						message = "clear"
+					case "backlog":
+						message = `empty — tkr add "…" captures a task`
+					}
+					fmt.Fprintln(&out, "  "+p.dim(message))
+				}
 				for _, task := range page.Items {
 					fmt.Fprintf(&out, "  %s\n", taskLine(task, clock.Today, p))
 				}

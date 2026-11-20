@@ -11,13 +11,15 @@ import (
 	"taskronin/internal/textsafe"
 )
 
-// opHeadline renders the same tokens for plain effect matching and terminal output.
+// AIDEV-NOTE: opHeadline closures render the same tokens for effect matching
+// and display. Sanitize user text before styling it with paint.
 type opHeadline func(paint) string
 
 func plainHeadline(text string) opHeadline {
 	return func(paint) string { return textsafe.SanitizeLine(text) }
 }
 
+// outputOp requires a response. A nil headline is valid only under --json.
 func (e *env) outputOp(resp *api.OpResponse, headline opHeadline) error {
 	for _, warning := range resp.Warnings {
 		e.errorLine("tkr: warning: %s", warning)
@@ -45,8 +47,10 @@ func (e *env) printOp(resp *api.OpResponse, headline opHeadline) {
 	}
 	p := e.paint()
 	plain := headline(paint{})
-	display := plain
-	if p.on {
+	// AIDEV-NOTE: a whole-line sanitizer would destroy paint's own escapes.
+	// If a closure missed user input, fall back to its sanitized plain line.
+	display := textsafe.SanitizeLine(plain)
+	if p.on && display == plain {
 		display = headline(p)
 	}
 	if _, e.opOutputErr = fmt.Fprintln(e.out, display); e.opOutputErr != nil {
@@ -113,8 +117,9 @@ func (e *env) effectInHeadline(resp *api.OpResponse, effect api.Effect, headline
 	}
 }
 
-// AIDEV-NOTE: compare the plain rendering, strip the completion checkmark, then match the whole ID and
-// title so words inside a user title cannot hide an unrelated effect (especially slips).
+// AIDEV-NOTE: match the closure's plain rendering independently of display.
+// Strip the completion checkmark, then match the whole ID and title so words
+// inside a user title cannot hide an unrelated effect (especially slips).
 func titledAction(task *api.Task, headline string) string {
 	action, ok := strings.CutPrefix(strings.TrimPrefix(headline, "✓ "), (paint{}).taskHeadline(task, ""))
 	if !ok {

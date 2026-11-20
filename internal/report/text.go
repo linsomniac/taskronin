@@ -25,8 +25,9 @@ func Text(w io.Writer, r *api.Report) error {
 		}
 	}
 	width = min(60, width)
-	if len(r.Days) > 0 {
-		out.WriteByte('\n')
+	out.WriteByte('\n')
+	if len(r.Days) == 0 {
+		fmt.Fprintln(&out, "No work logged.")
 	}
 	seen := make(map[int64]bool)
 	for _, day := range r.Days {

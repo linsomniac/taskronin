@@ -449,13 +449,14 @@ func TestDashboardSections(t *testing.T) {
 	response.Store(new(view))
 	socket, token := fakeAPI(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { writeJSON(t, w, response.Load()) }))
 	args := []string{"today", "--socket", socket, "--token-file", token}
-	want := "Wed 2026-10-28 10:20 · America/Denver\nno focus\n\n"
-	if out := captureRun(t, sys, "", args...); out != want {
-		t.Fatalf("empty dashboard: %q", out)
-	}
-	// Publish a new immutable fixture for the next request.
-	view = *response.Load()
+	empty := captureRun(t, sys, "today_empty", args...)
 	view.Banners = []api.Banner{{Message: "unsafe\nnotice\x1b"}}
+	view.AIChanges = 1
+	response.Store(new(view))
+	want := empty + "⚠ unsafe�notice�\nAI changes: 1 unreviewed — run `tkr ai-changes`\n"
+	if out := captureRun(t, sys, "", args...); out != want {
+		t.Errorf("empty dashboard with notices = %q, want %q", out, want)
+	}
 	view.CurrentBlock = &api.Block{ID: 1, TaskID: 1, TaskTitle: "Current", Date: view.Clock.Today, End: 660}
 	view.Blocks = []api.Block{
 		{ID: 1, TaskID: 1, TaskTitle: "Current", Start: 540, End: 660, Current: true, Status: "planned"},

@@ -43,6 +43,10 @@ func searchCommand(e *env) *cobra.Command {
 				return json.NewEncoder(e.out).Encode(result)
 			}
 			p := e.paint()
+			if len(result.Items) == 0 {
+				_, err := fmt.Fprintln(e.out, p.dim("No matches for '"+textsafe.SanitizeLine(query.Q)+"'"))
+				return err
+			}
 			var out strings.Builder
 			for _, hit := range result.Items {
 				prefix := "#"

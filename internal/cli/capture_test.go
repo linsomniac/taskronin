@@ -897,21 +897,41 @@ func checkColorOutputs(t *testing.T, mode string) {
 	}
 }
 
-func TestColorSanitizesBeforeStyling(t *testing.T) {
-	sys, _ := testSys(t)
-	socket, token := fakeAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/tasks" {
-			t.Errorf("unexpected %s %s", r.Method, r.URL)
-		}
-		writeJSON(t, w, api.OpResponse{Task: &api.Task{ID: 1, Title: "Bad\x1b[31mtitle"}})
-	}))
-	out := captureRun(t, sys, "", "--socket", socket, "--token-file", token, "add", "requested title", "--color", "always")
-	if !strings.Contains(out, "'"+(paint{on: true}).strong("Bad�[31mtitle")+"'") {
-		t.Errorf("expected a sanitized, bold title inside plain quotes: %q", out)
+func TestPrintOpUnsafeHeadline(t *testing.T) {
+	for _, mode := range []string{"always", "never"} {
+		t.Run(mode, func(t *testing.T) {
+			var out bytes.Buffer
+			e := &env{out: &out, color: mode, colorSet: true}
+			e.printOp(&api.OpResponse{}, func(p paint) string { return p.id("#1") + " Bad\x1b[31mtitle" })
+			if got, want := out.String(), "#1 Bad�[31mtitle\n"; got != want {
+				t.Fatalf("unsafe headline = %q, want %q", got, want)
+			}
+		})
 	}
+}
+
+func TestColorSanitizesBeforeStyling(t *testing.T) {
 	palette := regexp.MustCompile(`\x1b\[(0|1|31|32|33|36|90)?m`)
-	if strings.Contains(palette.ReplaceAllString(out, ""), "\x1b") {
-		t.Fatalf("unexpected escape in %q", out)
+	for _, tc := range []struct{ name, title, clean string }{
+		{"palette", "Bad\x1b[31mtitle", "Bad�[31mtitle"},
+		{"non-palette", "Bad\x1b]52;c;AAAA\x07\x1b[2Jtitle", "Bad�]52;c;AAAA��[2Jtitle"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sys, _ := testSys(t)
+			socket, token := fakeAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost || r.URL.Path != "/api/v1/tasks" {
+					t.Errorf("unexpected %s %s", r.Method, r.URL)
+				}
+				writeJSON(t, w, api.OpResponse{Task: &api.Task{ID: 1, Title: tc.title}})
+			}))
+			out := captureRun(t, sys, "", "--socket", socket, "--token-file", token, "add", "requested title", "--color", "always")
+			if !strings.Contains(out, "'"+(paint{on: true}).strong(tc.clean)+"'") {
+				t.Errorf("expected a sanitized, bold title inside plain quotes: %q", out)
+			}
+			if strings.Contains(out, tc.title) || strings.ContainsAny(palette.ReplaceAllString(out, ""), "\x1b\x07") {
+				t.Fatalf("unexpected control bytes in %q", out)
+			}
+		})
 	}
 }
 
@@ -936,32 +956,57 @@ func TestLipglossOnlyInPaint(t *testing.T) {
 	}
 }
 
-func TestAddDeferJSONClockReads(t *testing.T) {
-	sys, _ := testSys(t)
-	var mu sync.Mutex
-	var requests []string
-	socket, token := fakeAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		defer mu.Unlock()
-		switch r.URL.Path {
-		case "/api/v1/clock":
-			requests = append(requests, r.Method+" /clock")
-			writeJSON(t, w, api.Clock{Today: civil.MustDate("2026-10-28"), WeekStart: "monday"})
-		case "/api/v1/tasks":
-			requests = append(requests, r.Method+" /tasks")
-
-			// A valid JSON echo does not need data for the text headline.
-			writeJSON(t, w, api.OpResponse{Task: &api.Task{ID: 1, Title: "x"}})
-		default:
-			t.Errorf("unexpected request %s", r.URL)
-			http.NotFound(w, r)
-		}
-	}))
-	out := captureRun(t, sys, "", "--socket", socket, "--token-file", token, "add", "x", "--defer", "tomorrow", "--json")
-	mu.Lock()
-	defer mu.Unlock()
-	if !json.Valid([]byte(out)) || strings.Join(requests, ", ") != "GET /clock, POST /tasks" {
-		t.Errorf("requests=%v output=%q", requests, out)
+func TestSchedulingJSONClockReads(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		args     []string
+		requests string
+	}{
+		{"add", []string{"add", "x", "--defer", "tomorrow"}, "GET /clock, POST /tasks"},
+		{"due", []string{"due", "1", "tomorrow"}, "GET /clock, GET /tasks/1, POST /tasks/1/due"},
+		{"defer", []string{"defer", "1", "tomorrow"}, "GET /clock, GET /tasks/1, POST /tasks/1/defer"},
+		{"block", []string{"block", "1", "13:00-14:00"}, "GET /clock, GET /tasks/1, POST /tasks/1/block"},
+		{"clear due", []string{"due", "1", "none"}, "GET /tasks/1, POST /tasks/1/due"},
+		{"clear defer", []string{"defer", "1", "none"}, "GET /tasks/1, POST /tasks/1/defer"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sys, _ := testSys(t)
+			var mu sync.Mutex
+			var requests []string
+			socket, token := fakeAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mu.Lock()
+				defer mu.Unlock()
+				path := strings.TrimPrefix(r.URL.Path, "/api/v1")
+				requests = append(requests, r.Method+" "+path)
+				switch path {
+				case "/clock":
+					writeJSON(t, w, api.Clock{Today: civil.MustDate("2026-10-28"), WeekStart: "monday"})
+				case "/tasks/1":
+					writeJSON(t, w, api.TaskDetail{Task: api.Task{ID: 1, ETag: "etag"}})
+				case "/tasks/1/block":
+					// Omit the task metadata used in the text headline.
+					writeJSON(t, w, map[string]any{"block": map[string]any{"id": 2, "date": "2026-10-29", "end": "14:00"}})
+				case "/tasks", "/tasks/1/due", "/tasks/1/defer":
+					task := &api.Task{ID: 1}
+					// Omit the moment for date-setting commands. For "none",
+					// supply a date so an eager headline would read /clock.
+					if tc.args[2] == "none" {
+						date := &api.Moment{Date: civil.MustDate("2026-10-29")}
+						task.Due, task.Defer = date, date
+					}
+					writeJSON(t, w, api.OpResponse{Task: task})
+				default:
+					t.Errorf("unexpected request %s", r.URL)
+					http.NotFound(w, r)
+				}
+			}))
+			out := captureRun(t, sys, "", append([]string{"--socket", socket, "--token-file", token, "--json"}, tc.args...)...)
+			mu.Lock()
+			defer mu.Unlock()
+			if !json.Valid([]byte(out)) || strings.Join(requests, ", ") != tc.requests {
+				t.Errorf("requests=%v output=%q", requests, out)
+			}
+		})
 	}
 }
 

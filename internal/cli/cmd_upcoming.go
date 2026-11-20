@@ -41,6 +41,9 @@ func upcomingCommand(e *env) *cobra.Command {
 					fmt.Fprintln(&out)
 				}
 				fmt.Fprintln(&out, p.head(section.title))
+				if len(section.tasks) == 0 {
+					fmt.Fprintln(&out, "  "+p.dim("none"))
+				}
 				for _, task := range section.tasks {
 					fmt.Fprintf(&out, "  %s", taskLine(task, clock.Today, p))
 					if task.Defer != nil {

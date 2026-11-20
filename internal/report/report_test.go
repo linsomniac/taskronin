@@ -166,6 +166,8 @@ func TestRPT05_TodoUpcoming(t *testing.T) {
 					header := "Work report Fri 2026-10-23 – Mon 2026-10-26\n"
 					if tt.name == "markdown" {
 						header = "# " + header
+					} else {
+						header += "\nNo work logged.\n"
 					}
 					if got != header+tt.want {
 						t.Fatalf("empty range with sections = %q, want %q", got, header+tt.want)
@@ -265,6 +267,8 @@ func TestEmptyReport(t *testing.T) {
 			want := "Work report Fri 2026-10-23 – Mon 2026-10-26\n"
 			if renderer.name == "markdown" {
 				want = "# " + want
+			} else {
+				want += "\nNo work logged.\n"
 			}
 			if got := rendered(t, renderer.render, r); got != want {
 				t.Fatalf("empty report = %q, want %q", got, want)
@@ -284,6 +288,8 @@ func TestReportFilters(t *testing.T) {
 			want := "Work report Fri 2026-10-23 – Mon 2026-10-26 · tag infra · project infra.keycloak\n"
 			if renderer.name == "markdown" {
 				want = "# " + want
+			} else {
+				want += "\nNo work logged.\n"
 			}
 			if got != want {
 				t.Fatalf("filtered header = %q, want %q", got, want)

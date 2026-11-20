@@ -8,8 +8,9 @@ import (
 	"taskronin/internal/textsafe"
 )
 
-// AIDEV-NOTE: apply the CLI palette to already-sanitized text. With color
-// off, every role preserves the original bytes.
+// AIDEV-NOTE: quotedTitle, reason, status and shortOpID sanitize their input.
+// Pass already-sanitized text to id, ok, warn, bad, dim, head and strong.
+// With color off those roles preserve the original bytes.
 type paint struct{ on bool }
 
 func (e *env) paint() paint { return paint{on: e.colorEnabled()} }
@@ -54,6 +55,8 @@ func (p paint) reason(reason string) string {
 
 func (p paint) status(status string) string {
 	switch status {
+	case "none":
+		return p.dim(status)
 	case "done", "worked":
 		return p.ok(status)
 	case "overdue", "slipped", "missed":

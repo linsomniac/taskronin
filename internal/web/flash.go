@@ -33,7 +33,7 @@ func flashLines(res *service.OpResult) []string {
 
 // AIDEV-NOTE: Mirror effectLine in internal/cli/effects.go and effectsLine in
 // internal/tui/banner.go; Plan E Task 3 holds the wording table. The CLI adds
-// terminal styling at token boundaries and uses relative dates. This copy uses
+// terminal styling to sanitized tokens and uses relative dates. This copy uses
 // service.Effect because A§1.3 forbids web importing cli or api (DF21).
 func effectLine(effect service.Effect) string {
 	id := effect.TaskID

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -38,8 +39,13 @@ func showCommand(e *env) *cobra.Command {
 			fmt.Fprintf(&out, "Status: %s\n", p.status(task.Status))
 			detailField(&out, "View", task.View)
 			fmt.Fprintf(&out, "Project: %s\n", p.dim(textsafe.SanitizeLine(detailOptional(task.Project))))
-			fmt.Fprintf(&out, "Tags: %s\n", p.dim(textsafe.SanitizeLine(strings.Join(task.Tags, ", "))))
-			detailField(&out, "Priority", detailOptional(task.Priority))
+			tags := cmp.Or(strings.Join(task.Tags, ", "), "none")
+			fmt.Fprintf(&out, "Tags: %s\n", p.dim(textsafe.SanitizeLine(tags)))
+			if task.Priority == nil {
+				fmt.Fprintln(&out, "Priority: "+p.dim("none"))
+			} else {
+				detailField(&out, "Priority", *task.Priority)
+			}
 			detailField(&out, "Origin", task.Origin)
 			if task.Defer != nil {
 				fmt.Fprintf(&out, "Defer: %s\n", p.dim(formatMoment(task.Defer)))
@@ -57,33 +63,43 @@ func showCommand(e *env) *cobra.Command {
 			}
 			p.detailTime(&out, "Deleted", task.DeletedAt)
 			fmt.Fprintf(&out, "Version: %d\nSlips: %d lifetime, %d since triage\n", task.Version, task.Slips.Lifetime, task.Slips.SinceTriage)
-			fmt.Fprintln(&out, "\n"+p.head("Reasons"))
-			for _, reason := range task.Reasons {
-				fmt.Fprintf(&out, "  %s since %s\n", p.reason(reason.Reason), p.dim(reason.Since.Format("2006-01-02 15:04:05Z07:00")))
+			if len(task.Reasons) > 0 {
+				fmt.Fprintln(&out, "\n"+p.head("Reasons"))
+				for _, reason := range task.Reasons {
+					fmt.Fprintf(&out, "  %s since %s\n", p.reason(reason.Reason), p.dim(reason.Since.Format("2006-01-02 15:04:05Z07:00")))
+				}
 			}
 			// AIDEV-NOTE: notes are plain user data. Preserve their whitespace
 			// and Markdown literally, while replacing terminal control bytes.
-			fmt.Fprintf(&out, "\n%s\n%s\n", p.head("Notes"), textsafe.Sanitize(task.Notes))
-			fmt.Fprintln(&out, "\n"+p.head("Blocks"))
-			for _, block := range task.Blocks {
-				fmt.Fprintf(&out, "  %s %s  %s", p.blockID(block.ID), p.dim(fmt.Sprintf("%s %s–%s", block.Date, block.Start, block.End)), p.status(block.Status))
-				if block.Slipped {
-					fmt.Fprint(&out, "  ("+p.bad("slipped")+")")
-				}
-				if block.NeedsReblock {
-					fmt.Fprint(&out, "  ("+p.warn("reblock?")+")")
-				}
-				if block.OutcomeSource != nil {
-					fmt.Fprintf(&out, "  outcome: %s", textsafe.SanitizeLine(*block.OutcomeSource))
-				}
-				if block.CancelReason != nil {
-					fmt.Fprintf(&out, "  cancelled: %s", textsafe.SanitizeLine(*block.CancelReason))
-				}
-				fmt.Fprintln(&out)
+			if task.Notes == "" {
+				fmt.Fprintln(&out, "\nNotes: "+p.dim("none"))
+			} else {
+				fmt.Fprintf(&out, "\n%s\n%s\n", p.head("Notes"), textsafe.Sanitize(task.Notes))
 			}
-			fmt.Fprintln(&out, "\n"+p.head("Entries"))
-			for _, entry := range task.Entries {
-				fmt.Fprintf(&out, "  %s\n", entryLine(entry, p))
+			if len(task.Blocks) > 0 {
+				fmt.Fprintln(&out, "\n"+p.head("Blocks"))
+				for _, block := range task.Blocks {
+					fmt.Fprintf(&out, "  %s %s  %s", p.blockID(block.ID), p.dim(fmt.Sprintf("%s %s–%s", block.Date, block.Start, block.End)), p.status(block.Status))
+					if block.Slipped {
+						fmt.Fprint(&out, "  ("+p.bad("slipped")+")")
+					}
+					if block.NeedsReblock {
+						fmt.Fprint(&out, "  ("+p.warn("reblock?")+")")
+					}
+					if block.OutcomeSource != nil {
+						fmt.Fprintf(&out, "  outcome: %s", textsafe.SanitizeLine(*block.OutcomeSource))
+					}
+					if block.CancelReason != nil {
+						fmt.Fprintf(&out, "  cancelled: %s", textsafe.SanitizeLine(*block.CancelReason))
+					}
+					fmt.Fprintln(&out)
+				}
+			}
+			if len(task.Entries) > 0 {
+				fmt.Fprintln(&out, "\n"+p.head("Entries"))
+				for _, entry := range task.Entries {
+					fmt.Fprintf(&out, "  %s\n", entryLine(entry, p))
+				}
 			}
 			if len(task.Interruptions) > 0 {
 				fmt.Fprintln(&out, "\n"+p.head("Interruptions"))

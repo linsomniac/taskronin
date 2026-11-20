@@ -92,8 +92,8 @@ func TestReportEndToEnd(t *testing.T) {
 
 func TestRPT10_EmptyRange(t *testing.T) {
 	_, sys := captureServer(t)
-	out := captureRun(t, sys, "", "report", "--last-week")
-	want := "Work report Mon 2026-10-19 – Sun 2026-10-25\n"
+	out := captureRun(t, sys, "", "report", "--last-week", "--color", "always")
+	want := "Work report Mon 2026-10-19 – Sun 2026-10-25\n\nNo work logged.\n"
 	if out != want {
 		t.Fatalf("stdout=%q want=%q", out, want)
 	}

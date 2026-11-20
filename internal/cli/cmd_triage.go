@@ -54,6 +54,10 @@ func triageCommand(e *env) *cobra.Command {
 				return err
 			}
 			p := e.paint()
+			if len(page.Items) == 0 {
+				_, err := fmt.Fprintln(e.out, p.dim("Triage clear"))
+				return err
+			}
 			for _, task := range page.Items {
 				if _, err := fmt.Fprintln(e.out, taskLine(task, clock.Today, p)); err != nil {
 					return err

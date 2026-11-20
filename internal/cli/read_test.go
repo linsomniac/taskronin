@@ -63,6 +63,53 @@ func TestLsFormat(t *testing.T) {
 	}
 }
 
+func TestEmptyReadScreens(t *testing.T) {
+	_, sys := captureServer(t)
+	captureRun(t, sys, "ls_empty", "ls")
+	captureRun(t, sys, "upcoming_empty", "upcoming")
+	if out := captureRun(t, sys, "", "ls", "--view", "done"); out != "Done\n  none\n" {
+		t.Errorf("empty done view = %q", out)
+	}
+	if out := captureRun(t, sys, "", "triage"); out != "Triage clear\n" {
+		t.Errorf("empty triage = %q", out)
+	}
+}
+
+func TestSearchNoMatches(t *testing.T) {
+	sys, _ := testSys(t)
+	socket, token := fakeAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if q := r.URL.Query().Get("q"); q != "bad\x1b[2J query" {
+			t.Errorf("search query = %q", q)
+		}
+		writeJSON(t, w, api.Page[api.SearchHit]{})
+	}))
+	args := []string{"--socket", socket, "--token-file", token, "search", "bad\x1b[2J", "query"}
+	const want = "No matches for 'bad�[2J query'"
+	if out := captureRun(t, sys, "", args...); out != want+"\n" {
+		t.Errorf("empty search = %q", out)
+	}
+	if out := captureRun(t, sys, "", append(args, "--color", "always")...); out != (paint{on: true}).dim(want)+"\n" {
+		t.Errorf("colored empty search = %q", out)
+	}
+}
+
+func TestShowMinimal(t *testing.T) {
+	_, sys := captureServer(t)
+	captureRun(t, sys, "", "add", "Unscheduled", "--bottom")
+	captureRun(t, sys, "show_minimal", "show", "1")
+	out := captureRun(t, sys, "", "show", "1", "--color", "always")
+	for _, label := range []string{"Project", "Tags", "Priority", "Notes"} {
+		if !strings.Contains(out, label+": "+(paint{on: true}).dim("none")+"\n") {
+			t.Errorf("missing dim empty value for %s in %q", label, out)
+		}
+	}
+	captureRun(t, sys, "", "due", "1", "2026-12-31")
+	out = captureRun(t, sys, "", "show", "1", "--color", "always")
+	if !strings.Contains(out, "Due phase: "+(paint{on: true}).dim("none")+"\n") {
+		t.Errorf("missing dim empty due phase in %q", out)
+	}
+}
+
 func TestShowSanitizes(t *testing.T) {
 	sys, _ := testSys(t)
 	unsafe := "x\x1b]52;c;AAAA\x07y"
