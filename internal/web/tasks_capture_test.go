@@ -40,10 +40,10 @@ func TestAddTaskDefaultTriage(t *testing.T) {
 	}
 	w = ta.get("/ui/triage")
 	csrf := scrapeForm(t, w.Body.String(), "/ui/tasks").Get("_csrf")
-	if got := decodeFlash(t, cookie.Value, csrf); got != "#1 created\n#1 +new" {
+	if got := decodeFlash(t, cookie.Value, csrf); got != "#1 created\n#1 needs triage (new)" {
 		t.Errorf("flash text = %q", got)
 	}
-	if got := flashText(t, w.Body.String()); got != "#1 created\n#1 +new" {
+	if got := flashText(t, w.Body.String()); got != "#1 created\n#1 needs triage (new)" {
 		t.Errorf("visible flash = %q", got)
 	}
 	cleared := responseCookie(t, w, "tr_flash")
@@ -137,7 +137,7 @@ func TestAddTaskDoubleSubmitReplays(t *testing.T) {
 	if err != nil || len(list.Items) != 1 || !slices.Equal(ta.opKinds(), append(before, "task.add")) {
 		t.Fatalf("replay tasks=%+v err=%v ops=%v", list, err, ta.opKinds())
 	}
-	if got := flashText(t, ta.viewBody("/ui/")); got != "#1 created\n#1 +new\nalready applied" {
+	if got := flashText(t, ta.viewBody("/ui/")); got != "#1 created\n#1 needs triage (new)\nalready applied" {
 		t.Errorf("replay flash = %q", got)
 	}
 }

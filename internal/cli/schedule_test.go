@@ -179,19 +179,19 @@ func TestUnblockOutcome(t *testing.T) {
 	captureRun(t, sys, "", "block", "1", "13:00-15:00")
 	srv.Clock.Set(testutil.Local(t, "2026-10-28 10:20"))
 	out := captureRun(t, sys, "", "unblock", "b1")
-	if !strings.HasPrefix(out, "b1 cancelled\n") || !strings.Contains(out, "b1 slipped\n") || strings.Contains(out, "cancelled (") {
+	if !strings.HasPrefix(out, "b1 cancelled\n") || !strings.Contains(out, "b1 slipped\n") || strings.Count(out, "b1 cancelled") != 1 {
 		t.Fatalf("cancel stdout=%q", out)
 	}
 	captureRun(t, sys, "", "block", "1", "13:00-15:00")
 	srv.Clock.Set(testutil.Local(t, "2026-10-28 14:00"))
 	out = captureRun(t, sys, "", "unblock", "2")
-	if !strings.HasPrefix(out, "b2 resolved missed\n") || !strings.Contains(out, "b2 slipped\n") {
+	if !strings.HasPrefix(out, "b2 resolved missed\n") || !strings.Contains(out, "b2 slipped\n") || strings.Contains(out, "b2 missed\n") {
 		t.Fatalf("resolve stdout=%q", out)
 	}
 	srv.Clock.Set(testutil.Local(t, "2026-10-29 10:00"))
 	for _, outcome := range []string{"worked", "missed", "auto"} {
 		out = captureRun(t, sys, "", "outcome", "b2", outcome)
-		if !strings.HasPrefix(out, "b2 outcome "+outcome+"\n") || strings.Count(out, "b2 outcome ") != 1 {
+		if !strings.HasPrefix(out, "b2 outcome "+outcome+"\n") || strings.Contains(out, "b2 marked "+outcome+"\n") {
 			t.Errorf("%s: stdout=%q", outcome, out)
 		}
 		block, err := srv.Client.GetBlock(t.Context(), 2)

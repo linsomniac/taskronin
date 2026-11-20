@@ -140,6 +140,29 @@ func (k OpKind) Verb() string {
 	}
 }
 
+// ReversalText describes a reversal of the root operation. A caller can omit
+// the operation ID for a compact banner.
+func (k OpKind) ReversalText(via, opID string) string {
+	action, past := "reverted", "reverted"
+	switch via {
+	case "undo":
+		action, past = "undid", "undone"
+	case "redo":
+		action, past = "redid", "redone"
+	}
+	line := past
+	if k != "" {
+		line = action + " " + k.Verb()
+	}
+	if opID == "" {
+		return line
+	}
+	if line == "reverted" {
+		return line + " op " + opID
+	}
+	return line + " (op " + opID + ")"
+}
+
 // OpState is an operation's current reversal state.
 type OpState string
 

@@ -251,12 +251,26 @@ func TestTodayReadKeepsMutationBanner(t *testing.T) {
 
 func TestEffectsLine(t *testing.T) {
 	eq(t, effectsLine([]api.Effect{{Kind: "block_cancelled", BlockID: 7}, {Kind: "slipped", BlockID: 7},
-		{Kind: "reason_added", TaskID: 42, Reason: "slipped"}, {Kind: "updated", TaskID: 42}}), "b7 cancelled · b7 slipped · #42 +slipped")
+		{Kind: "reason_added", TaskID: 42, Reason: "slipped"}, {Kind: "updated", TaskID: 42}}), "b7 cancelled · b7 slipped · #42 needs triage (slipped)")
 	eq(t, effectsLine([]api.Effect{{Kind: "interrupted", TaskID: 42, From: "17"}, {Kind: "unslipped", BlockID: 7},
 		{Kind: "focus_set", TaskID: 42}, {Kind: "focus_cleared"}, {Kind: "block_resolved", BlockID: 7},
 		{Kind: "block_resolved", BlockID: 8, To: "worked"}, {Kind: "completed", TaskID: 42},
 		{Kind: "entry_logged", EntryID: 9}, {Kind: "reverted"}}),
 		"interrupted #17 · b7 unslipped · focus #42 · focus cleared · b7 resolved · b8 worked · #42 completed · e9 logged · reverted")
+}
+
+func TestEffectsLineReverted(t *testing.T) {
+	for _, tc := range []struct{ via, to, want string }{
+		{"undo", "task.complete", "undid complete"},
+		{"redo", "entry.add", "redid log"},
+		{"revert", "task.update", "reverted edit"},
+		{"", "future.kind", "reverted future.kind"},
+		{"undo", "", "undone"},
+		{"redo", "", "redone"},
+		{"revert", "", "reverted"},
+	} {
+		eq(t, effectsLine([]api.Effect{{Kind: "reverted", Via: tc.via, From: "abcdef12", To: tc.to}}), tc.want)
+	}
 }
 
 func TestRenderSanitizesAndClips(t *testing.T) {

@@ -107,7 +107,7 @@ func (e *env) printAIChanges(changes *api.AIChanges) error {
 		}
 		fmt.Fprintln(&out, textsafe.SanitizeLine(line))
 		for _, effect := range op.Effects {
-			fmt.Fprintln(&out, "  "+textsafe.SanitizeLine(effectLine(effect)))
+			fmt.Fprintln(&out, "  "+textsafe.SanitizeLine(e.effectLine(effect)))
 		}
 	}
 	_, err := fmt.Fprint(e.out, out.String())

@@ -107,7 +107,7 @@ func TestTriageManual(t *testing.T) {
 		t.Fatalf("task=%+v err=%v", task, err)
 	}
 	captureRun(t, sys, "", "defer", "1", "tomorrow")
-	if out := captureRun(t, sys, "", "triage", "--manual", "1"); out != "#1 sent to triage (manual)\n#1 no longer deferred\n" {
+	if out := captureRun(t, sys, "", "triage", "--manual", "1"); out != "#1 sent to triage (manual)\n#1 defer cleared\n" {
 		t.Fatalf("deferral consequence stdout=%q", out)
 	}
 }

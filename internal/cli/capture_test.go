@@ -564,7 +564,7 @@ func TestDeletePrecondition(t *testing.T) {
 
 func TestCaptureEffects(t *testing.T) {
 	var out bytes.Buffer
-	e := &env{out: &out}
+	e := &env{out: &out, clockLoaded: true, serverClock: &api.Clock{Today: civil.MustDate("2026-10-28")}}
 	res := &api.OpResponse{Effects: []api.Effect{
 		{Kind: "deferred", TaskID: 42, To: "2026-10-30 09:00"},
 		{Kind: "undeferred", TaskID: 42},
@@ -573,7 +573,9 @@ func TestCaptureEffects(t *testing.T) {
 		{Kind: "blocked", BlockID: 7, To: "2026-10-28 13:00-15:00"},
 		{Kind: "block_moved", BlockID: 7, From: "13:00", To: "14:00"},
 		{Kind: "block_cancelled", BlockID: 7, To: "task_closed"},
+		{Kind: "block_cancelled", BlockID: 7},
 		{Kind: "block_resolved", BlockID: 7, To: "done"},
+		{Kind: "block_resolved", BlockID: 7},
 		{Kind: "outcome_set", BlockID: 7, To: "worked"},
 		{Kind: "slipped", BlockID: 7},
 		{Kind: "unslipped", BlockID: 7},
@@ -588,7 +590,9 @@ func TestCaptureEffects(t *testing.T) {
 		{Kind: "entry_relinked", EntryID: 9},
 		{Kind: "entry_deleted", EntryID: 9},
 		{Kind: "entry_restored", EntryID: 9},
-		{Kind: "reverted", From: "abcdef12"},
+		{Kind: "reverted", Via: "undo", From: "abcdef12", To: "task.complete"},
+		{Kind: "reverted", Via: "redo", From: "abcdef13", To: "entry.add"},
+		{Kind: "reverted", Via: "revert", From: "abcdef14"},
 		{Kind: "created", TaskID: 42},
 		{Kind: "updated", TaskID: 42},
 		{Kind: "placed", TaskID: 42},
@@ -629,7 +633,7 @@ func TestCaptureEffectsSanitized(t *testing.T) {
 	res.Task = &api.Task{ID: 1, Title: "completed; ✓ logged b7 slipped"}
 	res.Effects = []api.Effect{{Kind: "created", TaskID: 1}, {Kind: "slipped", TaskID: 1, BlockID: 7}, {Kind: "reason_added", TaskID: 2, Reason: "new"}}
 	e.printOp(res, taskHeadline(res.Task, "added to triage (new)"))
-	if !strings.HasSuffix(out.String(), "b7 slipped\n#2 +new\n") || strings.Contains(out.String(), "#1 created") {
+	if !strings.HasSuffix(out.String(), "b7 slipped\n#2 needs triage (new)\n") || strings.Contains(out.String(), "#1 created") {
 		t.Fatalf("incorrect effect suppression: %q", out.String())
 	}
 }

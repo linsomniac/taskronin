@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"taskronin/internal/domain"
 	"taskronin/internal/service"
 )
 
@@ -30,37 +31,44 @@ func flashLines(res *service.OpResult) []string {
 	return lines
 }
 
-// AIDEV-NOTE: Mirror effectLine in internal/cli/effects.go (DF21). The copy
-// uses service.Effect because A§1.3 forbids web importing cli or api.
+// AIDEV-NOTE: Mirror effectLine in internal/cli/effects.go and effectsLine in
+// internal/tui/banner.go; Plan E Task 3 holds the table. This copy uses
+// service.Effect because A§1.3 forbids web importing cli or api (DF21).
 func effectLine(effect service.Effect) string {
 	id := effect.TaskID
 	switch effect.Kind {
 	case service.EffDeferred:
 		return fmt.Sprintf("#%d deferred to %s", id, effect.To)
 	case service.EffUndeferred:
-		return fmt.Sprintf("#%d no longer deferred", id)
+		return fmt.Sprintf("#%d defer cleared", id)
 	case service.EffDueSet:
 		return fmt.Sprintf("#%d due %s", id, effect.To)
 	case service.EffDueCleared:
-		return fmt.Sprintf("#%d due cleared", id)
+		return fmt.Sprintf("#%d due date cleared", id)
 	case service.EffBlocked:
-		return fmt.Sprintf("b%d blocked %s", effect.BlockID, effect.To)
+		return fmt.Sprintf("b%d scheduled %s", effect.BlockID, effect.To)
 	case service.EffBlockMoved:
 		return fmt.Sprintf("b%d moved %s → %s", effect.BlockID, effect.From, effect.To)
 	case service.EffBlockCancelled:
-		return fmt.Sprintf("b%d cancelled (%s)", effect.BlockID, effect.To)
+		if effect.To == "" {
+			return fmt.Sprintf("b%d cancelled", effect.BlockID)
+		}
+		return fmt.Sprintf("b%d cancelled · %s", effect.BlockID, effect.To)
 	case service.EffBlockResolved:
-		return fmt.Sprintf("b%d resolved %s", effect.BlockID, effect.To)
+		if effect.To == "" {
+			return fmt.Sprintf("b%d resolved", effect.BlockID)
+		}
+		return fmt.Sprintf("b%d %s", effect.BlockID, effect.To)
 	case service.EffOutcomeSet:
-		return fmt.Sprintf("b%d outcome %s", effect.BlockID, effect.To)
+		return fmt.Sprintf("b%d marked %s", effect.BlockID, effect.To)
 	case service.EffSlipped:
 		return fmt.Sprintf("b%d slipped", effect.BlockID)
 	case service.EffUnslipped:
 		return fmt.Sprintf("b%d no longer counts as slipped", effect.BlockID)
 	case service.EffReasonAdded:
-		return fmt.Sprintf("#%d +%s", id, effect.Reason)
+		return fmt.Sprintf("#%d needs triage (%s)", id, effect.Reason)
 	case service.EffReasonRemoved:
-		return fmt.Sprintf("#%d −%s", id, effect.Reason)
+		return fmt.Sprintf("#%d no longer flagged %s", id, effect.Reason)
 	case service.EffFocusSet:
 		return fmt.Sprintf("focus → #%d", id)
 	case service.EffFocusCleared:
@@ -74,7 +82,7 @@ func effectLine(effect service.Effect) string {
 	case service.EffReviewed:
 		return "AI changes reviewed through #" + effect.To
 	case service.EffReverted:
-		return "reverted op " + effect.From
+		return domain.OpKind(effect.To).ReversalText(effect.Via, effect.From)
 	default:
 		return fmt.Sprintf("#%d %s", id, effect.Kind)
 	}

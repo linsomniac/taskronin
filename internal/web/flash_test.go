@@ -20,12 +20,12 @@ func TestFlashDuplicateCookies(t *testing.T) {
 	assertRedirect(t, ta.submit("/ui/", "/ui/tasks", url.Values{"title": {"Second"}}), "/ui/")
 	second := ta.cookies["tr_flash"]
 	for _, tc := range []struct{ name, cookies, want string }{
-		{"valid second", "tr_flash=junk; tr_flash=" + first, "#1 created\n#1 +new"},
-		{"valid fourth", strings.Repeat("tr_flash=junk; ", 3) + "tr_flash=" + first, "#1 created\n#1 +new"},
+		{"valid second", "tr_flash=junk; tr_flash=" + first, "#1 created\n#1 needs triage (new)"},
+		{"valid fourth", strings.Repeat("tr_flash=junk; ", 3) + "tr_flash=" + first, "#1 created\n#1 needs triage (new)"},
 		{"valid fifth ignored", strings.Repeat("tr_flash=junk; ", 4) + "tr_flash=" + first, ""},
-		{"first valid wins", "tr_flash=" + first + "; tr_flash=" + second, "#1 created\n#1 +new"},
-		{"bad MAC then valid", "tr_flash=YQ.YQ; tr_flash=" + second, "#2 created\n#2 +new"},
-		{"oversized then valid", "tr_flash=" + strings.Repeat("a", 2049) + "; tr_flash=" + second, "#2 created\n#2 +new"},
+		{"first valid wins", "tr_flash=" + first + "; tr_flash=" + second, "#1 created\n#1 needs triage (new)"},
+		{"bad MAC then valid", "tr_flash=YQ.YQ; tr_flash=" + second, "#2 created\n#2 needs triage (new)"},
+		{"oversized then valid", "tr_flash=" + strings.Repeat("a", 2049) + "; tr_flash=" + second, "#2 created\n#2 needs triage (new)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			w := ta.get("/ui/tasks/1", "Cookie", "tr_session="+ta.cookies[web.SessionCookie]+"; "+tc.cookies)
@@ -55,18 +55,18 @@ func TestFlashLinesEveryEffectKind(t *testing.T) {
 		service.EffPlaced:         {"", "", "#42 placed"},
 		service.EffMoved:          {"", "", "#42 moved"},
 		service.EffDeferred:       {"", "2026-10-30 09:00", "#42 deferred to 2026-10-30 09:00"},
-		service.EffUndeferred:     {"", "", "#42 no longer deferred"},
+		service.EffUndeferred:     {"", "", "#42 defer cleared"},
 		service.EffDueSet:         {"", "2026-10-30", "#42 due 2026-10-30"},
-		service.EffDueCleared:     {"", "", "#42 due cleared"},
-		service.EffBlocked:        {"", "2026-10-28 13:00-15:00", "b7 blocked 2026-10-28 13:00-15:00"},
+		service.EffDueCleared:     {"", "", "#42 due date cleared"},
+		service.EffBlocked:        {"", "2026-10-28 13:00-15:00", "b7 scheduled 2026-10-28 13:00-15:00"},
 		service.EffBlockMoved:     {"13:00-15:00", "15:00-17:00", "b7 moved 13:00-15:00 → 15:00-17:00"},
-		service.EffBlockCancelled: {"", "user", "b7 cancelled (user)"},
-		service.EffBlockResolved:  {"", "missed", "b7 resolved missed"},
-		service.EffOutcomeSet:     {"", "worked", "b7 outcome worked"},
+		service.EffBlockCancelled: {"", "user", "b7 cancelled · user"},
+		service.EffBlockResolved:  {"", "missed", "b7 missed"},
+		service.EffOutcomeSet:     {"", "worked", "b7 marked worked"},
 		service.EffSlipped:        {"", "", "b7 slipped"},
 		service.EffUnslipped:      {"", "", "b7 no longer counts as slipped"},
-		service.EffReasonAdded:    {"", "", "#42 +slipped"},
-		service.EffReasonRemoved:  {"", "", "#42 −slipped"},
+		service.EffReasonAdded:    {"", "", "#42 needs triage (slipped)"},
+		service.EffReasonRemoved:  {"", "", "#42 no longer flagged slipped"},
 		service.EffFocusSet:       {"", "", "focus → #42"},
 		service.EffFocusCleared:   {"", "", "focus cleared"},
 		service.EffInterrupted:    {"17", "", "interrupted #17"},
@@ -105,6 +105,27 @@ func TestFlashLinesEveryEffectKind(t *testing.T) {
 	}
 }
 
+func TestFlashLinesEffectVariants(t *testing.T) {
+	for _, tc := range []struct {
+		effect service.Effect
+		want   string
+	}{
+		{service.Effect{Kind: service.EffBlockCancelled, BlockID: 7}, "b7 cancelled"},
+		{service.Effect{Kind: service.EffBlockResolved, BlockID: 7}, "b7 resolved"},
+		{service.Effect{Kind: service.EffReverted, Via: "undo", From: "abcdef12", To: "task.complete"}, "undid complete (op abcdef12)"},
+		{service.Effect{Kind: service.EffReverted, Via: "redo", From: "abcdef13", To: "entry.add"}, "redid log (op abcdef13)"},
+		{service.Effect{Kind: service.EffReverted, Via: "revert", From: "abcdef14", To: "task.update"}, "reverted edit (op abcdef14)"},
+		{service.Effect{Kind: service.EffReverted, From: "abcdef15", To: "future.kind"}, "reverted future.kind (op abcdef15)"},
+		{service.Effect{Kind: service.EffReverted, Via: "undo", From: "abcdef16"}, "undone (op abcdef16)"},
+		{service.Effect{Kind: service.EffReverted, Via: "redo", From: "abcdef17"}, "redone (op abcdef17)"},
+	} {
+		got := web.FlashLines(&service.OpResult{Effects: []service.Effect{tc.effect}})
+		if !slices.Equal(got, []string{tc.want}) {
+			t.Errorf("effect %+v: got %q, want [%q]", tc.effect, got, tc.want)
+		}
+	}
+}
+
 func TestFlashLinesWarningsAndFlags(t *testing.T) {
 	got := web.FlashLines(&service.OpResult{
 		Effects:  []service.Effect{{Kind: service.EffUpdated, TaskID: 42}},
@@ -134,7 +155,7 @@ func TestMutateEmptyFlashPreservesPending(t *testing.T) {
 	if got := w.Header().Values("Set-Cookie"); len(got) != 0 {
 		t.Errorf("empty result overwrote pending flash: %v", got)
 	}
-	if got := flashText(t, ta.viewBody("/ui/")); got != "#1 created\n#1 +new" {
+	if got := flashText(t, ta.viewBody("/ui/")); got != "#1 created\n#1 needs triage (new)" {
 		t.Errorf("pending flash = %q", got)
 	}
 }

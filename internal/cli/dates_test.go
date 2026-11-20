@@ -30,6 +30,13 @@ func TestDayWordWithoutServer(t *testing.T) {
 	}
 }
 
+func TestDayWordNilClock(t *testing.T) {
+	e := &env{clockLoaded: true}
+	if got := e.dayWord(civil.MustDate("2026-10-28")); got != "Wed 2026-10-28" {
+		t.Fatal(got)
+	}
+}
+
 func TestMomentWord(t *testing.T) {
 	e := &env{clockLoaded: true, serverClock: &api.Clock{Today: civil.MustDate("2026-10-28")}}
 	m := &api.Moment{Date: civil.MustDate("2026-10-29")}
@@ -49,6 +56,7 @@ func TestRelDate(t *testing.T) {
 		"2026-10-29 09:00":       "tomorrow 09:00",
 		"2026-10-28 13:00-15:00": "today 13:00-15:00",
 		"2026-10-30":             "Fri 2026-10-30",
+		"2026-10-281":            "2026-10-281",
 		"task_closed":            "task_closed",
 		"13:00 → 14:00":          "13:00 → 14:00",
 		"2026-02-30 09:00":       "2026-02-30 09:00",

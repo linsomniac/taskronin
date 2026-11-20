@@ -10,6 +10,7 @@ import (
 
 	"taskronin/internal/api"
 	"taskronin/internal/client"
+	"taskronin/internal/domain"
 	"taskronin/internal/textsafe"
 )
 
@@ -137,7 +138,7 @@ func effectsLine(effs []api.Effect) string {
 		case "slipped", "unslipped":
 			part = fmt.Sprintf("b%d %s", e.BlockID, e.Kind)
 		case "reason_added":
-			part = fmt.Sprintf("#%d +%s", e.TaskID, e.Reason)
+			part = fmt.Sprintf("#%d needs triage (%s)", e.TaskID, e.Reason)
 		case "interrupted":
 			part = "interrupted #" + e.From
 		case "focus_set":
@@ -157,7 +158,7 @@ func effectsLine(effs []api.Effect) string {
 		case "entry_logged":
 			part = fmt.Sprintf("e%d logged", e.EntryID)
 		case "reverted":
-			part = "reverted"
+			part = domain.OpKind(e.To).ReversalText(e.Via, "")
 		default:
 			continue
 		}

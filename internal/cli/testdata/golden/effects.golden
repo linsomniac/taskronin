@@ -1,17 +1,19 @@
 Effects
-#42 deferred to 2026-10-30 09:00
-#42 no longer deferred
-#42 due 2026-10-31
-#42 due cleared
-b7 blocked 2026-10-28 13:00-15:00
+#42 deferred to Fri 2026-10-30 09:00
+#42 defer cleared
+#42 due Sat 2026-10-31
+#42 due date cleared
+b7 scheduled today 13:00-15:00
 b7 moved 13:00 → 14:00
-b7 cancelled (task_closed)
-b7 resolved done
-b7 outcome worked
+b7 cancelled · task_closed
+b7 cancelled
+b7 done
+b7 resolved
+b7 marked worked
 b7 slipped
 b7 no longer counts as slipped
-#42 +slipped
-#42 −new
+#42 needs triage (slipped)
+#42 no longer flagged new
 focus → #42
 focus cleared
 interrupted #41
@@ -21,7 +23,9 @@ e9 updated
 e9 relinked
 e9 deleted
 e9 restored
-reverted op abcdef12
+undid complete (op abcdef12)
+redid log (op abcdef13)
+reverted op abcdef14
 #42 created
 #42 updated
 #42 placed

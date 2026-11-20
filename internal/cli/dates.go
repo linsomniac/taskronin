@@ -24,7 +24,7 @@ func (e *env) dayWord(d civil.Date) string {
 	// AIDEV-NOTE: clock caches both success and failure. A write pays for at
 	// most one extra local read and can still print the absolute date on error.
 	clock, err := e.clock()
-	if err == nil {
+	if err == nil && clock != nil {
 		switch d.DaysSince(clock.Today) {
 		case 0:
 			return "today"
@@ -43,7 +43,7 @@ func (e *env) momentWord(m *api.Moment) string {
 
 func (e *env) relDate(text string) string {
 	const dateLen = len("YYYY-MM-DD")
-	if len(text) < dateLen {
+	if len(text) < dateLen || (len(text) > dateLen && text[dateLen] != ' ') {
 		return text
 	}
 	d, err := civil.ParseDate(text[:dateLen])

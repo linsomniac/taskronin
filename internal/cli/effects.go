@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"taskronin/internal/api"
+	"taskronin/internal/domain"
 	"taskronin/internal/textsafe"
 )
 
@@ -34,23 +35,23 @@ func (e *env) printOp(resp *api.OpResponse, headline string) {
 		return
 	}
 	for _, effect := range resp.Effects {
-		if !effectInHeadline(resp, effect, headline) {
-			if _, e.opOutputErr = fmt.Fprintln(e.out, textsafe.SanitizeLine(effectLine(effect))); e.opOutputErr != nil {
+		if !e.effectInHeadline(resp, effect, headline) {
+			if _, e.opOutputErr = fmt.Fprintln(e.out, textsafe.SanitizeLine(e.effectLine(effect))); e.opOutputErr != nil {
 				return
 			}
 		}
 	}
 }
 
-func effectInHeadline(resp *api.OpResponse, effect api.Effect, headline string) bool {
-	if headline == effectLine(effect) || schedulingEffectInHeadline(resp, effect, headline) || metadataEffectInHeadline(resp, effect, headline) {
+func (e *env) effectInHeadline(resp *api.OpResponse, effect api.Effect, headline string) bool {
+	if headline == e.effectLine(effect) || schedulingEffectInHeadline(resp, effect, headline) || metadataEffectInHeadline(resp, effect, headline) {
 		return true
 	}
 	if resp.Task == nil || effect.TaskID != resp.Task.ID {
 		return false
 	}
-	// AIDEV-NOTE: match the task prefix before examining the action, so words
-	// inside a user title cannot hide an unrelated effect (especially slips).
+	// AIDEV-NOTE: compare the rendered effect above, then match the task prefix
+	// before examining its action. Words in a title must never hide a slip.
 	action, ok := strings.CutPrefix(headline, taskHeadline(resp.Task, ""))
 	if !ok {
 		return false
@@ -119,6 +120,10 @@ func schedulingEffectInHeadline(resp *api.OpResponse, effect api.Effect, headlin
 			switch effect.Kind {
 			case "blocked", "block_moved":
 				return scheduled
+			case "block_resolved":
+				return headline == fmt.Sprintf("b%d resolved %s", block.ID, effect.To)
+			case "outcome_set":
+				return headline == fmt.Sprintf("b%d outcome %s", block.ID, effect.To)
 			case "block_cancelled":
 				return headline == fmt.Sprintf("b%d cancelled", block.ID)
 			}
@@ -151,35 +156,41 @@ func schedulingEffectInHeadline(resp *api.OpResponse, effect api.Effect, headlin
 	}
 }
 
-func effectLine(effect api.Effect) string {
+func (e *env) effectLine(effect api.Effect) string {
 	id := effect.TaskID
 	switch effect.Kind {
 	case "deferred":
-		return fmt.Sprintf("#%d deferred to %s", id, effect.To)
+		return fmt.Sprintf("#%d deferred to %s", id, e.relDate(effect.To))
 	case "undeferred":
-		return fmt.Sprintf("#%d no longer deferred", id)
+		return fmt.Sprintf("#%d defer cleared", id)
 	case "due_set":
-		return fmt.Sprintf("#%d due %s", id, effect.To)
+		return fmt.Sprintf("#%d due %s", id, e.relDate(effect.To))
 	case "due_cleared":
-		return fmt.Sprintf("#%d due cleared", id)
+		return fmt.Sprintf("#%d due date cleared", id)
 	case "blocked":
-		return fmt.Sprintf("b%d blocked %s", effect.BlockID, effect.To)
+		return fmt.Sprintf("b%d scheduled %s", effect.BlockID, e.relDate(effect.To))
 	case "block_moved":
 		return fmt.Sprintf("b%d moved %s → %s", effect.BlockID, effect.From, effect.To)
 	case "block_cancelled":
-		return fmt.Sprintf("b%d cancelled (%s)", effect.BlockID, effect.To)
+		if effect.To == "" {
+			return fmt.Sprintf("b%d cancelled", effect.BlockID)
+		}
+		return fmt.Sprintf("b%d cancelled · %s", effect.BlockID, effect.To)
 	case "block_resolved":
-		return fmt.Sprintf("b%d resolved %s", effect.BlockID, effect.To)
+		if effect.To == "" {
+			return fmt.Sprintf("b%d resolved", effect.BlockID)
+		}
+		return fmt.Sprintf("b%d %s", effect.BlockID, effect.To)
 	case "outcome_set":
-		return fmt.Sprintf("b%d outcome %s", effect.BlockID, effect.To)
+		return fmt.Sprintf("b%d marked %s", effect.BlockID, effect.To)
 	case "slipped":
 		return fmt.Sprintf("b%d slipped", effect.BlockID)
 	case "unslipped":
 		return fmt.Sprintf("b%d no longer counts as slipped", effect.BlockID)
 	case "reason_added":
-		return fmt.Sprintf("#%d +%s", id, effect.Reason)
+		return fmt.Sprintf("#%d needs triage (%s)", id, effect.Reason)
 	case "reason_removed":
-		return fmt.Sprintf("#%d −%s", id, effect.Reason)
+		return fmt.Sprintf("#%d no longer flagged %s", id, effect.Reason)
 	case "focus_set":
 		return fmt.Sprintf("focus → #%d", id)
 	case "focus_cleared":
@@ -193,7 +204,7 @@ func effectLine(effect api.Effect) string {
 	case "reviewed":
 		return "AI changes reviewed through #" + effect.To
 	case "reverted":
-		return "reverted op " + effect.From
+		return domain.OpKind(effect.To).ReversalText(effect.Via, effect.From)
 	default:
 		return fmt.Sprintf("#%d %s", id, effect.Kind)
 	}
