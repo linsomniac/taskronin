@@ -143,6 +143,14 @@ func (k OpKind) Verb() string {
 // ReversalText describes a reversal of the root operation. A caller can omit
 // the operation ID for a compact banner.
 func (k OpKind) ReversalText(via, opID string) string {
+	if opID != "" {
+		opID = "op " + opID
+	}
+	return k.ReversalLabel(via, opID)
+}
+
+// ReversalLabel accepts the complete optional operation mark, including its CLI styling.
+func (k OpKind) ReversalLabel(via, opMark string) string {
 	// AIDEV-NOTE: J§4.2 uses revert wording when Via is missing or unknown.
 	action, past := "reverted", "reverted"
 	switch via {
@@ -155,13 +163,13 @@ func (k OpKind) ReversalText(via, opID string) string {
 	if k != "" {
 		line = action + " " + k.Verb()
 	}
-	if opID == "" {
+	if opMark == "" {
 		return line
 	}
 	if k == "" && action == "reverted" {
-		return line + " op " + opID
+		return line + " " + opMark
 	}
-	return line + " (op " + opID + ")"
+	return line + " (" + opMark + ")"
 }
 
 // OpState is an operation's current reversal state.

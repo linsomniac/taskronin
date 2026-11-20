@@ -66,7 +66,7 @@ func aiChangesCommand(e *env) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return e.outputOp(res, fmt.Sprintf("acknowledged AI changes through #%d", newest))
+			return e.outputOp(res, func(p paint) string { return "acknowledged AI changes through " + p.taskID(newest) })
 		},
 	}
 	f := cmd.Flags()
@@ -99,15 +99,16 @@ func allAIChanges(e *env, c *client.Client, all bool) (*api.AIChanges, error) {
 }
 
 func (e *env) printAIChanges(changes *api.AIChanges) error {
+	p := e.paint()
 	var out strings.Builder
 	for _, op := range changes.Ops {
-		line := fmt.Sprintf("op %.8s #%d %s by %s at %s", op.OpID, op.Seq, op.Kind, op.Actor, op.At.Format("2006-01-02 15:04:05Z07:00"))
+		line := fmt.Sprintf("%s %s %s by %s at %s", p.shortOpID(op.OpID), p.taskID(op.Seq), textsafe.SanitizeLine(op.Kind), textsafe.SanitizeLine(op.Actor), op.At.Format("2006-01-02 15:04:05Z07:00"))
 		if op.State == string(domain.OpReverted) {
 			line += " (reverted)"
 		}
-		fmt.Fprintln(&out, textsafe.SanitizeLine(line))
+		fmt.Fprintln(&out, line)
 		for _, effect := range op.Effects {
-			fmt.Fprintln(&out, "  "+textsafe.SanitizeLine(e.effectLine(effect)))
+			fmt.Fprintln(&out, "  "+e.effectLine(effect, p))
 		}
 	}
 	_, err := fmt.Fprint(e.out, out.String())

@@ -63,33 +63,35 @@ func (e *env) today() error {
 			}
 		}
 	}
+	p := e.paint()
 	var out strings.Builder
 	fmt.Fprintf(&out, "%s · %s\n", view.Clock.Now.In(z.Location()).Format("Mon 2006-01-02 15:04"), textsafe.SanitizeLine(view.Clock.Timezone))
 	for _, banner := range view.Banners {
-		fmt.Fprintf(&out, "⚠ %s\n", textsafe.SanitizeLine(banner.Message))
+		fmt.Fprintln(&out, p.warn("⚠ "+textsafe.SanitizeLine(banner.Message)))
 	}
 	focus := "no focus"
 	b := view.CurrentBlock
 	if f := view.Focus; f != nil {
-		focus = fmt.Sprintf("▶ #%d %s", f.ID, textsafe.SanitizeLine(f.Title))
+		title := textsafe.SanitizeLine(f.Title)
 		if b != nil && b.TaskID == f.ID {
-			focus += fmt.Sprintf(" (→%s)", b.End)
+			title += fmt.Sprintf(" (→%s)", b.End)
 		}
+		focus = p.ok("▶") + " " + p.taskID(f.ID) + " " + p.ok(title)
 	} else if b != nil {
-		focus = fmt.Sprintf("▷ #%d %s (→%s)", b.TaskID, textsafe.SanitizeLine(b.TaskTitle), b.End)
+		focus = p.ok("▷") + " " + p.taskID(b.TaskID) + " " + p.ok(fmt.Sprintf("%s (→%s)", textsafe.SanitizeLine(b.TaskTitle), b.End))
 	}
 	fmt.Fprintf(&out, "%s\n\n", focus)
 	if len(view.Blocks) > 0 {
-		fmt.Fprintln(&out, "Blocks")
+		fmt.Fprintln(&out, p.head("Blocks"))
 		for _, b := range view.Blocks {
-			status := textsafe.SanitizeLine(b.Status)
+			status := p.status(b.Status)
 			switch {
 			case b.Current:
-				status = "◀ now"
+				status = p.ok("◀ now")
 			case b.NeedsReblock:
-				status = "reblock?"
+				status = p.warn("reblock?")
 			}
-			fmt.Fprintf(&out, "  b%d %s–%s  #%d %s  %s\n", b.ID, b.Start, b.End, b.TaskID, textsafe.SanitizeLine(b.TaskTitle), status)
+			fmt.Fprintf(&out, "  %s %s–%s  %s %s  %s\n", p.blockID(b.ID), b.Start, b.End, p.taskID(b.TaskID), textsafe.SanitizeLine(b.TaskTitle), status)
 		}
 		fmt.Fprintln(&out)
 	}
@@ -104,33 +106,33 @@ func (e *env) today() error {
 		if len(section.tasks) == 0 {
 			continue
 		}
-		fmt.Fprintln(&out, section.title)
+		fmt.Fprintln(&out, p.head(section.title))
 		for _, task := range section.tasks {
-			fmt.Fprintf(&out, "  %s\n", taskLine(task, view.Clock.Today))
+			fmt.Fprintf(&out, "  %s\n", taskLine(task, view.Clock.Today, p))
 		}
 		fmt.Fprintln(&out)
 	}
 	if len(view.Entries) > 0 {
-		fmt.Fprintln(&out, "Log")
+		fmt.Fprintln(&out, p.head("Log"))
 		for _, entry := range view.Entries {
 			marker := "-"
 			if entry.Kind == "complete" {
-				marker = "✓"
+				marker = p.ok("✓")
 			}
 			fmt.Fprintf(&out, "  %s %s", marker, textsafe.SanitizeLine(entry.Title))
 			if entry.TaskID != nil {
-				fmt.Fprintf(&out, "  [#%d]", *entry.TaskID)
+				fmt.Fprintf(&out, "  [%s]", p.taskID(*entry.TaskID))
 			}
 			fmt.Fprintln(&out)
 		}
 		fmt.Fprintln(&out)
 	}
 	if len(view.Interruptions) > 0 {
-		fmt.Fprintln(&out, "Interruptions")
+		fmt.Fprintln(&out, p.head("Interruptions"))
 		for _, in := range view.Interruptions {
-			fmt.Fprintf(&out, "  %s #%d '%s'", in.At.In(z.Location()).Format("15:04"), in.ToTaskID, textsafe.SanitizeLine(titles[in.ToTaskID]))
+			fmt.Fprintf(&out, "  %s %s '%s'", in.At.In(z.Location()).Format("15:04"), p.taskID(in.ToTaskID), textsafe.SanitizeLine(titles[in.ToTaskID]))
 			if in.FromTaskID != nil {
-				fmt.Fprintf(&out, " interrupted #%d", *in.FromTaskID)
+				fmt.Fprintf(&out, " interrupted %s", p.taskID(*in.FromTaskID))
 			}
 			if in.FromBlockID != nil {
 				b := blocks[*in.FromBlockID]

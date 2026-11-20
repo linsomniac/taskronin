@@ -1,8 +1,6 @@
 package cli
 
 import (
-	"fmt"
-
 	"github.com/spf13/cobra"
 
 	"taskronin/internal/api"
@@ -24,7 +22,6 @@ func moveCommand(e *env) *cobra.Command {
 				return err
 			}
 			req := api.PlaceRequest{How: args[1]}
-			headline := fmt.Sprintf("#%d moved %s", id, req.How)
 			switch req.How {
 			case "top", "bottom":
 				if len(args) != 2 {
@@ -38,11 +35,10 @@ func moveCommand(e *env) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				headline += fmt.Sprintf(" #%d", req.Ref)
 			default:
 				return usagef("move requires top, bottom, before N or after N")
 			}
-			return e.placeTask(id, req, headline)
+			return e.placeTask(id, req)
 		},
 	}
 }
@@ -56,12 +52,12 @@ func keepCommand(e *env) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return e.placeTask(id, api.PlaceRequest{How: "keep"}, fmt.Sprintf("#%d kept in place", id))
+			return e.placeTask(id, api.PlaceRequest{How: "keep"})
 		},
 	}
 }
 
-func (e *env) placeTask(id int64, req api.PlaceRequest, headline string) error {
+func (e *env) placeTask(id int64, req api.PlaceRequest) error {
 	c, err := e.client()
 	if err != nil {
 		return err
@@ -74,5 +70,14 @@ func (e *env) placeTask(id int64, req api.PlaceRequest, headline string) error {
 	if err != nil {
 		return err
 	}
-	return e.outputOp(res, headline)
+	return e.outputOp(res, func(p paint) string {
+		if req.How == "keep" {
+			return p.taskID(id) + " kept in place"
+		}
+		line := p.taskID(id) + " moved " + req.How
+		if req.How == "after" || req.How == "before" {
+			line += " " + p.taskID(req.Ref)
+		}
+		return line
+	})
 }

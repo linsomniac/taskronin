@@ -51,7 +51,8 @@ func entryActionCommand(e *env, verb string) *cobra.Command {
 				return e.editEntry(entry)
 			case "delete":
 				if !yes {
-					confirmed, err := e.confirmDeletion(fmt.Sprintf("e%d '%s'", entry.ID, entry.Title))
+					p := e.paint()
+					confirmed, err := e.confirmDeletion(p.entryID(entry.ID) + " " + p.quotedTitle(entry.Title))
 					if err != nil || !confirmed {
 						return err
 					}
@@ -69,7 +70,7 @@ func entryActionCommand(e *env, verb string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return e.outputOp(res, fmt.Sprintf("e%d %s", id, action))
+			return e.outputOp(res, func(p paint) string { return p.entryID(id) + " " + action })
 		},
 	}
 	if verb != "show" {
@@ -112,11 +113,12 @@ func entryLinkCommand(e *env) *cobra.Command {
 			if res.Entry == nil {
 				return fmt.Errorf("server response is missing the relinked entry")
 			}
-			headline := fmt.Sprintf("e%d standalone (no task)", id)
-			if res.Entry.TaskID != nil {
-				headline = fmt.Sprintf("e%d linked to #%d", id, *res.Entry.TaskID)
-			}
-			return e.outputOp(res, headline)
+			return e.outputOp(res, func(p paint) string {
+				if res.Entry.TaskID != nil {
+					return p.entryID(id) + " linked to " + p.taskID(*res.Entry.TaskID)
+				}
+				return p.entryID(id) + " standalone (no task)"
+			})
 		},
 	}
 }
@@ -125,26 +127,27 @@ func (e *env) showEntry(entry *api.Entry) error {
 	if e.jsonOut {
 		return json.NewEncoder(e.out).Encode(entry)
 	}
+	p := e.paint()
 	var out strings.Builder
-	fmt.Fprintf(&out, "e%d %s\n", entry.ID, textsafe.SanitizeLine(entry.Title))
+	fmt.Fprintf(&out, "%s %s\n", p.entryID(entry.ID), textsafe.SanitizeLine(entry.Title))
 	link := "none (standalone)"
 	if entry.TaskID != nil {
-		link = fmt.Sprintf("#%d", *entry.TaskID)
+		link = p.taskID(*entry.TaskID)
 		if entry.TaskTitle != nil {
-			link += " " + *entry.TaskTitle
+			link += " " + textsafe.SanitizeLine(*entry.TaskTitle)
 		}
 	}
-	detailField(&out, "Task", link)
+	fmt.Fprintf(&out, "Task: %s\n", link)
 	detailField(&out, "Kind", entry.Kind)
-	detailField(&out, "Work date", formatDate(entry.WorkDate))
+	fmt.Fprintf(&out, "Work date: %s\n", p.dim(formatDate(entry.WorkDate)))
 	if entry.Time != nil {
-		detailField(&out, "Time", entry.Time.String())
+		fmt.Fprintf(&out, "Time: %s\n", p.dim(entry.Time.String()))
 	}
 	fmt.Fprintf(&out, "Reopened: %t\n", entry.Reopened)
-	detailTime(&out, "Created", &entry.CreatedAt)
-	detailTime(&out, "Updated", &entry.UpdatedAt)
-	detailTime(&out, "Deleted", entry.DeletedAt)
-	fmt.Fprintf(&out, "Version: %d\n\nNotes\n%s\n", entry.Version, textsafe.Sanitize(entry.Notes))
+	p.detailTime(&out, "Created", &entry.CreatedAt)
+	p.detailTime(&out, "Updated", &entry.UpdatedAt)
+	p.detailTime(&out, "Deleted", entry.DeletedAt)
+	fmt.Fprintf(&out, "Version: %d\n\n%s\n%s\n", entry.Version, p.head("Notes"), textsafe.Sanitize(entry.Notes))
 	_, err := fmt.Fprint(e.out, out.String())
 	return err
 }
@@ -166,8 +169,8 @@ func (e *env) editEntry(entry *api.Entry) error {
 		if e.jsonOut {
 			return json.NewEncoder(e.out).Encode(entry)
 		}
-		_, err := fmt.Fprintf(e.out, "e%d unchanged\n", entry.ID)
+		_, err := fmt.Fprintf(e.out, "%s unchanged\n", e.paint().entryID(entry.ID))
 		return err
 	}
-	return e.outputOp(res, fmt.Sprintf("e%d updated", entry.ID))
+	return e.outputOp(res, func(p paint) string { return p.entryID(entry.ID) + " updated" })
 }

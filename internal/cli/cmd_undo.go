@@ -62,13 +62,13 @@ func undoCommand(e *env, verb string) *cobra.Command {
 func (e *env) outputReversal(res *api.OpResponse, fallback string) error {
 	for _, effect := range res.Effects {
 		if effect.Kind == "reverted" {
-			return e.outputOp(res, e.effectLine(effect))
+			return e.outputOp(res, func(p paint) string { return e.effectLine(effect, p) })
 		}
 	}
 	if res.OpID == nil {
 		return fmt.Errorf("server response is missing the %s operation", fallback)
 	}
-	return e.outputOp(res, fmt.Sprintf("%s (op %.8s)", fallback, *res.OpID))
+	return e.outputOp(res, func(p paint) string { return fallback + " (" + p.shortOpID(*res.OpID) + ")" })
 }
 
 // maxPrefixMatches bounds the candidates an ambiguous prefix lists.

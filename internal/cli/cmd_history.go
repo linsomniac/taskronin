@@ -36,22 +36,24 @@ func historyCommand(e *env) *cobra.Command {
 			if e.jsonOut {
 				return json.NewEncoder(e.out).Encode(page)
 			}
+			p := e.paint()
 			var out strings.Builder
 			for _, event := range page.Items {
-				entity := fmt.Sprintf("%s %d", event.Entity, event.EntityID)
+				entity := fmt.Sprintf("%s %d", textsafe.SanitizeLine(event.Entity), event.EntityID)
 				switch event.Entity {
 				case "task":
-					entity = fmt.Sprintf("#%d", event.EntityID)
+					entity = p.taskID(event.EntityID)
 				case "triage", "task_tags":
-					entity = fmt.Sprintf("#%d %s", event.EntityID, event.Entity)
+					entity = p.taskID(event.EntityID) + " " + event.Entity
 				case "entry":
-					entity = fmt.Sprintf("e%d", event.EntityID)
+					entity = p.entryID(event.EntityID)
 				case "block":
-					entity = fmt.Sprintf("b%d", event.EntityID)
+					entity = p.blockID(event.EntityID)
 				}
 				op := event.Op
-				line := fmt.Sprintf("op %.8s %s by %s at %s (%s %s; %s)", op.OpID, op.Kind, op.Actor, op.At.Format("2006-01-02 15:04:05Z07:00"), entity, event.Action, op.State)
-				fmt.Fprintln(&out, textsafe.SanitizeLine(line))
+				fmt.Fprintf(&out, "%s %s by %s at %s (%s %s; %s)\n",
+					p.shortOpID(op.OpID), textsafe.SanitizeLine(op.Kind), textsafe.SanitizeLine(op.Actor),
+					p.dim(op.At.Format("2006-01-02 15:04:05Z07:00")), entity, textsafe.SanitizeLine(event.Action), textsafe.SanitizeLine(op.State))
 			}
 			_, err = fmt.Fprint(e.out, out.String())
 			return err

@@ -53,8 +53,9 @@ func triageCommand(e *env) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			p := e.paint()
 			for _, task := range page.Items {
-				if _, err := fmt.Fprintln(e.out, taskLine(task, clock.Today)); err != nil {
+				if _, err := fmt.Fprintln(e.out, taskLine(task, clock.Today, p)); err != nil {
 					return err
 				}
 			}
@@ -80,7 +81,7 @@ func (e *env) markManual(id int64) error {
 	if err != nil {
 		return err
 	}
-	return e.outputOp(res, fmt.Sprintf("#%d sent to triage (manual)", id))
+	return e.outputOp(res, func(p paint) string { return p.taskID(id) + " sent to triage (" + p.warn("manual") + ")" })
 }
 
 func (e *env) acceptNew(tasks []api.Task) error {
@@ -106,5 +107,5 @@ func (e *env) acceptNew(tasks []api.Task) error {
 			return err
 		}
 	}
-	return e.outputOp(res, fmt.Sprintf("accepted %d new tasks into the backlog", len(res.Tasks)))
+	return e.outputOp(res, plainHeadline(fmt.Sprintf("accepted %d new tasks into the backlog", len(res.Tasks))))
 }

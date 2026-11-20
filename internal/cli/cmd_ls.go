@@ -51,14 +51,15 @@ func lsCommand(e *env) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			p := e.paint()
 			var out strings.Builder
 			for i, page := range pages {
 				if i > 0 {
 					fmt.Fprintln(&out)
 				}
-				fmt.Fprintln(&out, titles[views[i]])
+				fmt.Fprintln(&out, p.head(titles[views[i]]))
 				for _, task := range page.Items {
-					fmt.Fprintf(&out, "  %s\n", taskLine(task, clock.Today))
+					fmt.Fprintf(&out, "  %s\n", taskLine(task, clock.Today, p))
 				}
 			}
 			_, err = fmt.Fprint(e.out, out.String())

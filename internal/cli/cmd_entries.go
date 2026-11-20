@@ -83,9 +83,10 @@ func entriesCommand(e *env) *cobra.Command {
 			if e.jsonOut {
 				return json.NewEncoder(e.out).Encode(result)
 			}
+			p := e.paint()
 			var out strings.Builder
 			for _, entry := range result.Items {
-				fmt.Fprintln(&out, entryLine(entry))
+				fmt.Fprintln(&out, entryLine(entry, p))
 			}
 			_, err = fmt.Fprint(e.out, out.String())
 			return err
@@ -110,18 +111,18 @@ func entryDate(value, flag string, ref datespec.Ref) (*civil.Date, error) {
 	return &moment.Date, nil
 }
 
-func entryLine(entry api.Entry) string {
+func entryLine(entry api.Entry, p paint) string {
 	date := entry.WorkDate.String()
 	if entry.Time != nil {
 		date += " " + entry.Time.String()
 	}
 	marker := "-"
 	if entry.Kind == "complete" {
-		marker = "✓"
+		marker = p.ok("✓")
 	}
-	line := fmt.Sprintf("e%d  %s  %s %s", entry.ID, date, marker, textsafe.Truncate(textsafe.SanitizeLine(entry.Title), 40, "…"))
+	line := fmt.Sprintf("%s  %s  %s %s", p.entryID(entry.ID), p.dim(date), marker, textsafe.Truncate(textsafe.SanitizeLine(entry.Title), 40, "…"))
 	if entry.TaskID != nil {
-		line += fmt.Sprintf("  [#%d", *entry.TaskID)
+		line += fmt.Sprintf("  [%s", p.taskID(*entry.TaskID))
 		if entry.TaskTitle != nil {
 			line += " " + textsafe.Truncate(textsafe.SanitizeLine(*entry.TaskTitle), 40, "…")
 		}

@@ -31,6 +31,7 @@ func upcomingCommand(e *env) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			p := e.paint()
 			var out strings.Builder
 			for i, section := range []struct {
 				title string
@@ -39,9 +40,9 @@ func upcomingCommand(e *env) *cobra.Command {
 				if i > 0 {
 					fmt.Fprintln(&out)
 				}
-				fmt.Fprintln(&out, section.title)
+				fmt.Fprintln(&out, p.head(section.title))
 				for _, task := range section.tasks {
-					fmt.Fprintf(&out, "  %s", taskLine(task, clock.Today))
+					fmt.Fprintf(&out, "  %s", taskLine(task, clock.Today, p))
 					if task.Defer != nil {
 						fmt.Fprintf(&out, "  deferred to %s", formatMoment(task.Defer))
 					}

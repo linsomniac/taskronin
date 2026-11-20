@@ -63,9 +63,12 @@ func doneCommand(e *env) *cobra.Command {
 				return fmt.Errorf("server response is missing the completed task or entry")
 			}
 			if e.jsonOut {
-				return e.outputOp(res, "")
+				return e.outputOp(res, nil)
 			}
-			headline := "✓ " + taskHeadline(res.Task, "done · logged "+e.dayWord(res.Entry.WorkDate))
+			day := e.dayWord(res.Entry.WorkDate)
+			headline := func(p paint) string {
+				return p.ok("✓") + " " + p.taskHeadline(res.Task, p.ok("done")+" · logged "+day)
+			}
 			if err := e.outputOp(res, headline); err != nil {
 				return err
 			}
@@ -103,6 +106,6 @@ func (e *env) printDoneTally(c *client.Client, workDate civil.Date) error {
 	if count == 1 {
 		word = "one"
 	}
-	_, err = fmt.Fprintln(e.out, word+" done today")
-	return err
+	_, e.opOutputErr = fmt.Fprintln(e.out, word+" "+e.paint().ok("done")+" today")
+	return e.operationOutputError()
 }

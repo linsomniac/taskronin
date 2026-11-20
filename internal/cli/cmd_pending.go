@@ -158,7 +158,9 @@ func (e *env) retryOne(c *client.Client, store *client.PendingStore, p client.Pe
 		_, err = fmt.Fprintf(e.out, "revoked token %s (id %d)\n", textsafe.SanitizeLine(res.Token.Name), res.Token.ID)
 		return err
 	case res.Op != nil && res.Op.OpID != nil:
-		return e.outputOp(res.Op, fmt.Sprintf("resent pending request %s (op %.8s)", p.Key, *res.Op.OpID))
+		return e.outputOp(res.Op, func(palette paint) string {
+			return fmt.Sprintf("resent pending request %s (%s)", textsafe.SanitizeLine(p.Key), palette.shortOpID(*res.Op.OpID))
+		})
 	default:
 		_, err = fmt.Fprintf(e.out, "resent pending request %s\n", textsafe.SanitizeLine(p.Key))
 		return err

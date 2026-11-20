@@ -36,7 +36,7 @@ func reopenCommand(e *env) *cobra.Command {
 			if res.Task == nil {
 				return fmt.Errorf("server response is missing the reopened task")
 			}
-			if err := e.outputOp(res, taskHeadline(res.Task, "reopened")); err != nil {
+			if err := e.outputOp(res, func(p paint) string { return p.taskHeadline(res.Task, "reopened") }); err != nil {
 				return err
 			}
 			if !e.jsonOut {

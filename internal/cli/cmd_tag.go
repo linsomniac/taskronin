@@ -8,6 +8,7 @@ import (
 
 	"taskronin/internal/api"
 	"taskronin/internal/client"
+	"taskronin/internal/textsafe"
 )
 
 func init() {
@@ -63,7 +64,7 @@ func metadataCommand(e *env, verb string) *cobra.Command {
 			if res.Task == nil {
 				return fmt.Errorf("server response is missing the task")
 			}
-			return e.outputOp(res, metadataHeadline(res.Task, verb))
+			return e.outputOp(res, func(p paint) string { return p.metadataHeadline(res.Task, verb) })
 		},
 	}
 	switch verb {
@@ -80,16 +81,20 @@ func metadataCommand(e *env, verb string) *cobra.Command {
 	return cmd
 }
 
-func metadataHeadline(task *api.Task, verb string) string {
+func (p paint) metadataHeadline(task *api.Task, verb string) string {
 	if verb == "tag" {
-		return fmt.Sprintf("#%d tags: %s", task.ID, strings.Join(task.Tags, ", "))
+		return fmt.Sprintf("%s tags: %s", p.taskID(task.ID), p.dim(textsafe.SanitizeLine(strings.Join(task.Tags, ", "))))
 	}
 	value := task.Project
 	if verb == "priority" {
 		value = task.Priority
 	}
 	if value == nil {
-		return fmt.Sprintf("#%d %s cleared", task.ID, verb)
+		return fmt.Sprintf("%s %s cleared", p.taskID(task.ID), verb)
 	}
-	return fmt.Sprintf("#%d %s %s", task.ID, verb, *value)
+	label := textsafe.SanitizeLine(*value)
+	if verb == "project" {
+		label = p.dim(label)
+	}
+	return fmt.Sprintf("%s %s %s", p.taskID(task.ID), verb, label)
 }

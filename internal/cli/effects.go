@@ -11,7 +11,14 @@ import (
 	"taskronin/internal/textsafe"
 )
 
-func (e *env) outputOp(resp *api.OpResponse, headline string) error {
+// opHeadline renders the same tokens for plain effect matching and terminal output.
+type opHeadline func(paint) string
+
+func plainHeadline(text string) opHeadline {
+	return func(paint) string { return textsafe.SanitizeLine(text) }
+}
+
+func (e *env) outputOp(resp *api.OpResponse, headline opHeadline) error {
 	for _, warning := range resp.Warnings {
 		e.errorLine("tkr: warning: %s", warning)
 	}
@@ -19,6 +26,10 @@ func (e *env) outputOp(resp *api.OpResponse, headline string) error {
 		return json.NewEncoder(e.out).Encode(resp)
 	}
 	e.printOp(resp, headline)
+	return e.operationOutputError()
+}
+
+func (e *env) operationOutputError() error {
 	if e.opOutputErr != nil {
 		return fmt.Errorf("write operation output: %w", e.opOutputErr)
 	}
@@ -26,18 +37,24 @@ func (e *env) outputOp(resp *api.OpResponse, headline string) error {
 }
 
 // printOp echoes all consequences except those already stated in the headline.
-func (e *env) printOp(resp *api.OpResponse, headline string) {
+func (e *env) printOp(resp *api.OpResponse, headline opHeadline) {
 	// AIDEV-NOTE: preserve this void interface while retaining the first
 	// write error for outputOp. The mutation has already succeeded.
 	if e.opOutputErr != nil {
 		return
 	}
-	if _, e.opOutputErr = fmt.Fprintln(e.out, textsafe.SanitizeLine(headline)); e.opOutputErr != nil {
+	p := e.paint()
+	plain := headline(paint{})
+	display := plain
+	if p.on {
+		display = headline(p)
+	}
+	if _, e.opOutputErr = fmt.Fprintln(e.out, display); e.opOutputErr != nil {
 		return
 	}
 	for _, effect := range resp.Effects {
-		if !e.effectInHeadline(resp, effect, headline) {
-			if _, e.opOutputErr = fmt.Fprintln(e.out, textsafe.SanitizeLine(e.effectLine(effect))); e.opOutputErr != nil {
+		if !e.effectInHeadline(resp, effect, plain) {
+			if _, e.opOutputErr = fmt.Fprintln(e.out, e.effectLine(effect, p)); e.opOutputErr != nil {
 				return
 			}
 		}
@@ -45,7 +62,7 @@ func (e *env) printOp(resp *api.OpResponse, headline string) {
 }
 
 func (e *env) effectInHeadline(resp *api.OpResponse, effect api.Effect, headline string) bool {
-	if headline == e.effectLine(effect) || schedulingEffectInHeadline(resp, effect, headline) || metadataEffectInHeadline(resp, effect, headline) {
+	if headline == e.effectLine(effect, paint{}) || schedulingEffectInHeadline(resp, effect, headline) || metadataEffectInHeadline(resp, effect, headline) {
 		return true
 	}
 	// AIDEV-NOTE: placement implies clearing reasons and the old deferral
@@ -96,10 +113,10 @@ func (e *env) effectInHeadline(resp *api.OpResponse, effect api.Effect, headline
 	}
 }
 
-// AIDEV-NOTE: strip the completion checkmark, then match the whole ID and
+// AIDEV-NOTE: compare the plain rendering, strip the completion checkmark, then match the whole ID and
 // title so words inside a user title cannot hide an unrelated effect (especially slips).
 func titledAction(task *api.Task, headline string) string {
-	action, ok := strings.CutPrefix(strings.TrimPrefix(headline, "✓ "), taskHeadline(task, ""))
+	action, ok := strings.CutPrefix(strings.TrimPrefix(headline, "✓ "), (paint{}).taskHeadline(task, ""))
 	if !ok {
 		return ""
 	}
@@ -139,7 +156,7 @@ func metadataEffectInHeadline(resp *api.OpResponse, effect api.Effect, headline 
 		}
 		if effect.Kind == "updated" {
 			for _, verb := range []string{"tag", "project", "priority"} {
-				if headline == metadataHeadline(task, verb) {
+				if headline == (paint{}).metadataHeadline(task, verb) {
 					return true
 				}
 			}
@@ -151,7 +168,7 @@ func metadataEffectInHeadline(resp *api.OpResponse, effect api.Effect, headline 
 // Only block and reblock end in the quoted task title after the block ID.
 func scheduledBlockHeadline(block *api.Block, headline string) bool {
 	return strings.HasPrefix(headline, fmt.Sprintf("b%d ", block.ID)) &&
-		strings.HasSuffix(headline, fmt.Sprintf(" #%d '%s'", block.TaskID, block.TaskTitle))
+		strings.HasSuffix(headline, fmt.Sprintf(" #%d '%s'", block.TaskID, textsafe.SanitizeLine(block.TaskTitle)))
 }
 
 func schedulingEffectInHeadline(resp *api.OpResponse, effect api.Effect, headline string) bool {
@@ -179,60 +196,65 @@ func schedulingEffectInHeadline(resp *api.OpResponse, effect api.Effect, headlin
 	return false
 }
 
-func (e *env) effectLine(effect api.Effect) string {
-	id := effect.TaskID
+func (e *env) effectLine(effect api.Effect, p paint) string {
+	id := p.taskID(effect.TaskID)
+	from, to := textsafe.SanitizeLine(effect.From), textsafe.SanitizeLine(effect.To)
 	switch effect.Kind {
 	case "deferred":
-		return fmt.Sprintf("#%d deferred to %s", id, e.relDate(effect.To))
+		return fmt.Sprintf("%s deferred to %s", id, e.relDate(to))
 	case "undeferred":
-		return fmt.Sprintf("#%d defer cleared", id)
+		return fmt.Sprintf("%s defer cleared", id)
 	case "due_set":
-		return fmt.Sprintf("#%d due %s", id, e.relDate(effect.To))
+		return id + " " + p.warn("due "+e.relDate(to))
 	case "due_cleared":
-		return fmt.Sprintf("#%d due date cleared", id)
+		return fmt.Sprintf("%s due date cleared", id)
 	case "blocked":
-		return fmt.Sprintf("b%d scheduled %s", effect.BlockID, e.relDate(effect.To))
+		return fmt.Sprintf("%s scheduled %s", p.blockID(effect.BlockID), e.relDate(to))
 	case "block_moved":
-		return fmt.Sprintf("b%d moved %s → %s", effect.BlockID, effect.From, effect.To)
+		return fmt.Sprintf("%s moved %s → %s", p.blockID(effect.BlockID), from, to)
 	case "block_cancelled":
 		if effect.To == "" {
-			return fmt.Sprintf("b%d cancelled", effect.BlockID)
+			return fmt.Sprintf("%s cancelled", p.blockID(effect.BlockID))
 		}
-		return fmt.Sprintf("b%d cancelled · %s", effect.BlockID, effect.To)
+		return fmt.Sprintf("%s cancelled · %s", p.blockID(effect.BlockID), to)
 	case "block_resolved":
 		if effect.To == "" {
-			return fmt.Sprintf("b%d resolved", effect.BlockID)
+			return fmt.Sprintf("%s resolved", p.blockID(effect.BlockID))
 		}
-		return fmt.Sprintf("b%d %s", effect.BlockID, effect.To)
+		return fmt.Sprintf("%s %s", p.blockID(effect.BlockID), p.status(to))
 	case "outcome_set":
-		return fmt.Sprintf("b%d marked %s", effect.BlockID, effect.To)
+		return fmt.Sprintf("%s marked %s", p.blockID(effect.BlockID), p.status(to))
 	case "slipped":
-		return fmt.Sprintf("b%d slipped", effect.BlockID)
+		return fmt.Sprintf("%s %s", p.blockID(effect.BlockID), p.bad("slipped"))
 	case "unslipped":
-		return fmt.Sprintf("b%d no longer counts as slipped", effect.BlockID)
+		return fmt.Sprintf("%s no longer counts as %s", p.blockID(effect.BlockID), p.bad("slipped"))
 	case "reason_added":
-		return fmt.Sprintf("#%d needs triage (%s)", id, effect.Reason)
+		return fmt.Sprintf("%s needs triage (%s)", id, p.reason(effect.Reason))
 	case "reason_removed":
-		return fmt.Sprintf("#%d no longer flagged %s", id, effect.Reason)
+		return fmt.Sprintf("%s no longer flagged %s", id, p.reason(effect.Reason))
 	case "focus_set":
-		return fmt.Sprintf("focus → #%d", id)
+		return fmt.Sprintf("focus → %s", id)
 	case "focus_cleared":
 		return "focus cleared"
 	case "interrupted":
-		return "interrupted #" + effect.From
+		return "interrupted " + p.id("#"+from)
 	case "retitled":
-		return fmt.Sprintf("#%d retitled '%s' → '%s'", id, effect.From, effect.To)
+		return fmt.Sprintf("%s retitled %s → %s", id, p.quotedTitle(from), p.quotedTitle(to))
 	case "entry_logged", "entry_updated", "entry_relinked", "entry_deleted", "entry_restored":
-		return fmt.Sprintf("e%d %s", effect.EntryID, strings.TrimPrefix(effect.Kind, "entry_"))
+		return fmt.Sprintf("%s %s", p.entryID(effect.EntryID), strings.TrimPrefix(effect.Kind, "entry_"))
 	case "reviewed":
-		return "AI changes reviewed through #" + effect.To
+		return "AI changes reviewed through " + p.id("#"+to)
 	case "reverted":
-		return domain.OpKind(effect.To).ReversalText(effect.Via, effect.From)
+		kind := domain.OpKind(to)
+		if from == "" {
+			return kind.ReversalText(effect.Via, "")
+		}
+		return kind.ReversalLabel(effect.Via, p.id("op "+from))
 	default:
-		return fmt.Sprintf("#%d %s", id, effect.Kind)
+		return fmt.Sprintf("%s %s", id, textsafe.SanitizeLine(effect.Kind))
 	}
 }
 
-func taskHeadline(task *api.Task, action string) string {
-	return fmt.Sprintf("#%d '%s' %s", task.ID, task.Title, action)
+func (p paint) taskHeadline(task *api.Task, action string) string {
+	return fmt.Sprintf("%s %s %s", p.taskID(task.ID), p.quotedTitle(task.Title), action)
 }

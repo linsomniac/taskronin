@@ -24,7 +24,7 @@ func TestTaskLine(t *testing.T) {
 		Due: &api.Moment{Date: civil.MustDate("2026-10-30")},
 	}
 	want := "#42  [slipped×1] Set up keycloak postgres cluster  infra.keycloak +db  due Fri"
-	if got := taskLine(task, today); got != want {
+	if got := taskLine(task, today, paint{}); got != want {
 		t.Fatalf("taskLine=%q; want %q", got, want)
 	}
 	for _, tc := range []struct {
@@ -46,7 +46,7 @@ func TestTaskLine(t *testing.T) {
 		{"unsafe text", api.Task{ID: 1, Title: "Title\n\x1b", Project: new("p\tq"), Tags: []string{"t\x1b"}, Reasons: []api.Reason{{Reason: "new\n"}}}, "#1  [new�] Title��  p�q +t�"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := taskLine(tc.task, today); got != tc.want {
+			if got := taskLine(tc.task, today, paint{}); got != tc.want {
 				t.Errorf("taskLine=%q; want %q", got, tc.want)
 			}
 		})

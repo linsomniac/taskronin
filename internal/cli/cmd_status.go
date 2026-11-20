@@ -32,12 +32,13 @@ func statusCommand(e *env) *cobra.Command {
 			if e.jsonOut {
 				return json.NewEncoder(e.out).Encode(view)
 			}
-			focus, block := "none", "none"
+			p := e.paint()
+			focus, block := "focus: none", "none"
 			if view.Focus != nil {
-				focus = fmt.Sprintf("#%d %s", view.Focus.ID, textsafe.SanitizeLine(view.Focus.Title))
+				focus = p.ok("focus:") + " " + p.taskID(view.Focus.ID) + " " + p.ok(textsafe.SanitizeLine(view.Focus.Title))
 			}
 			if b := view.CurrentBlock; b != nil {
-				block = fmt.Sprintf("b%d #%d %s (→%s)", b.ID, b.TaskID, textsafe.SanitizeLine(b.Title), b.End)
+				block = fmt.Sprintf("%s %s %s (→%s)", p.blockID(b.ID), p.taskID(b.TaskID), textsafe.SanitizeLine(b.Title), b.End)
 			}
 			health := func(warning bool) string {
 				if warning {
@@ -45,7 +46,7 @@ func statusCommand(e *env) *cobra.Command {
 				}
 				return "ok"
 			}
-			_, err = fmt.Fprintf(e.out, "focus: %s\ncurrent block: %s\ntriage: %d\ndue: %d\nai: %d\nbackup: %s\npurge: %s\n",
+			_, err = fmt.Fprintf(e.out, "%s\ncurrent block: %s\ntriage: %d\ndue: %d\nai: %d\nbackup: %s\npurge: %s\n",
 				focus, block, view.Triage, view.Due, view.AI, health(view.BackupWarn), health(view.PurgeWarning))
 			return err
 		},

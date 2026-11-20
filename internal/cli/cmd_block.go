@@ -89,15 +89,15 @@ func scheduleBlockCommand(e *env, verb string) *cobra.Command {
 			if res.Block == nil {
 				return fmt.Errorf("server response is missing the scheduled block")
 			}
-			return e.outputOp(res, e.blockHeadline(res.Block))
+			return e.outputOp(res, func(p paint) string { return e.blockHeadline(res.Block, p) })
 		},
 	}
 	cmd.Flags().StringVar(&date, "date", "", "Block date (default today)")
 	return cmd
 }
 
-func (e *env) blockHeadline(block *api.Block) string {
-	return fmt.Sprintf("b%d %s %s–%s #%d '%s'", block.ID, e.dayWord(block.Date), block.Start, block.End, block.TaskID, block.TaskTitle)
+func (e *env) blockHeadline(block *api.Block, p paint) string {
+	return fmt.Sprintf("%s %s %s–%s %s %s", p.blockID(block.ID), e.dayWord(block.Date), block.Start, block.End, p.taskID(block.TaskID), p.quotedTitle(block.TaskTitle))
 }
 
 func unblockCommand(e *env) *cobra.Command {
@@ -124,11 +124,12 @@ func unblockCommand(e *env) *cobra.Command {
 			if res.Block == nil {
 				return fmt.Errorf("server response is missing the unblocked block")
 			}
-			headline := fmt.Sprintf("b%d cancelled", res.Block.ID)
-			if res.Block.Status != "cancelled" {
-				headline = fmt.Sprintf("b%d resolved %s", res.Block.ID, res.Block.Status)
-			}
-			return e.outputOp(res, headline)
+			return e.outputOp(res, func(p paint) string {
+				if res.Block.Status != "cancelled" {
+					return p.blockID(res.Block.ID) + " resolved " + p.status(res.Block.Status)
+				}
+				return p.blockID(res.Block.ID) + " cancelled"
+			})
 		},
 	}
 }
@@ -160,7 +161,7 @@ func outcomeCommand(e *env) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return e.outputOp(res, fmt.Sprintf("b%d outcome %s", id, outcome))
+			return e.outputOp(res, func(p paint) string { return p.blockID(id) + " outcome " + p.status(outcome) })
 		},
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"taskronin/internal/client"
 	"taskronin/internal/datespec"
 	"taskronin/internal/editor"
+	"taskronin/internal/textsafe"
 )
 
 func init() { register(addCommand) }
@@ -112,6 +113,9 @@ func addCommand(e *env) *cobra.Command {
 				}
 				e.draftPath = ""
 			}
+			if e.jsonOut {
+				return e.outputOp(res, nil)
+			}
 			headline, err := e.addHeadline(res, req.Place)
 			if err != nil {
 				return err
@@ -165,30 +169,30 @@ func (e *env) editAddNotes(req *api.AddTaskRequest) (*editor.Draft, error) {
 	return draft, err
 }
 
-func (e *env) addHeadline(res *api.OpResponse, place *api.AddPlacement) (string, error) {
+func (e *env) addHeadline(res *api.OpResponse, place *api.AddPlacement) (opHeadline, error) {
 	if res.Task == nil {
-		return "", fmt.Errorf("server response is missing the added task")
+		return nil, fmt.Errorf("server response is missing the added task")
 	}
-	action := "added to triage (new)"
+	action := func(p paint) string { return "added to triage (" + p.warn("new") + ")" }
 	if place != nil {
 		switch place.How {
 		case "top", "bottom":
-			action = fmt.Sprintf("added to backlog (%s)", place.How)
+			action = plainHeadline(fmt.Sprintf("added to backlog (%s)", place.How))
 		case "after", "before":
-			action = fmt.Sprintf("added to backlog (%s #%d)", place.How, place.Ref)
+			action = func(p paint) string { return fmt.Sprintf("added to backlog (%s %s)", place.How, p.taskID(place.Ref)) }
 		case "defer":
 			if res.Task.Defer == nil {
-				return "", fmt.Errorf("server response is missing the task's deferral")
+				return nil, fmt.Errorf("server response is missing the task's deferral")
 			}
-			action = "added, deferred to " + e.momentWord(res.Task.Defer)
+			action = plainHeadline("added, deferred to " + e.momentWord(res.Task.Defer))
 		case "block":
 			var err error
 			action, err = e.addBlockAction(res)
 			if err != nil {
-				return "", err
+				return nil, err
 			}
 		case "now":
-			action = fmt.Sprintf("added, focus → #%d", res.Task.ID)
+			action = func(p paint) string { return "added, focus → " + p.taskID(res.Task.ID) }
 		}
 	}
 	var metadata []string
@@ -201,23 +205,29 @@ func (e *env) addHeadline(res *api.OpResponse, place *api.AddPlacement) (string,
 	if res.Task.Priority != nil {
 		metadata = append(metadata, "prio "+*res.Task.Priority)
 	}
-	if len(metadata) > 0 {
-		action += " · " + strings.Join(metadata, " ")
-	}
-	return taskHeadline(res.Task, action), nil
+	return func(p paint) string {
+		line := p.taskHeadline(res.Task, action(p))
+		if len(metadata) > 0 {
+			line += " · " + p.dim(textsafe.SanitizeLine(strings.Join(metadata, " ")))
+		}
+		return line
+	}, nil
 }
 
-func (e *env) addBlockAction(res *api.OpResponse) (string, error) {
+func (e *env) addBlockAction(res *api.OpResponse) (opHeadline, error) {
 	// AddTask returns its task plus effects. The block's resolved span is
 	// available even when the block is absent as a top-level response entity.
 	for _, effect := range res.Effects {
 		if effect.Kind == "blocked" && effect.TaskID == res.Task.ID {
 			span, err := datespec.ParseSpan(effect.To, datespec.Future, datespec.Ref{})
 			if err != nil {
-				return "", fmt.Errorf("invalid block in server response: %w", err)
+				return nil, fmt.Errorf("invalid block in server response: %w", err)
 			}
-			return fmt.Sprintf("added, blocked b%d %s %s–%s", effect.BlockID, e.dayWord(span.Date), span.Start, span.End), nil
+			day := e.dayWord(span.Date)
+			return func(p paint) string {
+				return fmt.Sprintf("added, blocked %s %s %s–%s", p.blockID(effect.BlockID), day, span.Start, span.End)
+			}, nil
 		}
 	}
-	return "", fmt.Errorf("server response is missing the added block")
+	return nil, fmt.Errorf("server response is missing the added block")
 }

@@ -42,21 +42,23 @@ func searchCommand(e *env) *cobra.Command {
 			if e.jsonOut {
 				return json.NewEncoder(e.out).Encode(result)
 			}
+			p := e.paint()
 			var out strings.Builder
 			for _, hit := range result.Items {
 				prefix := "#"
 				if hit.Kind == "entry" {
 					prefix = "e"
 				}
-				fmt.Fprintf(&out, "%s%d  %s", prefix, hit.ID, textsafe.Truncate(textsafe.SanitizeLine(hit.Title), 40, "…"))
+				id := p.id(fmt.Sprintf("%s%d", prefix, hit.ID))
+				fmt.Fprintf(&out, "%s  %s", id, textsafe.Truncate(textsafe.SanitizeLine(hit.Title), 40, "…"))
 				if hit.WorkDate != nil {
 					fmt.Fprintf(&out, "  %s", hit.WorkDate)
 				}
 				if hit.TaskID != nil {
-					fmt.Fprintf(&out, "  [#%d]", *hit.TaskID)
+					fmt.Fprintf(&out, "  [%s]", p.taskID(*hit.TaskID))
 				}
 				if hit.Status != "" {
-					fmt.Fprintf(&out, "  %s", textsafe.SanitizeLine(hit.Status))
+					fmt.Fprintf(&out, "  %s", p.status(hit.Status))
 				}
 				fmt.Fprintln(&out)
 				if hit.Snippet != "" {

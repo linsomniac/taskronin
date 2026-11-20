@@ -160,12 +160,15 @@ func (e *env) fail(err error) int {
 			e.errorLine("  %s: %s", field.Field, field.Message)
 		}
 		for _, c := range p.Conflicts {
-			e.errorLine("  op %.8s %s by %s at %s (%s %d)", c.OpID, c.Kind, c.Actor, c.At.Format("2006-01-02 15:04"), c.Entity, c.EntityID)
+			palette := e.paint()
+			detail := fmt.Sprintf("%s by %s at %s (%s %d)", c.Kind, c.Actor, c.At.Format("2006-01-02 15:04"), c.Entity, c.EntityID)
+			_, _ = fmt.Fprintf(e.err, "  %s %s\n", palette.shortOpID(c.OpID), palette.bad(textsafe.SanitizeLine(detail)))
 		}
 		if p.Status == http.StatusPreconditionFailed && len(p.Current) > 0 {
 			var current struct{ ID, Version int64 }
 			if json.Unmarshal(p.Current, &current) == nil && current.ID > 0 {
-				e.errorLine("  current: #%d version %d", current.ID, current.Version)
+				palette := e.paint()
+				_, _ = fmt.Fprintf(e.err, "  %s %s %s\n", palette.bad("current:"), palette.taskID(current.ID), palette.bad(fmt.Sprintf("version %d", current.Version)))
 			}
 		}
 	}

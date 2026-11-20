@@ -11,7 +11,6 @@ import (
 
 	"taskronin/internal/api"
 	"taskronin/internal/client"
-	"taskronin/internal/textsafe"
 )
 
 func init() {
@@ -67,7 +66,7 @@ func closeTaskCommand(e *env, verb string) *cobra.Command {
 			if res.Task == nil {
 				return fmt.Errorf("server response is missing the %s task", action)
 			}
-			return e.outputOp(res, taskHeadline(res.Task, action))
+			return e.outputOp(res, func(p paint) string { return p.taskHeadline(res.Task, action) })
 		},
 	}
 	if verb == "delete" || verb == "undelete" {
@@ -77,11 +76,12 @@ func closeTaskCommand(e *env, verb string) *cobra.Command {
 }
 
 func (e *env) confirmDelete(task *api.Task) (bool, error) {
-	return e.confirmDeletion(fmt.Sprintf("#%d '%s'", task.ID, task.Title))
+	p := e.paint()
+	return e.confirmDeletion(p.taskID(task.ID) + " " + p.quotedTitle(task.Title))
 }
 
 func (e *env) confirmDeletion(label string) (bool, error) {
-	if _, err := fmt.Fprintf(e.err, "Delete %s? [y/N] ", textsafe.SanitizeLine(label)); err != nil {
+	if _, err := fmt.Fprintf(e.err, "Delete %s? [y/N] ", label); err != nil {
 		return false, err
 	}
 	line, err := bufio.NewReader(e.in).ReadString('\n')

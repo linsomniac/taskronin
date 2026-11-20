@@ -14,11 +14,19 @@ import (
 	"taskronin/internal/civil"
 )
 
-func TestLsFormat(t *testing.T) {
+const plainLsFixture = "Triage\n  #1  [new] Keycloak  infra.keycloak +db\n\nBacklog\n  #2  Infrastructure  infrastructure\n"
+
+func seedLs(t *testing.T) sysDeps {
+	t.Helper()
 	_, sys := captureServer(t)
 	captureRun(t, sys, "", "add", "Keycloak", "-P", "infra.keycloak", "-t", "db")
 	captureRun(t, sys, "", "add", "Infrastructure", "-P", "infrastructure", "--bottom")
-	want := "Triage\n  #1  [new] Keycloak  infra.keycloak +db\n\nBacklog\n  #2  Infrastructure  infrastructure\n"
+	return sys
+}
+
+func TestLsFormat(t *testing.T) {
+	sys := seedLs(t)
+	want := plainLsFixture
 	if out := captureRun(t, sys, "", "ls"); out != want {
 		t.Fatalf("stdout=%q want=%q", out, want)
 	}
@@ -90,7 +98,12 @@ func TestShowSanitizes(t *testing.T) {
 				}
 			}
 		}
-		out = captureRun(t, sys, "", append([]string{"--socket", socket, "--token-file", token, "--json"}, args...)...)
+		colored := captureRun(t, sys, "", append([]string{"--socket", socket, "--token-file", token, "--color", "always"}, args...)...)
+		p := paint{on: true}
+		if !strings.Contains(colored, p.taskID(1)) || !strings.Contains(colored, p.entryID(9)) || colorSGR.ReplaceAllString(colored, "") != out {
+			t.Errorf("%v with color = %q", args, colored)
+		}
+		out = captureRun(t, sys, "", append([]string{"--socket", socket, "--token-file", token, "--json", "--color", "always"}, args...)...)
 		var entity struct{ Title, Notes string }
 		if err := json.Unmarshal([]byte(out), &entity); err != nil || entity.Title != unsafe || entity.Notes != notes || strings.ContainsAny(out, "\x1b\x07") {
 			t.Fatalf("JSON=%q err=%v", out, err)

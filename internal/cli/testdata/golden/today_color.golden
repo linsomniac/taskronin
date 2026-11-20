@@ -1,0 +1,22 @@
+Wed 2026-10-28 10:20 · America/Denver
+[33m⚠ 1 unreviewed AI changes.[m
+[32m▶[m [36m#4[m [32mRestart stuck pg replica[m
+
+[1mBlocks[m
+  [36mb1[m 09:00–11:00  [36m#2[m Set up keycloak postgres cluster  [32m◀ now[m
+
+[1mTriage 3[m
+  [36m#1[m  [33m[overdue,due,new][m Pay invoice  [31moverdue[m
+  [36m#3[m  [33m[new][m Write report
+  [36m#5[m  [33m[new][m AI suggestion
+
+[1mOverdue[m
+  [36m#1[m  [33m[overdue,due,new][m Pay invoice  [31moverdue[m
+
+[1mLog[m
+  - Restarted replica, root cause disk full  [[36m#4[m]
+
+[1mInterruptions[m
+  10:20 [36m#4[m 'Restart stuck pg replica' interrupted [36m#2[m (block 09:00–11:00)
+
+AI changes: 1 unreviewed — run `tkr ai-changes`

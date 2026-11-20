@@ -44,10 +44,10 @@ func editCommand(e *env) *cobra.Command {
 				if e.jsonOut {
 					return json.NewEncoder(e.out).Encode(task)
 				}
-				_, err := fmt.Fprintf(e.out, "#%d unchanged\n", id)
+				_, err := fmt.Fprintf(e.out, "%s unchanged\n", e.paint().taskID(id))
 				return err
 			}
-			return e.outputOp(res, fmt.Sprintf("#%d updated", id))
+			return e.outputOp(res, func(p paint) string { return p.taskID(id) + " updated" })
 		},
 	}
 }

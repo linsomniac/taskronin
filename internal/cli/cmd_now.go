@@ -1,8 +1,6 @@
 package cli
 
 import (
-	"fmt"
-
 	"github.com/spf13/cobra"
 
 	"taskronin/internal/api"
@@ -35,13 +33,13 @@ func nowCommand(e *env) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			headline := "focus cleared"
+			headline := plainHeadline("focus cleared")
 			if !clearFocus {
 				task, err := c.GetTask(e.ctx, req.TaskID.V)
 				if err != nil {
 					return err
 				}
-				headline = fmt.Sprintf("focus → #%d '%s'", task.ID, task.Title)
+				headline = func(p paint) string { return "focus → " + p.taskID(task.ID) + " " + p.quotedTitle(task.Title) }
 			}
 			// AIDEV-NOTE: focus is the API's explicit precondition exception
 			// (A§3.5); a task ETag does not guard the focus singleton.

@@ -5,10 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"go/parser"
+	"go/token"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 
 	"taskronin/internal/api"
@@ -615,15 +619,28 @@ func TestCaptureEffects(t *testing.T) {
 		}
 	}
 	res.Effects = append(res.Effects, api.Effect{Kind: "future_kind", TaskID: 42})
-	e.printOp(res, "Effects")
+	e.printOp(res, plainHeadline("Effects"))
 	testutil.Golden(t, "effects", out.Bytes())
+	plain := out.String()
+	out.Reset()
+	e.color, e.colorSet = "always", true
+	e.printOp(res, plainHeadline("Effects"))
+	p := paint{on: true}
+	for _, token := range []string{p.taskID(42), p.blockID(7), p.entryID(9), p.id("op abcdef12"), p.warn("due Sat 2026-10-31"), p.bad("slipped"), p.ok("worked")} {
+		if !strings.Contains(out.String(), token) {
+			t.Errorf("missing effect token %q", token)
+		}
+	}
+	if colorSGR.ReplaceAllString(out.String(), "") != plain {
+		t.Errorf("color changed plain effects: %q", out.String())
+	}
 }
 
 func TestCaptureEffectsSanitized(t *testing.T) {
 	var out bytes.Buffer
 	e := &env{out: &out}
 	res := &api.OpResponse{Effects: []api.Effect{{Kind: "retitled", TaskID: 1, From: "Old\nline", To: "New\tname\x1b[31m"}}}
-	e.printOp(res, "Headline\r\x1b[2J")
+	e.printOp(res, plainHeadline("Headline\r\x1b[2J"))
 	want := "Headline��[2J\n#1 retitled 'Old�line' → 'New�name�[31m'\n"
 	if out.String() != want {
 		t.Fatalf("unsanitized output: %q; want %q", out.String(), want)
@@ -632,7 +649,7 @@ func TestCaptureEffectsSanitized(t *testing.T) {
 	out.Reset()
 	res.Task = &api.Task{ID: 1, Title: "completed; ✓ logged b7 slipped"}
 	res.Effects = []api.Effect{{Kind: "created", TaskID: 1}, {Kind: "slipped", TaskID: 1, BlockID: 7}, {Kind: "reason_added", TaskID: 2, Reason: "new"}}
-	e.printOp(res, taskHeadline(res.Task, "added to triage (new)"))
+	e.printOp(res, func(p paint) string { return p.taskHeadline(res.Task, "added to triage (new)") })
 	if !strings.HasSuffix(out.String(), "b7 slipped\n#2 needs triage (new)\n") || strings.Contains(out.String(), "#1 created") {
 		t.Fatalf("incorrect effect suppression: %q", out.String())
 	}
@@ -658,7 +675,7 @@ func TestCaptureOutputFailure(t *testing.T) {
 		name      string
 		remaining int
 	}{
-		{"headline", 0}, {"effect", 1},
+		{"headline", 0}, {"effect", 1}, {"tally", 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv, sys := captureServer(t)
@@ -668,7 +685,7 @@ func TestCaptureOutputFailure(t *testing.T) {
 			out := &captureFailWriter{remaining: tc.remaining, err: writeErr}
 			var stderr bytes.Buffer
 			code := run(t.Context(), []string{"done", "1"}, strings.NewReader(""), out, &stderr, sys)
-			if code != 1 || !strings.Contains(stderr.String(), writeErr.Error()) || strings.Contains(stderr.String(), "nothing was saved") {
+			if code != 1 || !strings.Contains(stderr.String(), "write operation output: "+writeErr.Error()) || strings.Contains(stderr.String(), "nothing was saved") {
 				t.Errorf("exit=%d stdout=%q stderr=%q", code, out.String(), stderr.String())
 			}
 			if out.writes != tc.remaining+1 {
@@ -690,9 +707,9 @@ func TestCapturePrintOpPreservesError(t *testing.T) {
 	out := &captureFailWriter{err: first}
 	e := &env{out: out}
 	res := &api.OpResponse{Effects: []api.Effect{{Kind: "slipped", BlockID: 7}}}
-	e.printOp(res, "Headline")
+	e.printOp(res, plainHeadline("Headline"))
 	out.err = errors.New("later output failure")
-	if err := e.outputOp(res, "Next headline"); !errors.Is(err, first) {
+	if err := e.outputOp(res, plainHeadline("Next headline")); !errors.Is(err, first) {
 		t.Fatalf("outputOp error=%v; want original write error", err)
 	}
 	if out.writes != 1 {
@@ -815,5 +832,162 @@ func TestPlacementSuppressesOnlyAffectedTasks(t *testing.T) {
 		if hidden := e.effectInHeadline(resp, effect, headline); hidden != tc.hidden {
 			t.Errorf("%s on #%d: hidden=%t, want %t", tc.kind, tc.taskID, hidden, tc.hidden)
 		}
+	}
+}
+
+var colorSGR = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+func TestColorNeverMatchesPlain(t *testing.T) {
+	for _, mode := range []string{"never", "auto (non-TTY)", "NO_COLOR"} {
+		t.Run(mode, func(t *testing.T) { checkColorOutputs(t, mode) })
+	}
+}
+
+func TestColorAlwaysStripsToPlain(t *testing.T) {
+	checkColorOutputs(t, "always")
+}
+
+func checkColorOutputs(t *testing.T, mode string) {
+	t.Helper()
+	for _, command := range []string{"ls", "today", "done"} {
+		t.Run(command, func(t *testing.T) {
+			var sys sysDeps
+			var want string
+			args := []string{command}
+			switch command {
+			case "ls":
+				sys = seedLs(t)
+				want = plainLsFixture
+			case "today":
+				sys = seedDashboard(t)
+			case "done":
+				srv, deps := captureServer(t)
+				sys = deps
+				captureTask(t, srv, "Set up keycloak")
+				args = append(args, "1")
+			}
+			if command != "ls" {
+				name := map[string]string{"today": "dashboard", "done": "done"}[command]
+				b, err := os.ReadFile(filepath.Join("testdata", "golden", name+".golden"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				want = string(b)
+			}
+			switch mode {
+			case "NO_COLOR":
+				t.Setenv("NO_COLOR", "1")
+				sys.StdoutTTY = true
+			case "always", "never":
+				args = append(args, "--color", mode)
+			}
+			out := captureRun(t, sys, "", args...)
+			plain := out
+			if mode == "always" {
+				plain = colorSGR.ReplaceAllString(out, "")
+				if plain == out {
+					t.Fatal("--color always emitted no SGR sequences")
+				}
+				testutil.Golden(t, command+"_color", []byte(out))
+			}
+			if plain != want {
+				t.Fatalf("plain=%q want=%q", plain, want)
+			}
+		})
+	}
+}
+
+func TestColorSanitizesBeforeStyling(t *testing.T) {
+	sys, _ := testSys(t)
+	socket, token := fakeAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/tasks" {
+			t.Errorf("unexpected %s %s", r.Method, r.URL)
+		}
+		writeJSON(t, w, api.OpResponse{Task: &api.Task{ID: 1, Title: "Bad\x1b[31mtitle"}})
+	}))
+	out := captureRun(t, sys, "", "--socket", socket, "--token-file", token, "add", "requested title", "--color", "always")
+	if !strings.Contains(out, "'"+(paint{on: true}).strong("Bad�[31mtitle")+"'") {
+		t.Errorf("expected a sanitized, bold title inside plain quotes: %q", out)
+	}
+	palette := regexp.MustCompile(`\x1b\[(0|1|31|32|33|36|90)?m`)
+	if strings.Contains(palette.ReplaceAllString(out, ""), "\x1b") {
+		t.Fatalf("unexpected escape in %q", out)
+	}
+}
+
+func TestLipglossOnlyInPaint(t *testing.T) {
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range files {
+		if file == "paint.go" || strings.HasSuffix(file, "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(token.NewFileSet(), file, nil, parser.ImportsOnly)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, imp := range f.Imports {
+			if strings.Trim(imp.Path.Value, "\"`") == "charm.land/lipgloss/v2" {
+				t.Errorf("%s imports lipgloss directly", file)
+			}
+		}
+	}
+}
+
+func TestAddDeferJSONClockReads(t *testing.T) {
+	sys, _ := testSys(t)
+	var mu sync.Mutex
+	var requests []string
+	socket, token := fakeAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch r.URL.Path {
+		case "/api/v1/clock":
+			requests = append(requests, r.Method+" /clock")
+			writeJSON(t, w, api.Clock{Today: civil.MustDate("2026-10-28"), WeekStart: "monday"})
+		case "/api/v1/tasks":
+			requests = append(requests, r.Method+" /tasks")
+
+			// A valid JSON echo does not need data for the text headline.
+			writeJSON(t, w, api.OpResponse{Task: &api.Task{ID: 1, Title: "x"}})
+		default:
+			t.Errorf("unexpected request %s", r.URL)
+			http.NotFound(w, r)
+		}
+	}))
+	out := captureRun(t, sys, "", "--socket", socket, "--token-file", token, "add", "x", "--defer", "tomorrow", "--json")
+	mu.Lock()
+	defer mu.Unlock()
+	if !json.Valid([]byte(out)) || strings.Join(requests, ", ") != "GET /clock, POST /tasks" {
+		t.Errorf("requests=%v output=%q", requests, out)
+	}
+}
+
+func TestNewTaskPlacementHeadlineOnly(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"block", "1", "13:00-14:00"}, "b1 today 13:00–14:00 #1 'First'"},
+		{[]string{"move", "1", "top"}, "#1 moved top"},
+		{[]string{"defer", "1", "tomorrow"}, "#1 deferred to tomorrow"},
+	} {
+		t.Run(tc.args[0], func(t *testing.T) {
+			srv, sys := captureServer(t)
+			captureTask(t, srv, "First")
+			if got := captureRun(t, sys, "", tc.args...); got != tc.want+"\n" {
+				t.Fatalf("output=%q", got)
+			}
+		})
+	}
+}
+
+func TestOutputReversalFallback(t *testing.T) {
+	var out bytes.Buffer
+	e := &env{out: &out}
+	if err := e.outputReversal(&api.OpResponse{OpID: new("0123456789abcdef")}, "undone"); err != nil || out.String() != "undone (op 01234567)\n" {
+		t.Fatalf("output=%q err=%v", out.String(), err)
 	}
 }

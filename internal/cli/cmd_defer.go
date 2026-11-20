@@ -59,16 +59,19 @@ func momentCommand(e *env, verb string) *cobra.Command {
 			if res.Task == nil {
 				return fmt.Errorf("server response is missing the task")
 			}
-			headline := fmt.Sprintf("#%d due date cleared", res.Task.ID)
-			if verb == "defer" {
-				headline = fmt.Sprintf("#%d defer cleared", res.Task.ID)
-				if res.Task.Defer != nil {
-					headline = fmt.Sprintf("#%d deferred to %s", res.Task.ID, e.momentWord(res.Task.Defer))
+			return e.outputOp(res, func(p paint) string {
+				id := p.taskID(res.Task.ID)
+				if verb == "defer" {
+					if res.Task.Defer == nil {
+						return id + " defer cleared"
+					}
+					return id + " deferred to " + e.momentWord(res.Task.Defer)
 				}
-			} else if res.Task.Due != nil {
-				headline = fmt.Sprintf("#%d due %s", res.Task.ID, e.momentWord(res.Task.Due))
-			}
-			return e.outputOp(res, headline)
+				if res.Task.Due == nil {
+					return id + " due date cleared"
+				}
+				return id + " " + p.warn("due "+e.momentWord(res.Task.Due))
+			})
 		},
 	}
 }

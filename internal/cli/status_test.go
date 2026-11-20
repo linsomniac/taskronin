@@ -25,7 +25,8 @@ import (
 	"taskronin/internal/testutil"
 )
 
-func TestDashboardGolden(t *testing.T) {
+func seedDashboard(t *testing.T) sysDeps {
+	t.Helper()
 	srv := testutil.StartServer(t, testutil.WithClock("2026-10-26 08:00"))
 	sys := sysDeps{Getenv: os.Getenv, StdinTTY: true}
 	captureRun(t, sys, "", "add", "Pay invoice", "--due", "2026-10-27")
@@ -40,6 +41,11 @@ func TestDashboardGolden(t *testing.T) {
 		t.Fatal(err)
 	}
 	statusBackup(t, srv)
+	return sys
+}
+
+func TestDashboardGolden(t *testing.T) {
+	sys := seedDashboard(t)
 	out := captureRun(t, sys, "")
 	for _, want := range []string{
 		"Wed 2026-10-28 10:20 · America/Denver\n",
@@ -420,8 +426,13 @@ func TestStatusLong(t *testing.T) {
 	if out := captureRun(t, sys, "", "status"); out != want {
 		t.Fatalf("stdout=%q; want %q", out, want)
 	}
+	p := paint{on: true}
+	colored := captureRun(t, sys, "", "status", "--color", "always")
+	if !strings.Contains(colored, p.taskID(1)+" "+p.ok("Focus")) || colorSGR.ReplaceAllString(colored, "") != want {
+		t.Errorf("long status with color = %q", colored)
+	}
 	var status api.Status
-	if err := json.Unmarshal([]byte(captureRun(t, sys, "", "status", "--json")), &status); err != nil || status.Focus == nil || status.Focus.ID != 1 {
+	if err := json.Unmarshal([]byte(captureRun(t, sys, "", "status", "--json", "--color", "always")), &status); err != nil || status.Focus == nil || status.Focus.ID != 1 {
 		t.Fatalf("status JSON: %+v, %v", status, err)
 	}
 	srv.Stop()

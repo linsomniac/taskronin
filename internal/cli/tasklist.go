@@ -11,7 +11,7 @@ import (
 )
 
 // taskLine renders the shared compact task row in terminal columns.
-func taskLine(t api.Task, today civil.Date) string {
+func taskLine(t api.Task, today civil.Date, p paint) string {
 	title := textsafe.Truncate(textsafe.SanitizeLine(t.Title), 40, "…")
 	if len(t.Reasons) > 0 {
 		reasons := make([]string, 0, len(t.Reasons))
@@ -22,9 +22,9 @@ func taskLine(t api.Task, today civil.Date) string {
 			}
 			reasons = append(reasons, label)
 		}
-		title = "[" + strings.Join(reasons, ",") + "] " + title
+		title = p.warn("["+strings.Join(reasons, ",")+"]") + " " + title
 	}
-	columns := []string{fmt.Sprintf("#%d", t.ID), title}
+	columns := []string{p.taskID(t.ID), title}
 	var metadata []string
 	if t.Project != nil && *t.Project != "" {
 		metadata = append(metadata, textsafe.SanitizeLine(*t.Project))
@@ -33,16 +33,16 @@ func taskLine(t api.Task, today civil.Date) string {
 		metadata = append(metadata, "+"+textsafe.SanitizeLine(tag))
 	}
 	if len(metadata) > 0 {
-		columns = append(columns, strings.Join(metadata, " "))
+		columns = append(columns, p.dim(strings.Join(metadata, " ")))
 	}
 	if t.DuePhase == "overdue" {
-		columns = append(columns, "overdue")
+		columns = append(columns, p.bad("overdue"))
 	} else if t.Due != nil {
 		date := t.Due.Date.String()
 		if !t.Due.Date.Before(today) && !t.Due.Date.After(today.AddDays(6)) {
 			date = t.Due.Date.Weekday().String()[:3]
 		}
-		columns = append(columns, "due "+date)
+		columns = append(columns, p.warn("due "+date))
 	}
 	return strings.Join(columns, "  ")
 }

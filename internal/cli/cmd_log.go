@@ -10,7 +10,6 @@ import (
 	"taskronin/internal/client"
 	"taskronin/internal/datespec"
 	"taskronin/internal/editor"
-	"taskronin/internal/textsafe"
 )
 
 func init() { register(logCommand) }
@@ -75,6 +74,7 @@ func logCommand(e *env) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			p := e.paint()
 			link := ""
 			if implicit {
 				status, _, _, err := c.Status(e.ctx, "")
@@ -86,10 +86,10 @@ func logCommand(e *env) *cobra.Command {
 				switch {
 				case status.Focus != nil:
 					req.TaskID = api.Opt[int64]{Set: true, V: status.Focus.ID}
-					link = fmt.Sprintf("→ #%d (focus)", status.Focus.ID)
+					link = fmt.Sprintf("→ %s (focus)", p.taskID(status.Focus.ID))
 				case status.CurrentBlock != nil:
 					req.TaskID = api.Opt[int64]{Set: true, V: status.CurrentBlock.TaskID}
-					link = fmt.Sprintf("→ #%d (current block)", status.CurrentBlock.TaskID)
+					link = fmt.Sprintf("→ %s (current block)", p.taskID(status.CurrentBlock.TaskID))
 				default:
 					link = "→ no task"
 				}
@@ -121,13 +121,13 @@ func logCommand(e *env) *cobra.Command {
 			}
 			day := entry.WorkDate.Weekday().String()[:3] + " " + entry.WorkDate.String()
 			if entry.TaskID == nil {
-				_, err = fmt.Fprintf(e.out, "e%d logged %s (no task)\n", entry.ID, day)
+				_, err = fmt.Fprintf(e.out, "%s logged %s (no task)\n", p.entryID(entry.ID), day)
 			} else {
 				title := ""
 				if entry.TaskTitle != nil {
-					title = textsafe.SanitizeLine(*entry.TaskTitle)
+					title = *entry.TaskTitle
 				}
-				_, err = fmt.Fprintf(e.out, "e%d logged %s on #%d '%s'\n", entry.ID, day, *entry.TaskID, title)
+				_, err = fmt.Fprintf(e.out, "%s logged %s on %s %s\n", p.entryID(entry.ID), day, p.taskID(*entry.TaskID), p.quotedTitle(title))
 			}
 			return err
 		},
