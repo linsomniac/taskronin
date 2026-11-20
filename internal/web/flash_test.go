@@ -111,6 +111,7 @@ func TestFlashLinesEffectVariants(t *testing.T) {
 		want   string
 	}{
 		{service.Effect{Kind: service.EffBlockCancelled, BlockID: 7}, "b7 cancelled"},
+		{service.Effect{Kind: service.EffBlockMoved, BlockID: 7}, "b7 moved"},
 		{service.Effect{Kind: service.EffBlockResolved, BlockID: 7}, "b7 resolved"},
 		{service.Effect{Kind: service.EffReverted, Via: "undo", From: "abcdef12", To: "task.complete"}, "undid complete (op abcdef12)"},
 		{service.Effect{Kind: service.EffReverted, Via: "redo", From: "abcdef13", To: "entry.add"}, "redid log (op abcdef13)"},

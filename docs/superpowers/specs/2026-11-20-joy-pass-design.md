@@ -148,8 +148,12 @@ and `undeferred` lines for the placed task are suppressed; `reason_added` and
 starting at `RevertsOpID`, it follows `RevertsOpID` while the target is itself
 a reversal (`Via != ""`, at most 8 hops) and stops at the first user op. The
 effect then carries `From` = that root op's 8-char ID, `To` = that root op's
-kind, and a new `Via` field = the reversing op's own `Via` (`undo`, `redo` or
-`revert`). `Via` is added to `service.Effect` and `api.Effect`
+kind, and a new `Via` field = the **net direction** of the chain: with an odd
+number of reversal ops between the user and the root (a plain undo, a plain
+revert) `Via` is the reversing op's own via (`undo` or `revert`); with an even
+number (redo of an undo, undo of a revert, revert of an undo, revert of a
+revert) the root op is back in effect and `Via` is `redo`. `Via` is added to
+`service.Effect` and `api.Effect`
 (`json:"via,omitempty"`); it is the one additive API change of this pass. The
 lookup happens at read time (ops are never deleted), so history, replays and
 live responses all carry it; no migration. Rendering, in every mirror:

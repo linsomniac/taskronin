@@ -50,6 +50,9 @@ func effectLine(effect service.Effect) string {
 	case service.EffBlocked:
 		return fmt.Sprintf("b%d scheduled %s", effect.BlockID, domain.BlockSpanText(effect.To))
 	case service.EffBlockMoved:
+		if effect.From == "" && effect.To == "" { // In-place reblock: the service sends no spans.
+			return fmt.Sprintf("b%d moved", effect.BlockID)
+		}
 		return fmt.Sprintf("b%d moved %s → %s", effect.BlockID, domain.BlockSpanText(effect.From), domain.BlockSpanText(effect.To))
 	case service.EffBlockCancelled:
 		if effect.To == "" {

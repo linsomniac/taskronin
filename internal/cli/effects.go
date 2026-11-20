@@ -224,6 +224,11 @@ func (e *env) formatEffect(effect api.Effect, p paint) string {
 	case "blocked":
 		return fmt.Sprintf("%s scheduled %s", p.blockID(effect.BlockID), e.relDate(domain.BlockSpanText(to)))
 	case "block_moved":
+		// AIDEV-NOTE: the service emits block_moved without spans for an
+		// in-place reblock; never print a dangling arrow for it.
+		if from == "" && to == "" {
+			return fmt.Sprintf("%s moved", p.blockID(effect.BlockID))
+		}
 		return fmt.Sprintf("%s moved %s → %s", p.blockID(effect.BlockID), e.movedSpanText(from), e.movedSpanText(to))
 	case "block_cancelled":
 		if effect.To == "" {

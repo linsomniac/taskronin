@@ -641,6 +641,7 @@ func TestBlockMovedSpanWording(t *testing.T) {
 	for _, tc := range []struct{ from, to, want string }{
 		{"13:00-15:00", "2026-10-29 15:00-17:00", "b7 moved 13:00–15:00 → tomorrow 15:00–17:00"},
 		{"task_closed", "note 13:00-15:00", "b7 moved task_closed → note 13:00-15:00"},
+		{"", "", "b7 moved"}, // In-place reblock: the service sends no spans.
 	} {
 		got := e.effectLine(api.Effect{Kind: "block_moved", BlockID: 7, From: tc.from, To: tc.to}, paint{})
 		if got != tc.want {
