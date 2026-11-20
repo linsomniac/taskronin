@@ -791,7 +791,7 @@ func TestUpdateEventCompanions(t *testing.T) {
 				t.Fatal(err)
 			}
 			e := domain.Event{Entity: tt.entity, EntityID: 9, TaskID: sql.Null[domain.TaskID]{V: 7, Valid: true}, Action: domain.ActUpdate, Before: bj, After: aj}
-			if got := effectsFromEvents(domain.OpRecord{}, []domain.Event{e}); !reflect.DeepEqual(got, []Effect{tt.want}) {
+			if got := effectsFromEvents(domain.OpRecord{}, nil, []domain.Event{e}); !reflect.DeepEqual(got, []Effect{tt.want}) {
 				t.Errorf("effects = %+v, want %+v", got, tt.want)
 			}
 		})
@@ -812,7 +812,7 @@ func TestUpdateEventCompanions(t *testing.T) {
 	t.Run("missing outcome source is not automatic", func(t *testing.T) {
 		e := domain.Event{Entity: domain.EntBlock, Action: domain.ActUpdate,
 			Before: json.RawMessage(`{"status":"worked"}`), After: json.RawMessage(`{"status":"missed"}`)}
-		if got := effectsFromEvents(domain.OpRecord{}, []domain.Event{e}); len(got) != 0 {
+		if got := effectsFromEvents(domain.OpRecord{}, nil, []domain.Event{e}); len(got) != 0 {
 			t.Fatalf("inferred missing source: %+v", got)
 		}
 	})

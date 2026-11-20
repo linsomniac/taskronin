@@ -292,7 +292,7 @@ func (s *Service) runEntered(ctx context.Context, m Meta, spec opSpec, fn func(*
 	// reader pool; done is idempotent so the deferred call is harmless.
 	done()
 	r := &OpResult{OpID: o.rec.ID, Created: o.created, NoChange: noChange, Refs: o.refs,
-		Effects: effectsFromEvents(o.rec, o.events), Warnings: o.warnings}
+		Effects: effectsFromEvents(o.rec, o.target, o.events), Warnings: o.warnings}
 	if noChange {
 		r.OpID = domain.OpID{}
 		r.Created = false

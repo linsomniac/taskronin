@@ -52,6 +52,27 @@ func TestEffectKindsMatchDeclarations(t *testing.T) {
 	}
 }
 
+func TestEffectsFromEventsRevertedCarriesKind(t *testing.T) {
+	id := domain.NewOpID()
+	rec := domain.OpRecord{Via: "undo", RevertsOpID: sql.Null[domain.OpID]{V: id, Valid: true}}
+	target := &domain.OpRecord{ID: id, Kind: domain.OpTaskComplete}
+	evs := []domain.Event{{Entity: domain.EntTask, Action: domain.ActUpdate,
+		Before: json.RawMessage(`{"status":"done"}`), After: json.RawMessage(`{"status":"open"}`)}}
+	for _, tt := range []struct {
+		target *domain.OpRecord
+		wantTo string
+	}{
+		{target, "task.complete"},
+		{nil, ""},
+	} {
+		got := service.EffectsFromEventsForTest(rec, tt.target, evs)
+		want := service.Effect{Kind: service.EffReverted, From: id.String()[:8], To: tt.wantTo}
+		if len(got) == 0 || got[0] != want {
+			t.Errorf("target %v: effects = %+v, want first effect %+v", tt.target, got, want)
+		}
+	}
+}
+
 func TestEffectsFromEvents(t *testing.T) {
 	id := domain.NewOpID()
 	undo := domain.OpRecord{Kind: domain.OpUndo, Via: "undo", RevertsOpID: sql.Null[domain.OpID]{V: id, Valid: true}}
@@ -102,25 +123,25 @@ func TestEffectsFromEvents(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			ev := domain.Event{Entity: tt.entity, EntityID: 9, TaskID: sql.Null[domain.TaskID]{V: 7, Valid: true}, Action: tt.action, Before: json.RawMessage(tt.before), After: json.RawMessage(tt.after)}
-			if got := service.EffectsFromEventsForTest(domain.OpRecord{}, []domain.Event{ev}); !reflect.DeepEqual(got, tt.want) {
+			if got := service.EffectsFromEventsForTest(domain.OpRecord{}, nil, []domain.Event{ev}); !reflect.DeepEqual(got, tt.want) {
 				t.Fatalf("effects = %+v, want %+v", got, tt.want)
 			}
 		})
 	}
 	t.Run("undo without events", func(t *testing.T) {
-		if got := service.EffectsFromEventsForTest(undo, nil); got == nil || len(got) != 0 {
+		if got := service.EffectsFromEventsForTest(undo, nil, nil); got == nil || len(got) != 0 {
 			t.Fatalf("effects = %+v, want []", got)
 		}
 	})
 	t.Run("undo with focus", func(t *testing.T) {
 		evs := []domain.Event{{Entity: domain.EntFocus, Action: domain.ActSet, TaskID: sql.Null[domain.TaskID]{V: 7, Valid: true}, After: json.RawMessage(`{"task_id":7}`)}}
 		want := []service.Effect{{Kind: service.EffReverted, From: id.String()[:8]}, {Kind: service.EffFocusSet, TaskID: 7}}
-		if got := service.EffectsFromEventsForTest(undo, evs); !reflect.DeepEqual(got, want) {
+		if got := service.EffectsFromEventsForTest(undo, nil, evs); !reflect.DeepEqual(got, want) {
 			t.Fatalf("effects = %+v, want %+v", got, want)
 		}
 	})
 	t.Run("review once", func(t *testing.T) {
-		got := service.EffectsFromEventsForTest(domain.OpRecord{Kind: domain.OpAIReview}, []domain.Event{{Entity: domain.EntSetting}, {Entity: domain.EntSetting, Action: domain.ActUpdate, After: json.RawMessage(`{"key":"ai_reviewed_through","value":"123"}`)}})
+		got := service.EffectsFromEventsForTest(domain.OpRecord{Kind: domain.OpAIReview}, nil, []domain.Event{{Entity: domain.EntSetting}, {Entity: domain.EntSetting, Action: domain.ActUpdate, After: json.RawMessage(`{"key":"ai_reviewed_through","value":"123"}`)}})
 		if !reflect.DeepEqual(got, []service.Effect{{Kind: service.EffReviewed, To: "123"}}) {
 			t.Fatalf("effects = %+v", got)
 		}

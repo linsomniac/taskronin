@@ -102,8 +102,8 @@ func (s *Service) replayIdem(ctx context.Context, row store.IdemRow) (*OpResult,
 			if err != nil {
 				return err
 			}
-			r.Effects = effectsFromEvents(rec, events)
-			return nil
+			r.Effects, err = persistedEffects(ctx, q, rec, events)
+			return err
 		})
 		if err != nil {
 			return nil, err

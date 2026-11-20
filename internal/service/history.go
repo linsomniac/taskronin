@@ -148,7 +148,10 @@ func (s *Service) GetOp(ctx context.Context, a domain.Actor, id domain.OpID) (Op
 		if err != nil {
 			return err
 		}
-		detail.Op.Effects = effectsFromEvents(rec, events)
+		detail.Op.Effects, err = persistedEffects(ctx, q, rec, events)
+		if err != nil {
+			return err
+		}
 		detail.Events = make([]EventView, 0, len(events))
 		for _, event := range events {
 			detail.Events = append(detail.Events, eventView(event, detail.Op))
@@ -159,6 +162,21 @@ func (s *Service) GetOp(ctx context.Context, a domain.Actor, id domain.OpID) (Op
 		return OpDetail{}, err
 	}
 	return detail, nil
+}
+
+func persistedEffects(ctx context.Context, q store.Q, rec domain.OpRecord, events []domain.Event) ([]Effect, error) {
+	var target *domain.OpRecord
+	if rec.RevertsOpID.Valid {
+		// AIDEV-NOTE: The target kind is decoration. A missing target must not fail history or a replay.
+		op, err := store.GetOp(ctx, q, rec.RevertsOpID.V)
+		switch {
+		case err == nil:
+			target = &op
+		case !errors.Is(err, store.ErrNotFound):
+			return nil, err
+		}
+	}
+	return effectsFromEvents(rec, target, events), nil
 }
 
 func opSummary(ctx context.Context, q store.Q, rec domain.OpRecord) (OpSummary, error) {
@@ -199,7 +217,10 @@ func opPage(ctx context.Context, q store.Q, view domain.View, query store.OpQuer
 		if err != nil {
 			return Page[OpSummary]{}, err
 		}
-		summary.Effects = effectsFromEvents(rec, events)
+		summary.Effects, err = persistedEffects(ctx, q, rec, events)
+		if err != nil {
+			return Page[OpSummary]{}, err
+		}
 		page.Items = append(page.Items, summary)
 	}
 	return page, nil

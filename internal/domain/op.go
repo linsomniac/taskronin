@@ -86,6 +86,60 @@ const (
 	OpSystemRestore OpKind = "system.restore"
 )
 
+// Verb is the human verb for messages (J§4.2); the mirrors in cli, web and tui all use it.
+func (k OpKind) Verb() string {
+	switch k {
+	case OpTaskAdd:
+		return "add"
+	case OpTaskUpdate:
+		return "edit"
+	case OpTaskDue:
+		return "due"
+	case OpTaskPlace:
+		return "place"
+	case OpTaskAcceptNew:
+		return "accept new"
+	case OpTaskDefer:
+		return "defer"
+	case OpTaskManual:
+		return "send to triage"
+	case OpTaskComplete:
+		return "complete"
+	case OpTaskReopen:
+		return "reopen"
+	case OpTaskDrop:
+		return "drop"
+	case OpTaskDelete:
+		return "delete"
+	case OpTaskUndelete:
+		return "undelete"
+	case OpBlockCreate:
+		return "block"
+	case OpBlockReblock:
+		return "reblock"
+	case OpBlockUnblock:
+		return "unblock"
+	case OpBlockOutcome:
+		return "outcome"
+	case OpEntryAdd:
+		return "log"
+	case OpEntryUpdate:
+		return "edit entry"
+	case OpEntryRelink:
+		return "relink entry"
+	case OpEntryDelete:
+		return "delete entry"
+	case OpEntryUndelete:
+		return "restore entry"
+	case OpFocusSet:
+		return "focus"
+	case OpRevert:
+		return "revert"
+	default:
+		return string(k)
+	}
+}
+
 // OpState is an operation's current reversal state.
 type OpState string
 
