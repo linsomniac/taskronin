@@ -17,8 +17,10 @@ import (
 	"time"
 
 	"taskronin/internal/api"
+	"taskronin/internal/civil"
 	"taskronin/internal/client"
 	"taskronin/internal/config"
+	"taskronin/internal/datespec"
 	"taskronin/internal/domain"
 	"taskronin/internal/testutil"
 )
@@ -129,20 +131,41 @@ func TestProblemErrorHint(t *testing.T) {
 func TestUsagePrefixAudit(t *testing.T) {
 	_, sys := captureServer(t)
 	for _, tc := range []struct {
-		args []string
-		want string
+		args       []string
+		want, wire string
 	}{
-		{[]string{"reblock", "1", "9:00-26:00"}, `block end "26:00": hour out of range`},
-		{[]string{"add", "x", "--block", "9:00-26:00"}, `block end "26:00": hour out of range`},
-		{[]string{"log", "-N", "x", "--at", "9:60"}, `--at "9:60": minutes out of range`},
-		{[]string{"token", "create", "x", "--scopes", "unknown"}, "--scopes: unknown scope name"},
-		{[]string{"history", "--limit", "abc"}, `invalid argument "abc" for "--limit" flag: expected a whole number`},
-		{[]string{"now", "--clear=abc"}, `invalid argument "abc" for "--clear" flag: expected true or false`},
+		{[]string{"block", "1", "nxt 09:00-10:00"}, `block: unrecognised date "nxt": use today, yesterday, tomorrow, a weekday (mon…sun), +Nd/-Nd, +Nw/-Nw, or YYYY-MM-DD`, `block: unrecognised date "nxt": use today, yesterday, tomorrow, a weekday (mon…sun), +Nd/-Nd, +Nw/-Nw, or YYYY-MM-DD`},
+		{[]string{"add", "x", "--block", "2026-13-45 09:00-10:00"}, `--block: invalid date "2026-13-45": no such calendar day`, `--block: invalid date "2026-13-45": no such calendar day`},
+		{[]string{"block", "1", "09:00"}, `invalid block span "09:00": expected start-end clocks`, `block: invalid block span "09:00": expected start-end clocks`},
+		{[]string{"reblock", "1", "9:00-26:00"}, `block end "26:00": hour out of range`, `reblock: invalid block end: civil: "26:00" has hour out of range`},
+		{[]string{"add", "x", "--block", "9:00-26:00"}, `block end "26:00": hour out of range`, `--block: invalid block end: civil: "26:00" has hour out of range`},
+		{[]string{"log", "-N", "x", "--at", "9:60"}, `--at "9:60": minutes out of range`, `--at: civil: "9:60" has minutes out of range`},
+		{[]string{"token", "create", "x", "--scopes", "unknown"}, "--scopes: unknown scope name", `--scopes: validation: invalid input`},
+		{[]string{"history", "--limit", "abc"}, `invalid argument "abc" for "--limit" flag: expected a whole number`, `invalid argument "abc" for "--limit" flag: strconv.ParseInt: parsing "abc": invalid syntax`},
+		{[]string{"now", "--clear=abc"}, `invalid argument "abc" for "--clear" flag: expected true or false`, `invalid argument "abc" for "--clear" flag: strconv.ParseBool: parsing "abc": invalid syntax`},
 	} {
 		out, stderr, code := runCLI(t, sys, "", tc.args...)
 		if code != 2 || out != "" || stderr != "tkr: "+tc.want+"\n" {
 			t.Errorf("%v: exit=%d stdout=%q stderr=%q", tc.args, code, out, stderr)
 		}
+		out, stderr, code = runCLI(t, sys, "", append([]string{"--json"}, tc.args...)...)
+		var p api.Problem
+		if err := json.Unmarshal([]byte(out), &p); err != nil || code != 2 || stderr != "" || p.Detail != tc.wire {
+			t.Errorf("--json %v: exit=%d stdout=%q stderr=%q", tc.args, code, out, stderr)
+		}
+	}
+}
+
+func TestBlockCalendarOverflowContext(t *testing.T) {
+	ref := datespec.Ref{Today: civil.MustDate("9999-12-31")}
+	_, err := datespec.ParseSpan("tomorrow 09:00-10:00", datespec.Future, ref)
+	if err == nil {
+		t.Fatal("expected calendar overflow")
+	}
+	got := dateUsage("block", err)
+	var usage *usageError
+	if !errors.As(got, &usage) || usage.humanDetail != `block: date specification "tomorrow" resolves outside the supported calendar` {
+		t.Fatalf("block usage error = %#v", got)
 	}
 }
 

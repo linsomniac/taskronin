@@ -109,6 +109,22 @@ func assertEditDraft(t *testing.T, dir, stderr, want string) {
 	}
 }
 
+func TestMissingEditor(t *testing.T) {
+	srv, sys := captureServer(t)
+	t.Setenv("VISUAL", "")
+	t.Setenv("EDITOR", "nosuch")
+	t.Setenv("PATH", t.TempDir())
+	out, stderr, code := runCLI(t, sys, "", "add", "x", "-e")
+	drafts := editDrafts(t, srv.Paths.DraftsDir)
+	if len(drafts) != 1 {
+		t.Fatalf("drafts = %v", drafts)
+	}
+	want := "tkr: editor \"nosuch\" not found in $PATH\ntkr: your draft is at " + drafts[0] + "\n"
+	if code != 1 || out != "" || stderr != want {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, out, stderr)
+	}
+}
+
 func TestEditSuccess(t *testing.T) {
 	for _, tc := range []struct {
 		name, title, notes string

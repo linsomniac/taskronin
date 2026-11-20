@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"taskronin/internal/api"
 	"taskronin/internal/testutil"
 )
 
@@ -39,6 +41,7 @@ func TestTUIHookRecapUsage(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	sys := sysDeps{StdinTTY: true, StdoutTTY: true, Getenv: os.Getenv}
 	for _, tc := range []struct{ spec, message string }{
+		{"25:00", `tkr: --date "25:00": hour out of range`},
 		{"nextweek", `tkr: --date: unrecognised date "nextweek": use today, yesterday, tomorrow, a weekday (mon…sun), +Nd/-Nd, +Nw/-Nw, or YYYY-MM-DD`},
 		{"tue 10:00", "tkr: --date: expected a date without a time"},
 	} {
@@ -47,6 +50,11 @@ func TestTUIHookRecapUsage(t *testing.T) {
 		if code != 2 || out != "" || strings.TrimSpace(stderr) != tc.message {
 			t.Errorf("date %q: code=%d stdout=%q stderr=%q", spec, code, out, stderr)
 		}
+	}
+	out, stderr, code := runCLI(t, sys, "", "recap", "--date", "25:00", "--json")
+	var p api.Problem
+	if err := json.Unmarshal([]byte(out), &p); err != nil || code != 2 || stderr != "" || p.Detail != `--date: civil: "25:00" has hour out of range` {
+		t.Fatalf("--json exit=%d stdout=%q stderr=%q", code, out, stderr)
 	}
 }
 

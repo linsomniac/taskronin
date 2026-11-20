@@ -34,11 +34,14 @@ type Ref struct {
 // Error describes an input failure without implementation prefixes.
 type InputError struct {
 	detail, problemDetail string
+	// NamesBlock reports whether the diagnostic itself identifies a block span or endpoint.
+	NamesBlock bool
 }
 
 func (e *InputError) Error() string { return e.detail }
 
 // ProblemDetail returns the original detail used in machine-readable errors.
+// AIDEV-NOTE: CLI --json depends on this detail even when Error changes.
 func (e *InputError) ProblemDetail() string { return e.problemDetail }
 
 // Parse resolves a date with an optional clock, or a bare clock on today.
@@ -77,6 +80,11 @@ func Parse(s string, m Mode, r Ref) (domain.Moment, error) {
 	return result, nil
 }
 
+func invalidSpan(value, reason string) error {
+	detail := fmt.Sprintf("invalid block span %q: %s", value, reason)
+	return &InputError{detail: detail, problemDetail: detail, NamesBlock: true}
+}
+
 // ParseSpan resolves an optional date followed by start-end clocks, defaulting
 // to today. The span must satisfy 0 <= start < end <= 1440, with no spaces
 // around the hyphen. Only the end clock may be 24:00.
@@ -95,7 +103,7 @@ func ParseSpan(s string, m Mode, r Ref) (domain.BlockSpan, error) {
 				return domain.BlockSpan{}, err
 			}
 		}
-		return domain.BlockSpan{}, fmt.Errorf("invalid block span %q: expected [date] start-end without spaces around the hyphen", s)
+		return domain.BlockSpan{}, invalidSpan(s, "expected [date] start-end without spaces around the hyphen")
 	}
 	d, err := parseDate(date, m, r)
 	if err != nil {
@@ -103,7 +111,7 @@ func ParseSpan(s string, m Mode, r Ref) (domain.BlockSpan, error) {
 	}
 	startText, endText, ok := strings.Cut(clocks, "-")
 	if !ok {
-		return domain.BlockSpan{}, fmt.Errorf("invalid block span %q: expected start-end clocks", s)
+		return domain.BlockSpan{}, invalidSpan(s, "expected start-end clocks")
 	}
 	start, err := parseClock(startText, false, "start")
 	if err != nil {
@@ -114,7 +122,7 @@ func ParseSpan(s string, m Mode, r Ref) (domain.BlockSpan, error) {
 		return domain.BlockSpan{}, err
 	}
 	if start >= end {
-		return domain.BlockSpan{}, fmt.Errorf("invalid block span %q: end must be after start on the same day", s)
+		return domain.BlockSpan{}, invalidSpan(s, "end must be after start on the same day")
 	}
 	return domain.BlockSpan{Date: d, Start: start, End: civil.EndMinute(end)}, nil
 }
@@ -134,7 +142,7 @@ func parseClock(s string, allow2400 bool, blockField string) (civil.Minute, erro
 			detail = "block " + blockField + " " + detail
 			wire = "invalid block " + blockField + ": " + wire
 		}
-		return 0, &InputError{detail: detail, problemDetail: wire}
+		return 0, &InputError{detail: detail, problemDetail: wire, NamesBlock: blockField != ""}
 	}
 	return minute, err
 }
@@ -184,7 +192,7 @@ func parseDate(s string, m Mode, r Ref) (civil.Date, error) {
 	d, err := civil.ParseDate(r.Today.AddDays(offset).String())
 	if err != nil {
 		detail := fmt.Sprintf("date specification %q resolves outside the supported calendar", s)
-		return civil.Date{}, &InputError{detail, detail + ": " + err.Error()}
+		return civil.Date{}, &InputError{detail: detail, problemDetail: detail + ": " + err.Error()}
 	}
 	return d, nil
 }

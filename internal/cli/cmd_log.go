@@ -155,7 +155,7 @@ func (e *env) editLog(req *api.AddEntryRequest) (*editor.Draft, error) {
 	if err != nil {
 		return nil, err
 	}
-	buffer, err := editor.Edit(e.ctx, argv, draft, e.in, e.out, e.err)
+	buffer, err := e.runEditor(argv, draft)
 	if err != nil {
 		return nil, err
 	}

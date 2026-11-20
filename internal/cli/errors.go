@@ -22,6 +22,7 @@ import (
 	"taskronin/internal/textsafe"
 )
 
+// AIDEV-NOTE: Never return humanDetail from Error(); --json depends on detail.
 type usageError struct{ detail, humanDetail string }
 
 func (e *usageError) Error() string        { return e.detail }
@@ -48,18 +49,19 @@ func argumentUsage(err error) error {
 }
 
 // dateUsage retains the pre-existing problem detail for scripts. The parser
-// already identifies block fields, so repeating the command obscures the cause.
+// names the span and its endpoints; date-part errors still need the flag or command.
 func dateUsage(field string, err error) error {
 	detail := field + ": " + err.Error()
 	wire := detail
 	var input *datespec.InputError
 	if errors.As(err, &input) {
 		wire = field + ": " + input.ProblemDetail()
-		detail = field + " " + input.Error()
-	}
-	switch field {
-	case "block", "reblock", "--block":
-		detail = err.Error()
+		switch {
+		case input.NamesBlock:
+			detail = input.Error()
+		case field != "block" && field != "reblock" && field != "--block":
+			detail = field + " " + input.Error()
+		}
 	}
 	return &usageError{detail: wire, humanDetail: detail}
 }
@@ -81,6 +83,8 @@ func tokenConfigError(err error) error {
 	return err
 }
 
+// AIDEV-NOTE: The prefixes removed here come from config.validatePath and
+// fsutil.CheckPrivate. Preserve the selected path when those diagnostics change.
 func tokenFileDetail(err error) string {
 	var configured *config.TokenFileError
 	var credential *client.TokenFileError
@@ -221,6 +225,8 @@ func (e *env) fail(err error) int {
 		if errors.As(err, &usage) && usage.humanDetail != "" {
 			detail = usage.humanDetail
 		}
+		// AIDEV-NOTE: Match the stable service detail. The server date belongs only
+		// on human stderr; --json retains the original validation detail.
 		if p.Code == string(domain.CodeValidation) && detail == domain.DeferFutureDetail && e.serverClock != nil {
 			detail += " (today is " + formatDate(e.serverClock.Today) + ")"
 		}

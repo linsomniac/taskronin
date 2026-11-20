@@ -2,7 +2,9 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os/exec"
 
 	"github.com/spf13/cobra"
 
@@ -70,7 +72,7 @@ func (e *env) editTitleNotes(kind, title, notes string, update func(string, stri
 	if err != nil {
 		return nil, err
 	}
-	buffer, err := editor.Edit(e.ctx, argv, draft, e.in, e.out, e.err)
+	buffer, err := e.runEditor(argv, draft)
 	if err != nil {
 		return nil, err
 	}
@@ -94,4 +96,12 @@ func (e *env) editTitleNotes(kind, title, notes string, update func(string, stri
 	}
 	draft = nil
 	return res, nil
+}
+
+func (e *env) runEditor(argv []string, draft *editor.Draft) (string, error) {
+	text, err := editor.Edit(e.ctx, argv, draft, e.in, e.out, e.err)
+	if !e.jsonOut && errors.Is(err, exec.ErrNotFound) {
+		return "", fmt.Errorf("editor %q not found in $PATH", argv[0])
+	}
+	return text, err
 }

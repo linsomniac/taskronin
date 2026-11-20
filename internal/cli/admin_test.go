@@ -86,6 +86,56 @@ func TestTokenCreateWriteFile(t *testing.T) {
 	}
 }
 
+func TestTokenSaveFailure(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can write a read-only directory")
+	}
+	srv, sys := captureServer(t)
+	dir := filepath.Join(t.TempDir(), "tokens")
+	if err := os.Mkdir(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range []string{"text", "json"} {
+		name := "probe-" + mode
+		path := filepath.Join(dir, name+".token")
+		args := []string{"token", "create", name, "--mcp", "--expires", "never", "--write-file=" + path}
+		if mode == "json" {
+			args = append(args, "--json")
+		}
+		out, stderr, code := runCLI(t, sys, "", args...)
+		if code != 1 {
+			t.Fatalf("%s exit=%d stdout=%q stderr=%q", mode, code, out, stderr)
+		}
+		tokens, err := srv.Client.Tokens(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		var id int64
+		for _, tok := range tokens {
+			if tok.Name == name {
+				id = tok.ID
+			}
+		}
+		if id == 0 {
+			t.Fatalf("server did not create %s", name)
+		}
+		before := fmt.Sprintf("token %q (id %d) was created but ", name, id)
+		after := fmt.Sprintf("; revoke it with `tkr token revoke %d` and retry", id)
+		if mode == "text" {
+			want := "tkr: " + before + fmt.Sprintf("saving its secret to %q failed (permission denied)", path) + after + "\n"
+			if out != "" || stderr != want {
+				t.Fatalf("stdout=%q stderr=%q want=%q", out, stderr, want)
+			}
+			continue
+		}
+		var p api.Problem
+		pattern := "^" + regexp.QuoteMeta(before+"its secret could not be saved: create atomic temporary file: open "+filepath.Join(dir, ".tkr-tmp-")) + "[0-9]+" + regexp.QuoteMeta(": permission denied"+after) + "$"
+		if err := json.Unmarshal([]byte(out), &p); err != nil || stderr != "" || !regexp.MustCompile(pattern).MatchString(p.Detail) {
+			t.Fatalf("problem=%+v stderr=%q decode=%v", p, stderr, err)
+		}
+	}
+}
+
 func TestTokenCreatePrintsSecretOnce(t *testing.T) {
 	srv, sys := captureServer(t)
 	out := captureRun(t, sys, "", "token", "create", "ci", "--scopes", "read", "--expires", "30d", "--rate", "5")

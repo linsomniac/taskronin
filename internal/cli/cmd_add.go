@@ -165,7 +165,7 @@ func (e *env) editAddNotes(req *api.AddTaskRequest) (*editor.Draft, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Notes, err = editor.Edit(e.ctx, argv, draft, e.in, e.out, e.err)
+	req.Notes, err = e.runEditor(argv, draft)
 	return draft, err
 }
 
