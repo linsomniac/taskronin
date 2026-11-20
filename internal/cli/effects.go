@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"taskronin/internal/api"
-	"taskronin/internal/civil"
 	"taskronin/internal/textsafe"
 )
 
@@ -202,16 +201,4 @@ func effectLine(effect api.Effect) string {
 
 func taskHeadline(task *api.Task, action string) string {
 	return fmt.Sprintf("#%d '%s' %s", task.ID, task.Title, action)
-}
-
-func formatDate(date civil.Date) string {
-	return date.Weekday().String()[:3] + " " + date.String()
-}
-
-func formatMoment(moment *api.Moment) string {
-	text := formatDate(moment.Date)
-	if moment.Time != nil {
-		text += " " + moment.Time.String()
-	}
-	return text
 }

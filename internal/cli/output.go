@@ -3,8 +3,6 @@ package cli
 import (
 	"fmt"
 
-	"charm.land/lipgloss/v2"
-
 	"taskronin/internal/textsafe"
 )
 
@@ -23,8 +21,5 @@ func (e *env) colorEnabled() bool {
 
 func (e *env) errorLine(format string, args ...any) {
 	line := textsafe.SanitizeLine(fmt.Sprintf(format, args...))
-	if e.colorEnabled() {
-		line = lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Render(line)
-	}
-	_, _ = fmt.Fprintln(e.err, line)
+	_, _ = fmt.Fprintln(e.err, e.paint().bad(line))
 }
