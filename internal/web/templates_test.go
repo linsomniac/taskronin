@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -20,6 +21,54 @@ import (
 	"taskronin/internal/testutil"
 	"taskronin/internal/web"
 )
+
+func TestLayoutFrame(t *testing.T) {
+	ta := newTestApp(t)
+	login := ta.get("/ui/login")
+	if login.Code != http.StatusOK {
+		t.Fatalf("GET /ui/login = %d", login.Code)
+	}
+	t.Run("login", func(t *testing.T) {
+		card := requireElement(t, parseHTML(t, login.Body.String()), "section", "class", "login-card")
+		tagline := requireElement(t, card, "p", "class", "tagline")
+		if got := nodeText(tagline); got != "Your tasks, your focus, your work log." {
+			t.Errorf("login tagline = %q", got)
+		}
+	})
+
+	page := parseHTML(t, ta.login().viewBody("/ui/"))
+	header := requireElement(t, page, "header", "class", "topbar")
+	brand := requireElement(t, header, "a", "class", "brand")
+	if attr(brand, "href") != "/ui/" || nodeText(brand) != "Taskronin" {
+		t.Error("brand must link Taskronin to /ui/")
+	}
+	requireElement(t, header, "nav", "aria-label", "Main")
+	actions := requireElement(t, header, "div", "class", "topbar-actions")
+	var got []string
+	walkHTML(actions, func(n *html.Node) {
+		if n.Type == html.ElementNode && n.Data == "form" {
+			got = append(got, attr(n, "action"))
+		}
+	})
+	if want := []string{"/ui/undo", "/ui/redo", "/ui/logout"}; !slices.Equal(got, want) {
+		t.Errorf("top bar forms = %v, want %v", got, want)
+	}
+	requireElement(t, page, "main", "class", "page")
+}
+
+func requireElement(t *testing.T, root *html.Node, tag, key, value string) *html.Node {
+	t.Helper()
+	var matches []*html.Node
+	walkHTML(root, func(n *html.Node) {
+		if n.Type == html.ElementNode && n.Data == tag && attr(n, key) == value {
+			matches = append(matches, n)
+		}
+	})
+	if len(matches) != 1 {
+		t.Fatalf("found %d <%s %s=%q>, want one", len(matches), tag, key, value)
+	}
+	return matches[0]
+}
 
 func TestTemplatesLint(t *testing.T) {
 	err := fs.WalkDir(web.TemplateFS, "templates", func(path string, entry fs.DirEntry, err error) error {

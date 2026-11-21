@@ -189,12 +189,12 @@ func TestUndoStaleGeneration(t *testing.T) {
 	}
 }
 
-func TestUndoRedoNavForms(t *testing.T) {
+func TestUndoRedoTopbarForms(t *testing.T) {
 	ta := newTestApp(t).login()
 	body := ta.viewBody("/ui/backlog?tag=work") // checks hidden fields and unique nonces
 	var actions []string
 	walkHTML(parseHTML(t, body), func(n *html.Node) {
-		if n.Type == html.ElementNode && n.Data == "nav" {
+		if n.Type == html.ElementNode && n.Data == "div" && attr(n, "class") == "topbar-actions" {
 			walkHTML(n, func(form *html.Node) {
 				if form.Type == html.ElementNode && form.Data == "form" && attr(form, "method") == "post" {
 					actions = append(actions, attr(form, "action"))
@@ -204,7 +204,7 @@ func TestUndoRedoNavForms(t *testing.T) {
 	})
 	for _, action := range []string{"/ui/undo", "/ui/redo"} {
 		if !slices.Contains(actions, action) || len(scrapeForms(t, body, action)) != 1 {
-			t.Errorf("nav must contain one POST form for %s", action)
+			t.Errorf("top bar actions must contain one POST form for %s", action)
 		}
 	}
 }

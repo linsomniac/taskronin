@@ -1,8 +1,11 @@
 {{define "content"}}
-<h1>Log in</h1>
+<section class="login-card">
+<h1>Taskronin</h1>
+<p class="tagline">Your tasks, your focus, your work log.</p>
 {{with .Err}}<p class="error" data-code="{{.Code}}">{{.Detail}}</p>{{end}}
 <form method="post" action="/ui/login" hx-boost="false">
 <p><label>Password <input type="password" name="password" autocomplete="current-password" required></label></p>
-<button type="submit">Log in</button>
+<button type="submit" class="btn primary">Log in</button>
 </form>
+</section>
 {{end}}

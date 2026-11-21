@@ -1,6 +1,6 @@
 {{define "content"}}
 {{$stale := or (eq .Err.Code "precondition_failed") (eq .Err.Code "generation_mismatch")}}
-<section class="error" data-code="{{.Err.Code}}">
+<section class="error card" data-code="{{.Err.Code}}">
 <h1>{{.Title}}</h1>
 {{if $stale}}
 <p>This changed elsewhere since the page was loaded — <a href="{{.Return}}">reload</a>.</p>

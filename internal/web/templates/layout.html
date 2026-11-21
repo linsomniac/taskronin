@@ -10,6 +10,8 @@
 </head>
 <body hx-boost="true" hx-headers='{"X-CSRF-Token":"{{.CSRF}}"}'>
 {{if .CSRF}}
+<header class="topbar">
+<a class="brand" href="/ui/">Taskronin</a>
 <nav aria-label="Main">
 <a href="/ui/"{{if eq .Tab "today"}} aria-current="page"{{end}}>Today</a>
 <a href="/ui/triage"{{if eq .Tab "triage"}} aria-current="page"{{end}}>Triage</a>
@@ -19,22 +21,26 @@
 <a href="/ui/report"{{if eq .Tab "report"}} aria-current="page"{{end}}>Report</a>
 <a href="/ui/search"{{if eq .Tab "search"}} aria-current="page"{{end}}>Search</a>
 <a href="/ui/ai-changes"{{if eq .Tab "ai"}} aria-current="page"{{end}}>AI changes</a>
+</nav>
+<div class="topbar-actions">
 <form method="post" action="/ui/undo">
 {{template "hidden" $}}
-<button type="submit">Undo</button>
+<button type="submit" class="btn small">Undo</button>
 </form>
 <form method="post" action="/ui/redo">
 {{template "hidden" $}}
-<button type="submit">Redo</button>
+<button type="submit" class="btn small">Redo</button>
 </form>
 <form method="post" action="/ui/logout" hx-boost="false">
 {{template "hidden" $}}
-<button type="submit">Log out</button>
+<button type="submit" class="btn small">Log out</button>
 </form>
-</nav>
+</div>
+</header>
 {{end}}
-<main>
+<main class="page">
 {{if .Flash}}<section class="flash" role="status" aria-label="Action result">
+<span class="flash-mark">✓</span>
 <ul>{{range .Flash}}<li>{{.}}</li>{{end}}</ul>
 </section>{{end}}
 {{template "content" .}}</main>

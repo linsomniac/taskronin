@@ -1,8 +1,33 @@
+/* AIDEV-NOTE: Keep component colors tied to these tokens so both themes share the same rules. */
 :root {
+  color-scheme: light;
+  --bg: #f6f7f9;
+  --fg: #202735;
+  --muted: #546071;
+  --card: #ffffff;
+  --border: #c8ced7;
+  --accent: #2455a4;
+  --ok: #216347;
+  --warn: #805000;
+  --bad: #a1313c;
+  --radius: 0.5rem;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   line-height: 1.5;
-  color: #202124;
-  background: #fafafa;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --bg: #15191f;
+    --fg: #edf0f6;
+    --muted: #adb8c7;
+    --card: #202630;
+    --border: #475361;
+    --accent: #99c0ff;
+    --ok: #85d5ab;
+    --warn: #f0c471;
+    --bad: #ffa2aa;
+  }
 }
 
 * {
@@ -10,22 +35,144 @@
 }
 
 body {
-  max-width: 64rem;
+  max-width: 56rem;
   margin: 0 auto;
   padding: 1rem;
+  background: var(--bg);
+  color: var(--fg);
   overflow-wrap: anywhere;
 }
 
-nav {
+a {
+  color: var(--accent);
+}
+
+:focus-visible {
+  outline: 0.2rem solid var(--accent);
+  outline-offset: 0.2rem;
+}
+
+.topbar,
+.topbar nav,
+.topbar-actions,
+.actions {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.topbar {
   gap: 0.75rem;
+  padding-block: 0.25rem 1rem;
+  border-bottom: 1px solid var(--border);
   margin-block-end: 1.5rem;
 }
 
-a {
-  color: #174ea6;
+.brand {
+  color: var(--fg);
+  font-size: 1.125rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.topbar nav {
+  gap: 0.125rem;
+}
+
+.topbar nav a {
+  padding: 0.375rem 0.5rem;
+  border-radius: 99rem;
+  color: var(--fg);
+  font-size: 0.875rem;
+  text-decoration: none;
+}
+
+.topbar nav a:hover {
+  text-decoration: underline;
+}
+
+.topbar nav [aria-current="page"],
+.btn.primary {
+  background: var(--accent);
+  color: var(--card);
+}
+
+.topbar-actions {
+  margin-inline-start: auto;
+  gap: 0.25rem;
+}
+
+.card,
+.login-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem;
+  background: var(--card);
+  margin-block: 0.75rem;
+}
+
+.card.focus {
+  border-inline-start: 0.25rem solid var(--ok);
+}
+
+.card.current {
+  border-inline-start: 0.25rem solid var(--accent);
+}
+
+.card > :first-child,
+.login-card h1 {
+  margin-block-start: 0;
+}
+
+.card > :last-child {
+  margin-block-end: 0;
+}
+
+.meta,
+.muted,
+.id,
+.tagline {
+  color: var(--muted);
+}
+
+.meta,
+.muted,
+.id {
+  font-size: 0.875rem;
+}
+
+.id {
+  font-variant-numeric: tabular-nums;
+}
+
+.ok,
+.flash-mark {
+  color: var(--ok);
+}
+
+.chip {
+  display: inline-block;
+  border-radius: 99rem;
+  padding: 0.125rem 0.5rem;
+  background: var(--bg);
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+
+.chip.tag {
+  color: var(--muted);
+  background: color-mix(in srgb, var(--muted) 10%, var(--card));
+}
+
+.chip.warn {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 12%, var(--card));
+}
+
+.chip.bad {
+  color: var(--bad);
+  background: color-mix(in srgb, var(--bad) 12%, var(--card));
 }
 
 button,
@@ -37,26 +184,133 @@ textarea {
 }
 
 button,
-input[type="submit"] {
-  min-height: 2.75rem;
-  padding: 0.5rem 1rem;
+.btn,
+details.more > summary {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.5rem 0.875rem;
+  background: var(--card);
+  color: var(--fg);
   cursor: pointer;
 }
 
+.btn {
+  display: inline-block;
+  text-decoration: none;
+}
+
+.btn.primary,
+.btn.secondary {
+  border-color: var(--accent);
+}
+
+.btn.secondary {
+  color: var(--accent);
+}
+
+.btn.danger {
+  color: var(--bad);
+  border-color: var(--bad);
+}
+
+.btn.small {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.8125rem;
+}
+
+button:hover,
+.btn:hover,
+details.more > summary:hover {
+  border-color: currentColor;
+  text-decoration: underline;
+}
+
+.actions,
+details.more {
+  margin-block-start: 0.75rem;
+}
+
+details.more > summary {
+  width: fit-content;
+  color: var(--accent);
+  border-color: currentColor;
+}
+
+label {
+  display: block;
+  margin-block: 0.5rem;
+}
+
+input:not([type="hidden"], [type="checkbox"], [type="radio"], [type="submit"]),
+select,
 textarea {
+  display: block;
   width: 100%;
+  max-width: 24rem;
+  margin-block-start: 0.25rem;
+  padding: 0.5rem;
+  border: 1px solid var(--muted);
+  border-radius: var(--radius);
+  background: var(--card);
+  color: var(--fg);
+}
+
+textarea {
+  max-width: 100%;
   min-height: 8rem;
+  resize: vertical;
 }
 
-:focus-visible {
-  outline: 0.2rem solid #174ea6;
-  outline-offset: 0.2rem;
+.flash,
+.empty {
+  margin-block: 1rem;
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius);
 }
 
-@media (min-width: 48rem) {
-  body {
-    padding: 2rem;
-  }
+.flash {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  border: 1px solid var(--ok);
+  background: color-mix(in srgb, var(--ok) 10%, var(--card));
+}
+
+.flash-mark {
+  font-weight: 700;
+}
+
+.flash ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.error.card {
+  border-color: var(--bad);
+}
+
+p.error {
+  color: var(--bad);
+}
+
+.empty {
+  color: var(--muted);
+  border: 1px dashed var(--border);
+}
+
+.login-card {
+  max-width: 22rem;
+  margin: 15vh auto 0;
+  padding: 1.5rem;
+}
+
+.login-card h1 {
+  margin-block-end: 0.25rem;
+}
+
+.tagline {
+  margin-block: 0 1.5rem;
 }
 
 .notes-plain {
@@ -64,7 +318,14 @@ textarea {
   overflow-wrap: anywhere;
 }
 
-.muted {
-  color: #5f6368;
-  font-size: 0.875rem;
+.notes {
+  line-height: 1.65;
+}
+
+.notes pre {
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 0.75rem;
+  border-radius: var(--radius);
+  background: var(--bg);
 }

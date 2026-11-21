@@ -6,10 +6,24 @@ import (
 	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"taskronin/internal/web"
 )
+
+func TestCSSSelfContained(t *testing.T) {
+	data, err := web.StaticFS.ReadFile("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := strings.ToLower(string(data))
+	for _, forbidden := range []string{"@import", "url(", "http:", "https:", "expression("} {
+		if strings.Contains(css, forbidden) {
+			t.Errorf("app.css contains %q", forbidden)
+		}
+	}
+}
 
 func TestHTMXAssetPinned(t *testing.T) {
 	b, err := web.StaticFS.ReadFile("static/" + web.HTMXAsset)
