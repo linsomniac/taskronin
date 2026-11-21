@@ -64,7 +64,7 @@ func TestSearchPage(t *testing.T) {
 		}
 	}
 	body = ta.viewBody("/ui/search?q=absentword")
-	requireText(t, body, "No results.")
+	requireText(t, body, "No matches for “absentword”.")
 	for _, tc := range []struct {
 		query string
 		code  int

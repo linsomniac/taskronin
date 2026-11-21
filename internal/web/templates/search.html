@@ -17,7 +17,7 @@
 <p>{{.Kind}} #{{.ID}}{{if .Status}} · {{.Status}}{{end}}{{if .WorkDate.Valid}} · {{day .WorkDate.V}}{{end}}</p>
 <p data-snippet>{{.Snippet}}</p>
 </article>
-{{else}}<p>No results.</p>{{end}}
+{{else}}<p class="empty">No matches for “{{.Data.Query}}”.</p>{{end}}
 {{if .Data.More}}<a href="{{.Data.More}}">More</a>{{end}}
 </section>
 {{end}}

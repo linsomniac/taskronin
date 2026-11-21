@@ -19,21 +19,21 @@
 </article>
 {{end}}
 </section>
-{{else}}<p>No entries in this date range.</p>{{end}}
+{{else}}<p class="empty">No work logged in this range.</p>{{end}}
 {{with .Data.Todo}}
 <section aria-label="Triage">
 <h2>Triage</h2>
-{{range .Triage}}{{template "taskrow" (row $ .)}}{{else}}<p>Nothing to triage.</p>{{end}}
+{{range .Triage}}{{template "taskrow" (row $ .)}}{{else}}<p class="empty">Nothing to triage.</p>{{end}}
 </section>
 <section aria-label="Backlog">
 <h2>Backlog</h2>
-{{range .Backlog}}{{template "taskrow" (row $ .)}}{{else}}<p>No backlog tasks.</p>{{end}}
+{{range .Backlog}}{{template "taskrow" (row $ .)}}{{else}}<p class="empty">No backlog tasks.</p>{{end}}
 </section>
 {{end}}
 {{if .Data.IncludeUpcoming}}
 <section aria-label="Upcoming">
 <h2>Upcoming</h2>
-{{range .Data.Upcoming}}{{template "taskrow" (row $ .)}}{{else}}<p>No upcoming tasks.</p>{{end}}
+{{range .Data.Upcoming}}{{template "taskrow" (row $ .)}}{{else}}<p class="empty">No upcoming tasks.</p>{{end}}
 </section>
 {{end}}
 {{end}}

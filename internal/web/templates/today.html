@@ -20,7 +20,7 @@
 </form>
 </div>
 </div>
-{{else}}<p>No focus task.</p>{{end}}
+{{else}}<p class="empty">No focus. Pick a task below, or set one by ID.</p>{{end}}
 <form method="post" action="/ui/focus">
 {{template "hidden" $}}
 <label>Task ID <input name="task_id" required></label>
@@ -30,11 +30,11 @@
 </section>
 <section aria-label="Today's blocks">
 <h2>Today's blocks</h2>
-{{range .Data.Blocks}}{{template "blockrow" (row $ .)}}{{else}}<p>No blocks today.</p>{{end}}
+{{range .Data.Blocks}}{{template "blockrow" (row $ .)}}{{else}}<p class="empty">No blocks today. <span class="muted">Schedule one from a task's actions.</span></p>{{end}}
 </section>
 <section aria-label="Triage">
 <h2><a href="/ui/triage">Triage ({{.Data.TriageCount}})</a></h2>
-{{range .Data.TriageTop}}{{template "taskrow" (row $ .)}}{{else}}<p>Nothing to triage.</p>{{end}}
+{{range .Data.TriageTop}}{{template "taskrow" (row $ .)}}{{else}}<p class="empty">Triage clear.</p>{{end}}
 </section>
 {{with .Data.Overdue}}<section aria-label="Overdue"><h2>Overdue</h2>
 {{range .}}{{template "taskrow" (row $ .)}}{{end}}
@@ -44,13 +44,13 @@
 </section>{{end}}
 <section aria-label="Today's entries">
 <h2>Today's entries</h2>
-{{range .Data.Entries}}{{template "entryrow" (row $ .)}}{{else}}<p>No entries today.</p>{{end}}
+{{range .Data.Entries}}{{template "entryrow" (row $ .)}}{{else}}<p class="empty">Nothing logged yet today.</p>{{end}}
 </section>
 <section aria-label="Interruptions">
 <h2>Interruptions</h2>
 {{range .Data.Interruptions}}
 <p>{{wall .At}} — {{if .FromTaskID.Valid}}<a href="/ui/tasks/{{.FromTaskID.V}}">#{{.FromTaskID.V}}</a>{{end}}{{if .FromBlockID.Valid}} (block #{{.FromBlockID.V}}){{end}} → <a href="/ui/tasks/{{.ToTaskID}}">#{{.ToTaskID}}</a></p>
-{{else}}<p>No interruptions today.</p>{{end}}
+{{else}}<p class="empty">No interruptions today.</p>{{end}}
 </section>
 {{template "addtask" (row $ nil)}}
 {{template "logentry" (row $ .Data.LogEntry)}}

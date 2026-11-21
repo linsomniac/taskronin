@@ -206,7 +206,7 @@ func TestFormUnrecognisedDateMessage(t *testing.T) {
 
 type formPages struct {
 	*testApp
-	triage, middle, focus, deferred, due, done, dropped, deleted domain.TaskID
+	triage, first, middle, last, focus, deferred, due, done, dropped, deleted domain.TaskID
 }
 
 func newFormPages(t *testing.T) formPages {
@@ -214,12 +214,10 @@ func newFormPages(t *testing.T) formPages {
 	ta := newTestApp(t).login()
 	p := formPages{testApp: ta}
 	p.triage = ta.addTask(service.AddTaskIn{Title: "x", Tags: []string{"docs"}})
-	for _, title := range []string{"First", "Middle", "Last"} {
-		id := ta.addTask(service.AddTaskIn{Title: title, Place: &service.AddPlacement{How: "bottom"}})
-		if title == "Middle" {
-			p.middle = id
-		}
-	}
+	backlog := &service.AddPlacement{How: "bottom"}
+	p.first = ta.addTask(service.AddTaskIn{Title: "First", Place: backlog})
+	p.middle = ta.addTask(service.AddTaskIn{Title: "Middle", Place: backlog})
+	p.last = ta.addTask(service.AddTaskIn{Title: "Last", Place: backlog})
 	p.focus = ta.addTask(service.AddTaskIn{Title: "Focus", Tags: []string{"docs"}})
 	p.deferred = ta.addTask(service.AddTaskIn{Title: "Deferred", Place: &service.AddPlacement{How: "defer", Defer: testutil.Moment("10-30 09:00")}})
 	p.due = ta.addTask(service.AddTaskIn{Title: "Due soon", Due: ptrMoment(testutil.Moment("10-29 13:00"))})
@@ -255,21 +253,98 @@ func TestEveryFormKeepsHiddenFields(t *testing.T) {
 	}
 }
 
+func TestFixedHiddenActionValues(t *testing.T) {
+	p := newFormPages(t)
+	// Match the button as well as the field. Up and Down post to the same action.
+	placements := map[string]string{"Keep": "keep", "Top": "top", "Bottom": "bottom", "Place before": "before", "Place after": "after"}
+	for _, tc := range []struct {
+		page, cardAttr, id, field string
+		buttonValues              map[string]string
+	}{
+		{"/ui/triage", "data-task", fmt.Sprint(p.triage), "how", placements},
+		{taskPagePath(p.focus), "data-task", fmt.Sprint(p.focus), "how", placements},
+		{"/ui/backlog", "data-task", fmt.Sprint(p.middle), "how", map[string]string{"Up": "before", "Down": "after", "Top": "top", "Bottom": "bottom"}},
+		{"/ui/backlog", "data-task", fmt.Sprint(p.middle), "ref", map[string]string{"Up": fmt.Sprint(p.first), "Down": fmt.Sprint(p.last)}},
+		{"/ui/upcoming", "data-task", fmt.Sprint(p.deferred), "until", map[string]string{"Keep": "none"}},
+		{"/ui/backlog", "data-task", fmt.Sprint(p.middle), "task_id", map[string]string{"Focus": fmt.Sprint(p.middle)}},
+		{taskPagePath(p.focus), "data-task", fmt.Sprint(p.focus), "task_id", map[string]string{"Focus": fmt.Sprint(p.focus)}},
+		{"/ui/", "data-task", fmt.Sprint(p.focus), "task_id", map[string]string{"Clear focus": ""}},
+		{"/ui/recap", "data-block", "1", "outcome", map[string]string{"Worked": "worked", "Missed": "missed", "Auto outcome": "auto"}},
+	} {
+		t.Run(tc.page+"/"+tc.field, func(t *testing.T) {
+			tag := "article"
+			if tc.page == "/ui/" {
+				tag = "div"
+			}
+			card := requireElement(t, parseHTML(t, p.viewBody(tc.page)), tag, tc.cardAttr, tc.id)
+			got := make(map[string]string)
+			walkHTML(card, func(n *html.Node) {
+				if n.Data != "form" {
+					return
+				}
+				button := nodeText(requireElement(t, n, "button", "type", "submit"))
+				if _, ok := tc.buttonValues[button]; ok {
+					field := requireElement(t, n, "input", "name", tc.field)
+					if attr(field, "type") != "hidden" || !hasAttr(field, "value") {
+						t.Errorf("%s lacks hidden %s value", button, tc.field)
+					}
+					got[button] = attr(field, "value")
+				}
+			})
+			if !reflect.DeepEqual(got, tc.buttonValues) {
+				t.Errorf("%s by button = %v, want %v", tc.field, got, tc.buttonValues)
+			}
+		})
+	}
+}
+
 func TestDangerFormsKeepConfirm(t *testing.T) {
 	p := newFormPages(t)
-	for _, route := range p.paths() {
-		walkHTML(parseHTML(t, p.viewBody(route)), func(n *html.Node) {
+	type counts struct{ drop, deleteTask, deleteEntry, reopen int }
+	for _, tc := range []struct {
+		route string
+		want  counts
+	}{
+		{"/ui/", counts{}},
+		{"/ui/triage", counts{drop: 2}},
+		{"/ui/backlog", counts{drop: 4}}, // Three backlog fixtures plus the focused task.
+		{"/ui/upcoming", counts{}},
+		{"/ui/log", counts{deleteEntry: 3}},
+		{"/ui/log?include_deleted=1", counts{deleteEntry: 3}},
+		{"/ui/recap", counts{deleteEntry: 3}},
+		{"/ui/search?q=x", counts{}},
+		{taskPagePath(p.focus), counts{drop: 1, deleteTask: 1, deleteEntry: 1}},
+		{taskPagePath(p.done), counts{deleteTask: 1, deleteEntry: 1, reopen: 1}},
+		{taskPagePath(p.dropped), counts{deleteTask: 1, reopen: 1}},
+		{taskPagePath(p.deleted), counts{}},
+	} {
+		var got counts
+		walkHTML(parseHTML(t, p.viewBody(tc.route)), func(n *html.Node) {
 			if n.Data != "form" {
 				return
 			}
 			action := attr(n, "action")
 			switch path.Base(action) {
-			case "drop", "delete", "reopen":
-				if strings.TrimSpace(attr(n, "hx-confirm")) == "" {
-					t.Errorf("%s: %s lacks hx-confirm", route, action)
+			case "drop":
+				got.drop++
+			case "delete":
+				if strings.HasPrefix(action, "/ui/entries/") {
+					got.deleteEntry++
+				} else {
+					got.deleteTask++
 				}
+			case "reopen":
+				got.reopen++
+			default:
+				return
+			}
+			if strings.TrimSpace(attr(n, "hx-confirm")) == "" {
+				t.Errorf("%s: %s lacks hx-confirm", tc.route, action)
 			}
 		})
+		if got != tc.want {
+			t.Errorf("%s: danger forms = %+v, want %+v", tc.route, got, tc.want)
+		}
 	}
 }
 
@@ -296,9 +371,20 @@ func TestPrimaryActionRows(t *testing.T) {
 				tag = "div"
 			}
 			card := requireElement(t, parseHTML(t, p.viewBody(tc.page)), tag, "data-task", fmt.Sprint(tc.id))
+			if tc.page == taskPagePath(tc.id) && tc.id != p.deleted {
+				edit := requireElement(t, card, "form", "action", tc.page+"/edit").Parent
+				if edit.Data != "details" || edit.Parent != card || nodeText(requireElement(t, edit, "summary", "class", "")) != "Edit task" {
+					t.Error("Edit task must be a top-level disclosure")
+				}
+				tags := requireElement(t, card, "section", "aria-label", "Tags")
+				due := requireElement(t, card, "form", "action", tc.page+"/due")
+				if tags.Parent != card || due.Parent != card {
+					t.Error("Tags and Due must be visible outside disclosures")
+				}
+			}
 			var rows []*html.Node
 			for child := range card.ChildNodes() {
-				if child.Type == html.ElementNode && (attr(child, "class") == "actions" || child.Data == "details") {
+				if child.Type == html.ElementNode && (attr(child, "class") == "actions" || (child.Data == "details" && attr(child, "class") == "more")) {
 					rows = append(rows, child)
 				}
 			}
@@ -324,7 +410,7 @@ func TestPrimaryActionRows(t *testing.T) {
 			if summary != "More" {
 				t.Errorf("disclosure summary = %q", summary)
 			}
-			checkButtons(t, requireElement(t, rows[1], "div", "class", "actions"), tc.more)
+			checkButtons(t, rows[1], tc.more)
 		})
 	}
 }

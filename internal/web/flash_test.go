@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"golang.org/x/net/html"
+
 	"taskronin/internal/domain"
 	"taskronin/internal/service"
 	"taskronin/internal/web"
@@ -159,4 +161,23 @@ func TestMutateEmptyFlashPreservesPending(t *testing.T) {
 	if got := flashText(t, ta.viewBody("/ui/")); got != "#1 created\n#1 needs triage (new)" {
 		t.Errorf("pending flash = %q", got)
 	}
+}
+
+func TestFlashEscapesHTML(t *testing.T) {
+	ta := newTestApp(t).login()
+	route := taskPagePath(ta.addTask(service.AddTaskIn{Title: "Original"}))
+	assertRedirect(t, ta.submit(route, route+"/edit", url.Values{"title": {"<b>x</b>"}}), route)
+	banner := requireElement(t, parseHTML(t, ta.viewBody(route)), "section", "class", "flash")
+	if mark := requireElement(t, banner, "span", "class", "flash-mark"); nodeText(mark) != "✓" {
+		t.Errorf("flash mark = %q", nodeText(mark))
+	}
+	line := requireElement(t, banner, "li", "class", "")
+	if got := nodeText(line); !strings.Contains(got, "<b>x</b>") {
+		t.Errorf("flash line = %q, want literal title", got)
+	}
+	walkHTML(line, func(n *html.Node) {
+		if n.Type == html.ElementNode && n.Data == "b" {
+			t.Error("title rendered a b element in the flash line")
+		}
+	})
 }

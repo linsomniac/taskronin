@@ -11,7 +11,7 @@
 <h2>{{day .Date}}</h2>
 {{range .Entries}}{{template "entryrow" (row $ .)}}{{end}}
 </section>
-{{else}}<p>No entries in this date range.</p>{{end}}
+{{else}}<p class="empty">No entries in this range. Log one below.</p>{{end}}
 {{if .Data.More}}<a href="{{.Data.More}}">More</a>{{end}}
 {{template "logentry" (row $ .Data.LogEntry)}}
 {{end}}

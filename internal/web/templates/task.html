@@ -17,6 +17,7 @@
 <button type="submit" class="btn primary">Undelete</button>
 </form>
 {{else if eq .Status "open"}}
+{{/* AIDEV-NOTE: One Complete form submits both ways. Keep its button outside the options disclosure so it is always visible. */}}
 <form method="post" action="/ui/tasks/{{.ID}}/complete">
 {{template "hidden" $}}
 <input type="hidden" name="etag" value="{{etag $.Gen .Version}}">
@@ -107,6 +108,7 @@
 <button type="submit" class="btn danger">Delete</button>
 </form>
 </div>
+</details>
 <details><summary>Edit task</summary>
 <form method="post" action="/ui/tasks/{{.ID}}/edit">
 {{template "hidden" $}}
@@ -123,6 +125,7 @@
 </select></label>
 <button type="submit">Save task</button>
 </form>
+</details>
 
 <section aria-label="Tags">
 <h2>Tags</h2>
@@ -148,27 +151,25 @@
 <label>Due (or none) <input name="due" value="{{if .DueDate.Valid}}{{.DueDate.V}}{{if .DueMin.Valid}} {{hhmm .DueMin.V}}{{end}}{{end}}" required></label>
 <button type="submit">Set due</button>
 </form>
-</details>
-</details>
 {{end}}
 </article>
 
 <section aria-label="Blocks">
 <h2>Blocks</h2>
-{{range .Blocks}}{{template "blockrow" (row $ .)}}{{else}}<p>No blocks.</p>{{end}}
+{{range .Blocks}}{{template "blockrow" (row $ .)}}{{else}}<p class="empty">No blocks.</p>{{end}}
 </section>
 <section aria-label="Entries">
 <h2>Entries</h2>
 {{range .Entries}}
 <p>{{day .WorkDate}}</p>
 {{template "entryrow" (row $ .)}}
-{{else}}<p>No entries.</p>{{end}}
+{{else}}<p class="empty">No entries.</p>{{end}}
 </section>
 <section aria-label="Interruptions">
 <h2>Interruptions</h2>
 {{range .Interruptions}}
 <p>{{wall .At}} — {{if .FromTaskID.Valid}}<a href="/ui/tasks/{{.FromTaskID.V}}">#{{.FromTaskID.V}}</a>{{end}}{{if .FromBlockID.Valid}} (block #{{.FromBlockID.V}}){{end}} → <a href="/ui/tasks/{{.ToTaskID}}">#{{.ToTaskID}}</a></p>
-{{else}}<p>No interruptions.</p>{{end}}
+{{else}}<p class="empty">No interruptions.</p>{{end}}
 </section>
 {{end}}
 {{end}}

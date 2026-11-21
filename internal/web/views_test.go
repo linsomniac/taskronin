@@ -679,3 +679,84 @@ func TestOneSidedDateFilters(t *testing.T) {
 		}
 	}
 }
+
+type emptyPage struct {
+	route string
+	lines []string
+}
+
+func emptyPageCopy(taskPath string) []emptyPage {
+	return []emptyPage{
+		{"/ui/", []string{"No focus. Pick a task below, or set one by ID.", "No blocks today. Schedule one from a task's actions.", "Triage clear.", "Nothing logged yet today.", "No interruptions today."}},
+		{"/ui/triage", []string{"Triage clear. Nothing needs a decision."}},
+		{"/ui/backlog", []string{"Backlog empty. New tasks start in Triage."}},
+		{"/ui/upcoming", []string{"Nothing deferred."}},
+		{"/ui/log", []string{"No entries in this range. Log one below."}},
+		{"/ui/search?q=" + url.QueryEscape("<b>needle</b>"), []string{"No matches for “<b>needle</b>”."}},
+		{"/ui/report", []string{"No work logged in this range."}},
+		{"/ui/recap", []string{"Nothing to recap for today.", "No blocks on this date.", "No linked entries on this date.", "No unlinked entries.", "No interruptions on this date."}},
+		{taskPath, []string{"No blocks.", "No entries.", "No interruptions."}},
+	}
+}
+
+func TestEmptyStateCopy(t *testing.T) {
+	ta := newTestApp(t).login()
+	// A deleted task still has a detail page and leaves the lists empty.
+	id := ta.addTask(service.AddTaskIn{Title: "Archived"})
+	ta.mustOp(ta.Svc.Delete(t.Context(), ta.meta(), service.TaskRef{ID: id, Expect: ta.taskExpect(id)}))
+	for date, label := range map[string]string{"2026-10-27": "yesterday", "2026-10-29": "tomorrow", "2026-10-25": "Sun 2026-10-25"} {
+		requireText(t, ta.viewBody("/ui/recap?date="+date), "Nothing to recap for "+label+".")
+	}
+	for _, tc := range emptyPageCopy(taskPagePath(id)) {
+		t.Run(tc.route, func(t *testing.T) {
+			page := parseHTML(t, ta.viewBody(tc.route))
+			var lines []string
+			walkHTML(page, func(n *html.Node) {
+				if n.Data == "p" && attr(n, "class") == "empty" {
+					lines = append(lines, nodeText(n))
+				}
+				if tc.route == "/ui/upcoming" && attr(n, "aria-label") == "Due soon" {
+					t.Error("empty Due soon section rendered")
+				}
+			})
+			if !slices.Equal(lines, tc.lines) {
+				t.Errorf("empty paragraphs = %q, want %q", lines, tc.lines)
+			}
+			if tc.route == "/ui/" {
+				blocks := requireElement(t, page, "section", "aria-label", "Today's blocks")
+				hint := requireElement(t, blocks, "span", "class", "muted")
+				if nodeText(hint) != "Schedule one from a task's actions." {
+					t.Errorf("block hint = %q", nodeText(hint))
+				}
+			}
+		})
+	}
+}
+
+func TestEmptyStatesExclusive(t *testing.T) {
+	ta := newTestApp(t).login()
+	id := ta.addTask(service.AddTaskIn{Title: "<b>needle</b>", Place: &service.AddPlacement{How: "bottom"}})
+	focus := sql.Null[domain.TaskID]{V: id, Valid: true}
+	other := ta.addTask(service.AddTaskIn{Title: "Previous focus"})
+	ta.mustOp(ta.Svc.SetFocus(t.Context(), ta.meta(), service.SetFocusIn{TaskID: sql.Null[domain.TaskID]{V: other, Valid: true}}))
+	ta.mustOp(ta.Svc.SetFocus(t.Context(), ta.meta(), service.SetFocusIn{TaskID: focus, Interrupt: true}))
+	if strings.Contains(nodeText(parseHTML(t, ta.viewBody("/ui/recap"))), "Nothing to recap") {
+		t.Error("recap summary rendered on a day with only an interruption")
+	}
+	ta.addTask(service.AddTaskIn{Title: "New task"})
+	ta.addTask(service.AddTaskIn{Title: "Later", Place: &service.AddPlacement{How: "defer", Defer: testutil.Moment("10-30")}})
+	ta.mustOp(ta.Svc.Block(t.Context(), ta.meta(), service.BlockIn{TaskID: id, Expect: ta.taskExpect(id),
+		Span: domain.BlockSpan{Date: testutil.D("10-28"), Start: 13 * 60, End: 14 * 60}}))
+	ta.mustOp(ta.Svc.AddEntry(t.Context(), ta.meta(), service.AddEntryIn{TaskID: focus, Title: "Linked"}))
+	ta.mustOp(ta.Svc.AddEntry(t.Context(), ta.meta(), service.AddEntryIn{Title: "Standalone"}))
+	for _, tc := range emptyPageCopy(taskPagePath(id)) {
+		t.Run(tc.route, func(t *testing.T) {
+			content := nodeText(parseHTML(t, ta.viewBody(tc.route)))
+			for _, line := range tc.lines {
+				if strings.Contains(content, line) {
+					t.Errorf("populated page shows %q", line)
+				}
+			}
+		})
+	}
+}

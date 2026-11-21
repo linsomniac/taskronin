@@ -240,10 +240,10 @@ func TestRecapReportEmpty(t *testing.T) {
 	ta := newTestApp(t).login()
 	recap := ta.viewBody("/ui/recap")
 	requireText(t, recap, "No blocks on this date.", "No linked entries on this date.",
-		"No unlinked entries on this date.", "No interruptions on this date.")
+		"No unlinked entries.", "No interruptions on this date.")
 
 	report := ta.viewBody("/ui/report?todo=1&upcoming=1")
-	requireText(t, report, "No entries in this date range.", "Nothing to triage.",
+	requireText(t, report, "No work logged in this range.", "Nothing to triage.",
 		"No backlog tasks.", "No upcoming tasks.")
 }
 

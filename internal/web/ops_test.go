@@ -35,7 +35,7 @@ func TestFocusSetAndClear(t *testing.T) {
 	if err != nil || today.Focus != nil {
 		t.Fatalf("focus clear = %+v, %v", today, err)
 	}
-	requireText(t, ta.viewBody("/ui/"), "No focus task.")
+	requireText(t, ta.viewBody("/ui/"), "No focus. Pick a task below, or set one by ID.")
 	assertRedirect(t, ta.submit("/ui/tasks/1", "/ui/focus", nil), "/ui/tasks/1")
 	// Select Today's set form (the clear form has the same action).
 	body := ta.viewBody("/ui/")

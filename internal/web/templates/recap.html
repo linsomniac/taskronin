@@ -4,23 +4,31 @@
 <label>Date <input name="date" value="{{.Data.Date}}"></label>
 <button type="submit">Show recap</button>
 </form>
+{{if not (or .Data.Blocks .Data.Entries .Data.Interruptions)}}
+{{$days := .Data.Date.DaysSince .Today}}
+{{$label := day .Data.Date}}
+{{if eq $days 0}}{{$label = "today"}}
+{{else if eq $days -1}}{{$label = "yesterday"}}
+{{else if eq $days 1}}{{$label = "tomorrow"}}{{end}}
+<p class="empty">Nothing to recap for {{$label}}.</p>
+{{end}}
 <section aria-label="Blocks">
 <h2>Blocks</h2>
-{{range .Data.Blocks}}{{template "blockrow" (row $ .)}}{{else}}<p>No blocks on this date.</p>{{end}}
+{{range .Data.Blocks}}{{template "blockrow" (row $ .)}}{{else}}<p class="empty">No blocks on this date.</p>{{end}}
 </section>
 <section aria-label="Entries">
 <h2>Entries</h2>
-{{range .Data.Linked}}{{template "entryrow" (row $ .)}}{{else}}<p>No linked entries on this date.</p>{{end}}
+{{range .Data.Linked}}{{template "entryrow" (row $ .)}}{{else}}<p class="empty">No linked entries on this date.</p>{{end}}
 </section>
 <section aria-label="Unlinked entries">
 <h2>Unlinked entries</h2>
-{{range .Data.Unlinked}}{{template "entryrow" (row $ .)}}{{else}}<p>No unlinked entries on this date.</p>{{end}}
+{{range .Data.Unlinked}}{{template "entryrow" (row $ .)}}{{else}}<p class="empty">No unlinked entries.</p>{{end}}
 </section>
 <section aria-label="Interruptions">
 <h2>Interruptions</h2>
 {{range .Data.Interruptions}}
 <p>{{wall .At}} — {{if .FromTaskID.Valid}}<a href="/ui/tasks/{{.FromTaskID.V}}">#{{.FromTaskID.V}}</a>{{end}}{{if .FromBlockID.Valid}} (block #{{.FromBlockID.V}}){{end}} → <a href="/ui/tasks/{{.ToTaskID}}">#{{.ToTaskID}}</a></p>
-{{else}}<p>No interruptions on this date.</p>{{end}}
+{{else}}<p class="empty">No interruptions on this date.</p>{{end}}
 </section>
 {{template "logentry" (row $ .Data.LogEntry)}}
 {{end}}
