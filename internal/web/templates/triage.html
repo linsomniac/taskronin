@@ -12,42 +12,49 @@
 </form>
 {{end}}
 {{range .Data.Items}}
-<section aria-label="Task #{{.ID}}">
-{{template "taskrow" (row $ .TaskView)}}
+<article class="card task" data-task="{{.ID}}" aria-label="Task #{{.ID}}">
+{{template "taskheading" .TaskView}}
+<div class="actions">
 <form method="post" action="/ui/tasks/{{.ID}}/place">
 {{template "hidden" $}}
 <input type="hidden" name="etag" value="{{etag $.Gen .Version}}">
 <input type="hidden" name="how" value="keep">
-<button type="submit">Keep</button>
+<button type="submit" class="btn secondary">Keep</button>
 </form>
 <form method="post" action="/ui/tasks/{{.ID}}/place">
 {{template "hidden" $}}
 <input type="hidden" name="etag" value="{{etag $.Gen .Version}}">
 <input type="hidden" name="how" value="top">
-<button type="submit">Top</button>
+<button type="submit" class="btn secondary">Top</button>
 </form>
 <form method="post" action="/ui/tasks/{{.ID}}/place">
 {{template "hidden" $}}
 <input type="hidden" name="etag" value="{{etag $.Gen .Version}}">
 <input type="hidden" name="how" value="bottom">
-<button type="submit">Bottom</button>
+<button type="submit" class="btn secondary">Bottom</button>
 </form>
+{{template "complete" (row $ .TaskView)}}
+</div>
+<details class="more"><summary>More</summary>
+<div class="actions">
 <form method="post" action="/ui/tasks/{{.ID}}/place">
 {{template "hidden" $}}
 <input type="hidden" name="etag" value="{{etag $.Gen .Version}}">
 <input type="hidden" name="how" value="before">
 <label>Before task ID <input name="ref" required></label>
-<button type="submit">Place before</button>
+<button type="submit" class="btn secondary">Place before</button>
 </form>
 <form method="post" action="/ui/tasks/{{.ID}}/place">
 {{template "hidden" $}}
 <input type="hidden" name="etag" value="{{etag $.Gen .Version}}">
 <input type="hidden" name="how" value="after">
 <label>After task ID <input name="ref" required></label>
-<button type="submit">Place after</button>
+<button type="submit" class="btn secondary">Place after</button>
 </form>
 {{template "taskactions" (row $ .TaskView)}}
-</section>
+</div>
+</details>
+</article>
 {{else}}<p>Nothing to triage.</p>{{end}}
 {{if .Data.More}}<a href="{{.Data.More}}">More</a>{{end}}
 {{end}}

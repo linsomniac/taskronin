@@ -9,18 +9,16 @@
 <h2>Focus</h2>
 {{with .Data.Focus}}
 <div class="card focus" data-task="{{.ID}}">
-<h3 class="card-title">▶ {{template "tasklink" .}}</h3>
+<h3 class="card-title"><span aria-hidden="true">▶</span> {{template "tasklink" .}}</h3>
 {{template "taskmeta" .}}
-<form method="post" action="/ui/tasks/{{.ID}}/complete">
-{{template "hidden" $}}
-<input type="hidden" name="etag" value="{{etag $.Gen .Version}}">
-<button type="submit">Complete</button>
-</form>
+<div class="actions">
+{{template "complete" (row $ .)}}
 <form method="post" action="/ui/focus">
 {{template "hidden" $}}
 <input type="hidden" name="task_id" value="">
-<button type="submit">Clear focus</button>
+<button type="submit" class="btn secondary">Clear focus</button>
 </form>
+</div>
 </div>
 {{else}}<p>No focus task.</p>{{end}}
 <form method="post" action="/ui/focus">

@@ -15,9 +15,13 @@ row data and .P for page state, including {{template "hidden" .P}} and
 
 {{define "taskrow"}}
 <article class="card task" data-task="{{.V.ID}}">
-<h3 class="card-title">{{template "tasklink" .V}}</h3>
-{{template "taskmeta" .V}}
+{{template "taskheading" .V}}
 </article>
+{{end}}
+
+{{define "taskheading"}}
+<h3 class="card-title">{{template "tasklink" .}}</h3>
+{{template "taskmeta" .}}
 {{end}}
 
 {{define "tasklink"}}<a href="/ui/tasks/{{.ID}}"><span class="id">#{{.ID}}</span> {{.Title}}</a>{{end}}
@@ -26,7 +30,7 @@ row data and .P for page state, including {{template "hidden" .P}} and
 <p class="meta">
 {{range .Reasons}}<span class="chip warn reason">{{.Reason}}</span> {{end}}
 {{if gt .SlipsLifetime 0}}<span class="chip bad" title="Slips: lifetime / since triage">slipped ×{{.SlipsLifetime}}</span>{{end}}
-{{if eq .DuePhase "overdue"}}<span class="chip bad">overdue</span>{{else if .DueDate.Valid}}<span class="chip warn">due {{day .DueDate.V}}</span>{{end}}
+{{if eq .DuePhase "overdue"}}<span class="chip bad">overdue</span>{{else if .DueDate.Valid}}<span class="chip warn">due {{day .DueDate.V}}{{if .DueMin.Valid}} {{hhmm .DueMin.V}}{{end}}</span>{{end}}
 {{if .DueSoon}}<span class="chip warn">due soon</span>{{end}}
 {{if .DeferDate.Valid}}<span class="chip">deferred until {{day .DeferDate.V}}{{if .DeferMin.Valid}} {{hhmm .DeferMin.V}}{{end}}</span>{{end}}
 {{range .Tags}}<span class="chip tag">{{.}}</span> {{end}}
@@ -35,28 +39,32 @@ row data and .P for page state, including {{template "hidden" .P}} and
 </p>
 {{end}}
 
+{{/* AIDEV-NOTE: Triage and Backlog keep Complete in the primary row. Render taskactions inside More. */}}
+{{define "complete"}}
+<form method="post" action="/ui/tasks/{{.V.ID}}/complete">
+{{template "hidden" .P}}
+<input type="hidden" name="etag" value="{{etag .P.Gen .V.Version}}">
+<button type="submit" class="btn primary">Complete</button>
+</form>
+{{end}}
+
 {{define "taskactions"}}
 <form method="post" action="/ui/tasks/{{.V.ID}}/defer">
 {{template "hidden" .P}}
 <input type="hidden" name="etag" value="{{etag .P.Gen .V.Version}}">
 <label>Defer until <input name="until" placeholder="fri 9:00" required></label>
-<button type="submit">Defer</button>
+<button type="submit" class="btn secondary">Defer</button>
 </form>
 <form method="post" action="/ui/tasks/{{.V.ID}}/block">
 {{template "hidden" .P}}
 <input type="hidden" name="etag" value="{{etag .P.Gen .V.Version}}">
 <label>Block <input name="span" placeholder="13:00-15:00" required></label>
-<button type="submit">Schedule block</button>
-</form>
-<form method="post" action="/ui/tasks/{{.V.ID}}/complete">
-{{template "hidden" .P}}
-<input type="hidden" name="etag" value="{{etag .P.Gen .V.Version}}">
-<button type="submit">Complete</button>
+<button type="submit" class="btn secondary">Block</button>
 </form>
 <form method="post" action="/ui/tasks/{{.V.ID}}/drop" hx-confirm="Drop #{{.V.ID}} {{.V.Title}}?">
 {{template "hidden" .P}}
 <input type="hidden" name="etag" value="{{etag .P.Gen .V.Version}}">
-<button type="submit">Drop</button>
+<button type="submit" class="btn danger">Drop</button>
 </form>
 {{end}}
 
@@ -165,13 +173,15 @@ pages set Tab to task/recap to offer it for every planned block (DF20). */}}
 <label>Priority <select name="priority">
 <option value="" selected>None</option><option value="H">High</option><option value="M">Medium</option><option value="L">Low</option>
 </select></label>
+<details class="more"><summary>Placement</summary>
 <label>Placement <select name="place">
 <option value="" selected>Triage</option><option value="top">Top</option><option value="bottom">Bottom</option><option value="now">Now</option><option value="before">Before</option><option value="after">After</option><option value="defer">Defer</option><option value="block">Block</option>
 </select></label>
 <label>Reference task ID (before/after) <input name="ref"></label>
 <label>Defer until <input name="defer" placeholder="fri 9:00"></label>
 <label>Block span <input name="span" placeholder="13:00-15:00"></label>
-<button type="submit">Add task</button>
+</details>
+<button type="submit" class="btn primary">Add task</button>
 </form>
 </details>
 {{end}}

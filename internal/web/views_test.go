@@ -42,6 +42,7 @@ func (ta *testApp) viewBody(path string) string {
 		ta.t.Fatalf("GET %s = %d %s; logs: %s", path, w.Code, w.Body, ta.Logs)
 	}
 	body := w.Body.String()
+	entityAction := regexp.MustCompile(`^/ui/(tasks|entries|blocks)/[0-9]+/`)
 	nonces := make(map[string]bool)
 	csrf := ""
 	walkHTML(parseHTML(ta.t, body), func(n *html.Node) {
@@ -70,6 +71,9 @@ func (ta *testApp) viewBody(path string) string {
 			ta.t.Errorf("%s: invalid or reused nonce %q", path, nonce)
 		}
 		nonces[nonce] = true
+		if entityAction.MatchString(attr(n, "action")) && len(values["etag"]) != 1 {
+			ta.t.Errorf("%s: %s missing one hidden etag", path, attr(n, "action"))
+		}
 		for _, key := range []string{"etag", "task_etag"} {
 			for _, value := range values[key] {
 				expect, err := domain.ParseETag(value)
@@ -145,6 +149,10 @@ func TestTodayPage(t *testing.T) {
 	requireText(t, body, "13:00", "15:00", "Drafted intro", "Triage (1)")
 	focus := requireElement(t, parseHTML(t, body), "div", "class", "card focus")
 	title := requireElement(t, focus, "h3", "class", "card-title")
+	mark := requireElement(t, title, "span", "aria-hidden", "true")
+	if got := nodeText(mark); got != "▶" {
+		t.Errorf("decorative focus mark = %q", got)
+	}
 	if got := nodeText(title); got != "▶ #1 Write report" {
 		t.Errorf("focus title = %q", got)
 	}
@@ -230,13 +238,15 @@ func TestTriagePage(t *testing.T) {
 
 func TestTaskCardChips(t *testing.T) {
 	ta := newTestApp(t)
-	id := ta.addTask(service.AddTaskIn{Title: "Draft", Due: ptrMoment(testutil.Moment("10-29")),
+	id := ta.addTask(service.AddTaskIn{Title: "Draft", Due: ptrMoment(testutil.Moment("10-29 13:00")),
 		Tags: []string{"docs", "web"}, Project: "Writing", Priority: domain.PriorityH})
 	first := ta.task(id)
 	// Scheduling a block acknowledges "new". Supply the slip counts on the
 	// snapshot to exercise both presentations together in the Triage template.
 	first.SlipsLifetime, first.SlipsSinceTriage = 2, 1
-	second := ta.task(ta.addTask(service.AddTaskIn{Title: "No misses"}))
+	id = ta.addTask(service.AddTaskIn{Title: "No misses", Due: ptrMoment(testutil.Moment("10-29"))})
+	ta.Clock.Set(testutil.Local(t, "2026-10-30 10:00"))
+	second := ta.task(id)
 	tmpl, err := ta.App.Template("triage")
 	if err != nil {
 		t.Fatal(err)
@@ -255,6 +265,10 @@ func TestTaskCardChips(t *testing.T) {
 	if strings.Contains(nodeText(zero), "slipped") || strings.Contains(nodeText(page), "Slips L/S") {
 		t.Error("unexpected slip count on Triage")
 	}
+	overdue := requireElement(t, zero, "span", "class", "chip bad")
+	if got := nodeText(overdue); got != "overdue" {
+		t.Errorf("overdue chip = %q", got)
+	}
 	meta := requireElement(t, card, "p", "class", "meta")
 	var spans []string
 	walkHTML(meta, func(n *html.Node) {
@@ -262,7 +276,7 @@ func TestTaskCardChips(t *testing.T) {
 			spans = append(spans, attr(n, "class")+" | "+nodeText(n))
 		}
 	})
-	want := []string{"chip warn reason | new", "chip bad | slipped ×2", "chip warn | due Thu 2026-10-29",
+	want := []string{"chip warn reason | new", "chip bad | slipped ×2", "chip warn | due Thu 2026-10-29 13:00",
 		"chip warn | due soon", "chip tag | docs", "chip tag | web", "muted | Writing", "chip | prio H"}
 	if !slices.Equal(spans, want) {
 		t.Errorf("task metadata = %q, want %q", spans, want)

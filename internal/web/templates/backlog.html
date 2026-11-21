@@ -1,15 +1,16 @@
 {{define "content"}}
 <h1>Backlog</h1>
 {{range .Data.Items}}
-<section aria-label="Task #{{.ID}}">
-{{template "taskrow" (row $ .TaskView)}}
+<article class="card task" data-task="{{.ID}}" aria-label="Task #{{.ID}}">
+{{template "taskheading" .TaskView}}
+<div class="actions">
 {{if .Prev}}
 <form method="post" action="/ui/tasks/{{.ID}}/place">
 {{template "hidden" $}}
 <input type="hidden" name="etag" value="{{etag $.Gen .Version}}">
 <input type="hidden" name="how" value="before">
 <input type="hidden" name="ref" value="{{.Prev}}">
-<button type="submit">Up</button>
+<button type="submit" class="btn secondary">Up</button>
 </form>
 {{end}}
 {{if .Next}}
@@ -18,33 +19,39 @@
 <input type="hidden" name="etag" value="{{etag $.Gen .Version}}">
 <input type="hidden" name="how" value="after">
 <input type="hidden" name="ref" value="{{.Next}}">
-<button type="submit">Down</button>
+<button type="submit" class="btn secondary">Down</button>
 </form>
 {{end}}
+<form method="post" action="/ui/focus">
+{{template "hidden" $}}
+<input type="hidden" name="task_id" value="{{.ID}}">
+<button type="submit" class="btn secondary">Focus</button>
+</form>
+{{template "complete" (row $ .TaskView)}}
+</div>
+<details class="more"><summary>More</summary>
+<div class="actions">
 <form method="post" action="/ui/tasks/{{.ID}}/place">
 {{template "hidden" $}}
 <input type="hidden" name="etag" value="{{etag $.Gen .Version}}">
 <input type="hidden" name="how" value="top">
-<button type="submit">Top</button>
+<button type="submit" class="btn secondary">Top</button>
 </form>
 <form method="post" action="/ui/tasks/{{.ID}}/place">
 {{template "hidden" $}}
 <input type="hidden" name="etag" value="{{etag $.Gen .Version}}">
 <input type="hidden" name="how" value="bottom">
-<button type="submit">Bottom</button>
+<button type="submit" class="btn secondary">Bottom</button>
 </form>
 <form method="post" action="/ui/tasks/{{.ID}}/triage">
 {{template "hidden" $}}
 <input type="hidden" name="etag" value="{{etag $.Gen .Version}}">
-<button type="submit">Send to triage</button>
-</form>
-<form method="post" action="/ui/focus">
-{{template "hidden" $}}
-<input type="hidden" name="task_id" value="{{.ID}}">
-<button type="submit">Focus</button>
+<button type="submit" class="btn secondary">Send to triage</button>
 </form>
 {{template "taskactions" (row $ .TaskView)}}
-</section>
+</div>
+</details>
+</article>
 {{else}}<p>No backlog tasks.</p>{{end}}
 {{if .Data.More}}<a href="{{.Data.More}}">More</a>{{end}}
 {{end}}

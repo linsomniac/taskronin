@@ -3,32 +3,40 @@
 <section aria-label="Deferred">
 <h2>Deferred</h2>
 {{range .Data.Deferred}}
-{{template "taskrow" (row $ .)}}
-<form method="post" action="/ui/tasks/{{.ID}}/defer">
-{{template "hidden" $}}
-<input type="hidden" name="etag" value="{{etag $.Gen .Version}}">
-<label>Defer until <input name="until" value="{{if .DeferDate.Valid}}{{.DeferDate.V}}{{if .DeferMin.Valid}} {{hhmm .DeferMin.V}}{{end}}{{end}}" required></label>
-<button type="submit">Change defer</button>
-</form>
+<article class="card task" data-task="{{.ID}}">
+{{template "taskheading" .}}
+<div class="actions">
 <form method="post" action="/ui/tasks/{{.ID}}/defer">
 {{template "hidden" $}}
 <input type="hidden" name="etag" value="{{etag $.Gen .Version}}">
 <input type="hidden" name="until" value="none">
-<button type="submit">Keep</button>
+<button type="submit" class="btn secondary">Keep</button>
 </form>
+<form method="post" action="/ui/tasks/{{.ID}}/defer">
+{{template "hidden" $}}
+<input type="hidden" name="etag" value="{{etag $.Gen .Version}}">
+<label>Defer until <input name="until" value="{{if .DeferDate.Valid}}{{.DeferDate.V}}{{if .DeferMin.Valid}} {{hhmm .DeferMin.V}}{{end}}{{end}}" required></label>
+<button type="submit" class="btn primary">Change defer</button>
+</form>
+</div>
+</article>
 {{else}}<p>No deferred tasks.</p>{{end}}
 </section>
 {{with .Data.DueSoon}}
 <section aria-label="Due soon">
 <h2>Due soon</h2>
 {{range .}}
-{{template "taskrow" (row $ .)}}
+<article class="card task" data-task="{{.ID}}">
+{{template "taskheading" .}}
+<div class="actions">
 <form method="post" action="/ui/tasks/{{.ID}}/due">
 {{template "hidden" $}}
 <input type="hidden" name="etag" value="{{etag $.Gen .Version}}">
 <label>Due (or none) <input name="due" value="{{if .DueDate.Valid}}{{.DueDate.V}}{{if .DueMin.Valid}} {{hhmm .DueMin.V}}{{end}}{{end}}" required></label>
-<button type="submit">Set due</button>
+<button type="submit" class="btn primary">Set due</button>
 </form>
+</div>
+</article>
 {{end}}
 </section>
 {{end}}

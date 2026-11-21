@@ -1,15 +1,23 @@
 package web_test
 
 import (
+	"bytes"
+	"database/sql"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
+	"golang.org/x/net/html"
+
 	"taskronin/internal/datespec"
 	"taskronin/internal/domain"
+	"taskronin/internal/service"
 	"taskronin/internal/testutil"
 	"taskronin/internal/web"
 )
@@ -193,5 +201,224 @@ func TestFormUnrecognisedDateMessage(t *testing.T) {
 	requireFieldErrors(t, w.Body.String(), "due")
 	if !strings.Contains(nodeText(parseHTML(t, w.Body.String())), want) {
 		t.Fatalf("date field error missing: %s", w.Body)
+	}
+}
+
+type formPages struct {
+	*testApp
+	triage, middle, focus, deferred, due, done, dropped, deleted domain.TaskID
+}
+
+func newFormPages(t *testing.T) formPages {
+	t.Helper()
+	ta := newTestApp(t).login()
+	p := formPages{testApp: ta}
+	p.triage = ta.addTask(service.AddTaskIn{Title: "x", Tags: []string{"docs"}})
+	for _, title := range []string{"First", "Middle", "Last"} {
+		id := ta.addTask(service.AddTaskIn{Title: title, Place: &service.AddPlacement{How: "bottom"}})
+		if title == "Middle" {
+			p.middle = id
+		}
+	}
+	p.focus = ta.addTask(service.AddTaskIn{Title: "Focus", Tags: []string{"docs"}})
+	p.deferred = ta.addTask(service.AddTaskIn{Title: "Deferred", Place: &service.AddPlacement{How: "defer", Defer: testutil.Moment("10-30 09:00")}})
+	p.due = ta.addTask(service.AddTaskIn{Title: "Due soon", Due: ptrMoment(testutil.Moment("10-29 13:00"))})
+	p.done = ta.addTask(service.AddTaskIn{Title: "Done"})
+	ta.mustOp(ta.Svc.Complete(t.Context(), ta.meta(), service.CompleteIn{ID: p.done, Expect: ta.taskExpect(p.done)}))
+	p.dropped = ta.addTask(service.AddTaskIn{Title: "Dropped"})
+	ta.mustOp(ta.Svc.Drop(t.Context(), ta.meta(), service.TaskRef{ID: p.dropped, Expect: ta.taskExpect(p.dropped)}))
+	p.deleted = ta.addTask(service.AddTaskIn{Title: "Deleted"})
+	ta.mustOp(ta.Svc.Delete(t.Context(), ta.meta(), service.TaskRef{ID: p.deleted, Expect: ta.taskExpect(p.deleted)}))
+
+	focus := sql.Null[domain.TaskID]{V: p.focus, Valid: true}
+	ta.mustOp(ta.Svc.Block(t.Context(), ta.meta(), service.BlockIn{TaskID: p.focus, Expect: ta.taskExpect(p.focus),
+		Span: domain.BlockSpan{Date: testutil.D("10-28"), Start: 13 * 60, End: 15 * 60}}))
+	ta.mustOp(ta.Svc.SetFocus(t.Context(), ta.meta(), service.SetFocusIn{TaskID: focus}))
+	ta.mustOp(ta.Svc.AddEntry(t.Context(), ta.meta(), service.AddEntryIn{Title: "Linked", TaskID: focus}))
+	ta.mustOp(ta.Svc.AddEntry(t.Context(), ta.meta(), service.AddEntryIn{Title: "Standalone"}))
+	entry := ta.mustOp(ta.Svc.AddEntry(t.Context(), ta.meta(), service.AddEntryIn{Title: "Deleted entry"})).Entry
+	ta.mustOp(ta.Svc.DeleteEntry(t.Context(), ta.meta(), service.EntryRef{ID: entry.ID, Expect: domain.Expect{Gen: ta.Svc.Generation(), Version: entry.Version}}))
+	return p
+}
+
+func taskPagePath(id domain.TaskID) string { return fmt.Sprintf("/ui/tasks/%d", id) }
+
+func (p formPages) paths() []string {
+	return []string{"/ui/", "/ui/triage", "/ui/backlog", "/ui/upcoming", "/ui/log", "/ui/log?include_deleted=1",
+		"/ui/recap", "/ui/search?q=x", taskPagePath(p.focus), taskPagePath(p.done), taskPagePath(p.dropped), taskPagePath(p.deleted)}
+}
+
+func TestEveryFormKeepsHiddenFields(t *testing.T) {
+	p := newFormPages(t)
+	for _, route := range p.paths() {
+		p.viewBody(route) // Checks every POST's hidden inputs, including entity ETags.
+	}
+}
+
+func TestDangerFormsKeepConfirm(t *testing.T) {
+	p := newFormPages(t)
+	for _, route := range p.paths() {
+		walkHTML(parseHTML(t, p.viewBody(route)), func(n *html.Node) {
+			if n.Data != "form" {
+				return
+			}
+			action := attr(n, "action")
+			switch path.Base(action) {
+			case "drop", "delete", "reopen":
+				if strings.TrimSpace(attr(n, "hx-confirm")) == "" {
+					t.Errorf("%s: %s lacks hx-confirm", route, action)
+				}
+			}
+		})
+	}
+}
+
+func TestPrimaryActionRows(t *testing.T) {
+	p := newFormPages(t)
+	for _, tc := range []struct {
+		page          string
+		id            domain.TaskID
+		primary, more []string
+	}{
+		{"/ui/triage", p.triage, []string{"Keep", "Top", "Bottom", "Complete"}, []string{"Place before", "Place after", "Defer", "Block", "Drop"}},
+		{"/ui/backlog", p.middle, []string{"Up", "Down", "Focus", "Complete"}, []string{"Top", "Bottom", "Send to triage", "Defer", "Block", "Drop"}},
+		{"/ui/upcoming", p.deferred, []string{"Keep", "Change defer"}, nil},
+		{"/ui/upcoming", p.due, []string{"Set due"}, nil},
+		{taskPagePath(p.focus), p.focus, []string{"Complete", "Focus", "Keep"}, []string{"Top", "Bottom", "Place before", "Place after", "Defer", "Block", "Send to triage", "Drop", "Delete"}},
+		{taskPagePath(p.done), p.done, []string{"Reopen"}, []string{"Delete"}},
+		{taskPagePath(p.dropped), p.dropped, []string{"Reopen"}, []string{"Delete"}},
+		{taskPagePath(p.deleted), p.deleted, []string{"Undelete"}, nil},
+		{"/ui/", p.focus, []string{"Complete", "Clear focus"}, nil},
+	} {
+		t.Run(tc.page+"/"+fmt.Sprint(tc.id), func(t *testing.T) {
+			tag := "article"
+			if tc.page == "/ui/" {
+				tag = "div"
+			}
+			card := requireElement(t, parseHTML(t, p.viewBody(tc.page)), tag, "data-task", fmt.Sprint(tc.id))
+			var rows []*html.Node
+			for child := range card.ChildNodes() {
+				if child.Type == html.ElementNode && (attr(child, "class") == "actions" || child.Data == "details") {
+					rows = append(rows, child)
+				}
+			}
+			if len(rows) == 0 || rows[0].Data != "div" || attr(rows[0], "class") != "actions" {
+				t.Fatal("card missing primary action row")
+			}
+			checkButtons(t, rows[0], tc.primary)
+			if tc.more == nil {
+				if len(rows) != 1 {
+					t.Errorf("card has %d action groups, want one", len(rows))
+				}
+				return
+			}
+			if len(rows) != 2 || rows[1].Data != "details" || attr(rows[1], "class") != "more" || hasAttr(rows[1], "open") {
+				t.Fatal("primary row must be followed by a closed More disclosure")
+			}
+			var summary string
+			for child := range rows[1].ChildNodes() {
+				if child.Data == "summary" {
+					summary = nodeText(child)
+				}
+			}
+			if summary != "More" {
+				t.Errorf("disclosure summary = %q", summary)
+			}
+			checkButtons(t, requireElement(t, rows[1], "div", "class", "actions"), tc.more)
+		})
+	}
+}
+
+func checkButtons(t *testing.T, row *html.Node, want []string) {
+	t.Helper()
+	var got []string
+	walkHTML(row, func(n *html.Node) {
+		if n.Data != "button" {
+			return
+		}
+		label := nodeText(n)
+		got = append(got, label)
+		class := "btn secondary"
+		switch label {
+		case "Complete", "Change defer", "Set due", "Reopen", "Undelete":
+			class = "btn primary"
+		case "Drop", "Delete":
+			class = "btn danger"
+		}
+		if attr(n, "class") != class {
+			t.Errorf("%s class = %q, want %q", label, attr(n, "class"), class)
+		}
+	})
+	if !slices.Equal(got, want) {
+		t.Errorf("buttons = %q, want %q", got, want)
+	}
+}
+
+func TestFormDisclosures(t *testing.T) {
+	ta := newTestApp(t).login()
+	id := ta.addTask(service.AddTaskIn{Title: "Draft"})
+	for _, route := range []string{"/ui/", "/ui/triage", taskPagePath(id)} {
+		action, summary := "/ui/tasks", "Placement"
+		want := []string{"place", "ref", "defer", "span"}
+		if route == taskPagePath(id) {
+			action, summary = route+"/complete", "Complete with options"
+			want = []string{"as", "date", "log", "notes"}
+		}
+		form := requireElement(t, parseHTML(t, ta.viewBody(route)), "form", "action", action)
+		options := requireElement(t, form, "details", "class", "more")
+		if hasAttr(options, "open") || nodeText(requireElement(t, options, "summary", "class", "")) != summary {
+			t.Errorf("%s: want closed %q disclosure", route, summary)
+		}
+		var names []string
+		walkHTML(options, func(n *html.Node) {
+			if hasAttr(n, "name") {
+				names = append(names, attr(n, "name"))
+			}
+		})
+		if !slices.Equal(names, want) {
+			t.Errorf("%s: fields inside disclosure = %v, want %v", route, names, want)
+		}
+		if button := requireElement(t, form, "button", "type", "submit"); button.Parent != form || attr(button, "class") != "btn primary" {
+			t.Errorf("%s: expected primary submit outside disclosure", route)
+		}
+	}
+	if len(scrapeForms(t, ta.viewBody("/ui/backlog"), "/ui/tasks")) != 0 {
+		t.Error("add task form on Backlog")
+	}
+}
+
+func TestDeferredAndDueChips(t *testing.T) {
+	ta := newTestApp(t).login()
+	id := ta.addTask(service.AddTaskIn{Title: "Later", Due: ptrMoment(testutil.Moment("11-27 13:00")),
+		Place: &service.AddPlacement{How: "defer", Defer: testutil.Moment("10-30 09:00")}})
+	for _, route := range []string{"/ui/upcoming", taskPagePath(id)} {
+		card := requireElement(t, parseHTML(t, ta.viewBody(route)), "article", "data-task", fmt.Sprint(id))
+		for class, want := range map[string]string{"chip": "deferred until Fri 2026-10-30 09:00", "chip warn": "due Fri 2026-11-27 13:00"} {
+			if got := nodeText(requireElement(t, card, "span", "class", class)); got != want {
+				t.Errorf("%s: chip = %q, want %q", route, got, want)
+			}
+		}
+	}
+}
+
+func TestBlockStatusChips(t *testing.T) {
+	ta := newTestApp(t)
+	tmpl, err := ta.App.Template("task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	detail := ta.task(ta.addTask(service.AddTaskIn{Title: "Blocks"}))
+	for status, class := range map[domain.BlockStatus]string{
+		domain.BlockWorked: "chip ok", domain.BlockDone: "chip ok", domain.BlockMissed: "chip bad", domain.BlockCancelled: "chip muted",
+	} {
+		detail.Blocks = []domain.BlockView{{TimeBlock: domain.TimeBlock{ID: 1, Status: status}}}
+		var body bytes.Buffer
+		if err := tmpl.ExecuteTemplate(&body, "layout", web.Page{Data: detail}); err != nil {
+			t.Fatal(err)
+		}
+		block := requireElement(t, parseHTML(t, body.String()), "article", "data-block", "1")
+		if got := nodeText(requireElement(t, block, "span", "class", class)); got != string(status) {
+			t.Errorf("%s: chip text = %q", status, got)
+		}
 	}
 }
