@@ -32,7 +32,7 @@ type page struct {
 	Data       any
 	Err        *domain.Error
 	Resubmit   *resubmit
-	Flash      []string
+	Flash      flashMessage
 }
 
 type resubmit struct {
@@ -49,9 +49,9 @@ type resubmitField struct {
 	Long        bool
 }
 
-// AIDEV-NOTE: Row partials receive (row $ .), not just the row: use .P for
+// AIDEV-NOTE: Row form partials receive (row $ .), not just the row: use .P for
 // page state (template "hidden" .P, etag .P.Gen .V.Version), and .V for data.
-// Page forms use template "hidden" $; partials.html forms use "hidden" .P.
+// Page forms use template "hidden" $. Task heading/link/meta partials take a bare TaskView.
 // .P also carries the per-page markdown budget (md .P.MD .V.Notes).
 type rowCtx struct {
 	P page

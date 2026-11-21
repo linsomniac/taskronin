@@ -16,12 +16,36 @@ import (
 
 const flashCookie = "tr_flash"
 
+const warningPrefix = "⚠ "
+
+type flashLine string
+
+func (line flashLine) Class() string {
+	switch {
+	case strings.HasPrefix(string(line), warningPrefix):
+		return "warn"
+	case line == "no change" || line == "already applied":
+		return "muted"
+	default:
+		return ""
+	}
+}
+
+type flashMessage []flashLine
+
+func (lines flashMessage) HasEffects() bool {
+	// flashLines puts effects first, followed by warnings and status flags.
+	return len(lines) > 0 && lines[0].Class() == ""
+}
+
 func flashLines(res *service.OpResult) []string {
 	lines := make([]string, 0, len(res.Effects)+len(res.Warnings)+2)
 	for _, effect := range res.Effects {
 		lines = append(lines, effectLine(effect))
 	}
-	lines = append(lines, res.Warnings...)
+	for _, warning := range res.Warnings {
+		lines = append(lines, warningPrefix+warning)
+	}
 	if res.NoChange {
 		lines = append(lines, "no change")
 	}
@@ -114,7 +138,7 @@ func (a *app) setFlash(w http.ResponseWriter, r *http.Request, lines []string) {
 	setCookie(w, flashCookie, value, "/ui/", time.Time{}, 60)
 }
 
-func (a *app) readFlash(w http.ResponseWriter, r *http.Request) []string {
+func (a *app) readFlash(w http.ResponseWriter, r *http.Request) flashMessage {
 	cookies := r.CookiesNamed(flashCookie)
 	if len(cookies) == 0 {
 		return nil
@@ -143,7 +167,11 @@ func (a *app) readFlash(w http.ResponseWriter, r *http.Request) []string {
 		if err != nil || !hmac.Equal(mac, flashMAC(s.CSRF, text)) {
 			continue
 		}
-		return strings.Split(string(text), "\n")
+		var lines flashMessage
+		for line := range strings.SplitSeq(string(text), "\n") {
+			lines = append(lines, flashLine(line))
+		}
+		return lines
 	}
 	return nil
 }

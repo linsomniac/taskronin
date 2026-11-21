@@ -9,9 +9,10 @@
 <input type="hidden" name="_return" value="{{.Return}}">
 {{end}}
 
-{{/* AIDEV-NOTE: Invoke row partials with (row $ .). In them, use .V for
+{{/* AIDEV-NOTE: Invoke row form partials with (row $ .). In them, use .V for
 row data and .P for page state, including {{template "hidden" .P}} and
-{{etag .P.Gen .V.Version}} and {{md .P.MD .V.Notes}}. Page-level forms use {{template "hidden" $}}. */}}
+{{etag .P.Gen .V.Version}} and {{md .P.MD .V.Notes}}. Page-level forms use {{template "hidden" $}}.
+The taskheading, tasklink and taskmeta display partials take a TaskView directly. */}}
 
 {{define "taskrow"}}
 <article class="card task" data-task="{{.V.ID}}">
@@ -39,7 +40,7 @@ row data and .P for page state, including {{template "hidden" .P}} and
 </p>
 {{end}}
 
-{{/* AIDEV-NOTE: Triage and Backlog keep Complete in the primary row. Render taskactions inside More. */}}
+{{/* AIDEV-NOTE: Today, Triage and Backlog keep Complete in the primary row. Triage and Backlog render taskactions inside More. */}}
 {{define "complete"}}
 <form method="post" action="/ui/tasks/{{.V.ID}}/complete">
 {{template "hidden" .P}}
@@ -79,7 +80,7 @@ row data and .P for page state, including {{template "hidden" .P}} and
 <form method="post" action="/ui/entries/{{.V.ID}}/undelete">
 {{template "hidden" .P}}
 <input type="hidden" name="etag" value="{{etag .P.Gen .V.Version}}">
-<button type="submit">Undelete</button>
+<button type="submit" class="btn secondary">Undelete</button>
 </form>
 {{else}}
 <details><summary>Edit entry</summary>
@@ -93,7 +94,7 @@ row data and .P for page state, including {{template "hidden" .P}} and
 {{end}}
 <label>Notes <textarea name="notes">
 {{.V.Notes}}</textarea></label>
-<button type="submit">Save entry</button>
+<button type="submit" class="btn primary">Save entry</button>
 </form>
 </details>
 {{if and (eq .V.Kind "work") (or (eq .P.Tab "log") (and (eq .P.Tab "recap") (not .V.TaskID.Valid)))}}
@@ -101,13 +102,13 @@ row data and .P for page state, including {{template "hidden" .P}} and
 {{template "hidden" .P}}
 <input type="hidden" name="etag" value="{{etag .P.Gen .V.Version}}">
 <label>Task ID (empty for standalone) <input name="task_id" value="{{if .V.TaskID.Valid}}{{.V.TaskID.V}}{{end}}"></label>
-<button type="submit">Relink</button>
+<button type="submit" class="btn secondary">Relink</button>
 </form>
 {{end}}
 <form method="post" action="/ui/entries/{{.V.ID}}/delete" hx-confirm="Delete entry {{.V.Title}}?">
 {{template "hidden" .P}}
 <input type="hidden" name="etag" value="{{etag .P.Gen .V.Version}}">
-<button type="submit">Delete</button>
+<button type="submit" class="btn danger">Delete</button>
 </form>
 {{end}}
 {{end}}
@@ -129,13 +130,13 @@ pages set Tab to task/recap to offer it for every planned block (DF20). */}}
 <input type="hidden" name="etag" value="{{etag .P.Gen .V.Version}}">
 <input type="hidden" name="task_etag" value="{{etag .P.Gen .V.TaskVersion}}">
 <label>New block <input name="span" placeholder="15:00-16:00" required></label>
-<button type="submit">Reblock</button>
+<button type="submit" class="btn secondary">Reblock</button>
 </form>
 {{end}}
 <form method="post" action="/ui/blocks/{{.V.ID}}/unblock">
 {{template "hidden" .P}}
 <input type="hidden" name="etag" value="{{etag .P.Gen .V.Version}}">
-<button type="submit">Unblock</button>
+<button type="submit" class="btn secondary">Unblock</button>
 </form>
 {{end}}
 {{if eq .P.Tab "recap"}}
@@ -143,19 +144,19 @@ pages set Tab to task/recap to offer it for every planned block (DF20). */}}
 {{template "hidden" .P}}
 <input type="hidden" name="etag" value="{{etag .P.Gen .V.Version}}">
 <input type="hidden" name="outcome" value="worked">
-<button type="submit">Worked</button>
+<button type="submit" class="btn secondary">Worked</button>
 </form>
 <form method="post" action="/ui/blocks/{{.V.ID}}/outcome">
 {{template "hidden" .P}}
 <input type="hidden" name="etag" value="{{etag .P.Gen .V.Version}}">
 <input type="hidden" name="outcome" value="missed">
-<button type="submit">Missed</button>
+<button type="submit" class="btn secondary">Missed</button>
 </form>
 <form method="post" action="/ui/blocks/{{.V.ID}}/outcome">
 {{template "hidden" .P}}
 <input type="hidden" name="etag" value="{{etag .P.Gen .V.Version}}">
 <input type="hidden" name="outcome" value="auto">
-<button type="submit">Auto outcome</button>
+<button type="submit" class="btn secondary">Auto outcome</button>
 </form>
 {{end}}
 </article>
@@ -198,7 +199,7 @@ Recap supplies WorkDate; Today supplies focus, else the current block's task. */
 {{.V.Notes}}</textarea></label>
 <label>Date <input name="date" value="{{if not .V.WorkDate.IsZero}}{{.V.WorkDate}}{{end}}" placeholder="today"></label>
 <label>Time <input name="at" value="{{if .V.At.Valid}}{{hhmm .V.At.V}}{{end}}"></label>
-<button type="submit">Log entry</button>
+<button type="submit" class="btn primary">Log entry</button>
 </form>
 </details>
 {{end}}

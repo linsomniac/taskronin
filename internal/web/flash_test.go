@@ -134,7 +134,7 @@ func TestFlashLinesWarningsAndFlags(t *testing.T) {
 		Effects:  []service.Effect{{Kind: service.EffUpdated, TaskID: 42}},
 		Warnings: []string{"first warning", "second warning"}, NoChange: true, Replayed: true,
 	})
-	want := []string{"#42 updated", "first warning", "second warning", "no change", "already applied"}
+	want := []string{"#42 updated", "⚠ first warning", "⚠ second warning", "no change", "already applied"}
 	if !slices.Equal(got, want) {
 		t.Errorf("flash lines = %q, want %q", got, want)
 	}
@@ -180,4 +180,36 @@ func TestFlashEscapesHTML(t *testing.T) {
 			t.Error("title rendered a b element in the flash line")
 		}
 	})
+}
+
+func TestFlashWithoutEffects(t *testing.T) {
+	ta := newTestApp(t).login()
+	form := scrapeForm(t, ta.viewBody("/ui/"), "/ui/tasks")
+	for _, tc := range []struct {
+		name        string
+		result      service.OpResult
+		class, text string
+	}{
+		{"no change", service.OpResult{NoChange: true}, "muted", "no change"},
+		{"replay", service.OpResult{Replayed: true}, "muted", "already applied"},
+		{"warning only", service.OpResult{Warnings: []string{"<b>check</b>"}}, "warn", "⚠ <b>check</b>"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := errorPost(t, form)
+			r = r.WithContext(web.WithSession(r.Context(), web.SessionInfo{Actor: webOwner(), CSRF: form.Get("_csrf")}))
+			w := httptest.NewRecorder()
+			ta.App.Mutate(w, r, func(service.Meta, url.Values) (*service.OpResult, error) {
+				return &tc.result, nil
+			})
+			assertRedirect(t, w, "/ui/")
+			ta.cookies["tr_flash"] = responseCookie(t, w, "tr_flash").Value
+			banner := requireElement(t, parseHTML(t, ta.viewBody("/ui/")), "section", "aria-label", "Action result")
+			if attr(banner, "role") != "status" || strings.Contains(nodeText(banner), "✓") {
+				t.Errorf("expected a status without a success mark, got %q", nodeText(banner))
+			}
+			if got := nodeText(requireElement(t, banner, "li", "class", tc.class)); got != tc.text {
+				t.Errorf("line = %q, want %q", got, tc.text)
+			}
+		})
+	}
 }

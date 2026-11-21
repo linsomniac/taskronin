@@ -7,7 +7,7 @@
 <option value="task"{{if eq .Data.Kind "task"}} selected{{end}}>Tasks</option>
 <option value="entry"{{if eq .Data.Kind "entry"}} selected{{end}}>Entries</option>
 </select></label>
-<button type="submit">Search</button>
+<button type="submit" class="btn primary">Search</button>
 </form>
 {{if .Data.Searched}}
 <section aria-label="Search results">

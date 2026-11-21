@@ -8,7 +8,7 @@
 <input type="hidden" name="id" value="{{.ID}}">
 <input type="hidden" name="etag" value="{{etag $.Gen .Version}}">
 {{end}}
-<button type="submit">Accept the new tasks on this page at bottom</button>
+<button type="submit" class="btn secondary">Accept the new tasks on this page at bottom</button>
 </form>
 {{end}}
 {{range .Data.Items}}

@@ -120,7 +120,7 @@ func TestAddEntryWarningFlash(t *testing.T) {
 	if got := nodeText(requireElement(t, card, "span", "class", "ok")); got != "✓" {
 		t.Errorf("completion mark = %q", got)
 	}
-	if got := flashText(t, body); !slices.Contains(strings.Split(got, "\n"), "logged against a done task") {
+	if got := nodeText(requireElement(t, page, "li", "class", "warn")); got != "⚠ logged against a done task" {
 		t.Errorf("warning flash = %q", got)
 	}
 	if entry := ta.entry(2); !entry.TaskID.Valid || entry.TaskID.V != 1 || entry.Title != "Follow-up" {

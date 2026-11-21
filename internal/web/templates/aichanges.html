@@ -15,7 +15,7 @@
 {{if and .Revertible (eq .State "active")}}
 <form method="post" action="/ui/ops/{{.OpID}}/revert" hx-confirm="Revert {{.Kind}} ({{short .OpID}})?">
 {{template "hidden" $}}
-<button type="submit">Revert operation</button>
+<button type="submit" class="btn secondary">Revert operation</button>
 </form>
 {{end}}
 </article>
@@ -31,6 +31,6 @@
 <form method="post" action="/ui/ai-changes/review">
 {{template "hidden" $}}
 <input type="hidden" name="through" value="{{.Data}}">
-<button type="submit">Mark the changes on this page reviewed</button>
+<button type="submit" class="btn secondary">Mark the changes on this page reviewed</button>
 </form>
 {{end}}

@@ -2,7 +2,7 @@
 <h1>Recap — {{day .Data.Date}}</h1>
 <form method="get" action="/ui/recap">
 <label>Date <input name="date" value="{{.Data.Date}}"></label>
-<button type="submit">Show recap</button>
+<button type="submit" class="btn primary">Show recap</button>
 </form>
 {{if not (or .Data.Blocks .Data.Entries .Data.Interruptions)}}
 {{$days := .Data.Date.DaysSince .Today}}

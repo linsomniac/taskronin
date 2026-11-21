@@ -13,7 +13,7 @@
 {{if .CanRevert}}
 <form method="post" action="/ui/ops/{{.Op.OpID}}/revert" hx-confirm="Revert {{.Op.Kind}} ({{short .Op.OpID}})?">
 {{template "hidden" $}}
-<button type="submit">Revert operation</button>
+<button type="submit" class="btn secondary">Revert operation</button>
 </form>
 {{end}}
 </article>

@@ -253,6 +253,50 @@ func TestEveryFormKeepsHiddenFields(t *testing.T) {
 	}
 }
 
+func TestEveryButtonHasClass(t *testing.T) {
+	p := newFormPages(t)
+	p.mustOp(p.Svc.AddEntry(t.Context(), testutil.Meta(testutil.AI(), p.Svc.Generation()), service.AddEntryIn{Title: "AI work"}))
+
+	check := func(route, body string) {
+		t.Helper()
+		buttons := 0
+		walkHTML(parseHTML(t, body), func(n *html.Node) {
+			if n.Type != html.ElementNode || n.Data != "button" {
+				return
+			}
+			buttons++
+			label := nodeText(n)
+			want := "btn secondary"
+			switch label {
+			case "Add task", "Log entry", "Complete", "Set focus", "Log in", "Save task", "Save entry",
+				"Set due", "Change defer", "Show recap", "Filter", "Search":
+				want = "btn primary"
+			case "Drop", "Delete", "Delete entry":
+				want = "btn danger"
+			case "Undo", "Redo", "Log out":
+				want = "btn secondary small"
+			}
+			got := strings.Fields(attr(n, "class"))
+			slices.Sort(got)
+			if !slices.Equal(got, slices.Sorted(strings.FieldsSeq(want))) {
+				t.Errorf("%s: %q has classes %q, want %q", route, label, got, want)
+			}
+		})
+		if buttons == 0 {
+			t.Errorf("%s: expected buttons", route)
+		}
+	}
+	for _, route := range append(p.paths(), "/ui/report", "/ui/ai-changes", taskPagePath(p.focus)+"/history") {
+		check(route, p.viewBody(route))
+	}
+	check("/ui/login", p.get("/ui/login", "Cookie", "").Body.String())
+	failed := p.submit("/ui/", "/ui/tasks", url.Values{"title": {""}})
+	if failed.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("invalid task status = %d", failed.Code)
+	}
+	check("error", failed.Body.String())
+}
+
 func TestFixedHiddenActionValues(t *testing.T) {
 	p := newFormPages(t)
 	// Match the button as well as the field. Up and Down post to the same action.
@@ -422,18 +466,7 @@ func checkButtons(t *testing.T, row *html.Node, want []string) {
 		if n.Data != "button" {
 			return
 		}
-		label := nodeText(n)
-		got = append(got, label)
-		class := "btn secondary"
-		switch label {
-		case "Complete", "Change defer", "Set due", "Reopen", "Undelete":
-			class = "btn primary"
-		case "Drop", "Delete":
-			class = "btn danger"
-		}
-		if attr(n, "class") != class {
-			t.Errorf("%s class = %q, want %q", label, attr(n, "class"), class)
-		}
+		got = append(got, nodeText(n))
 	})
 	if !slices.Equal(got, want) {
 		t.Errorf("buttons = %q, want %q", got, want)
@@ -464,8 +497,20 @@ func TestFormDisclosures(t *testing.T) {
 		if !slices.Equal(names, want) {
 			t.Errorf("%s: fields inside disclosure = %v, want %v", route, names, want)
 		}
-		if button := requireElement(t, form, "button", "type", "submit"); button.Parent != form || attr(button, "class") != "btn primary" {
+		button := requireElement(t, form, "button", "type", "submit")
+		if button.Parent != form || attr(button, "class") != "btn primary" {
 			t.Errorf("%s: expected primary submit outside disclosure", route)
+		}
+		if route == taskPagePath(id) {
+			var controls []string
+			for child := range form.ChildNodes() {
+				if child == button || child == options {
+					controls = append(controls, child.Data)
+				}
+			}
+			if !slices.Equal(controls, []string{"button", "details"}) {
+				t.Errorf("Complete form controls = %v, want button before details", controls)
+			}
 		}
 	}
 	if len(scrapeForms(t, ta.viewBody("/ui/backlog"), "/ui/tasks")) != 0 {

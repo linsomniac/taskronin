@@ -4,7 +4,7 @@
 <label>From <input name="from" value="{{.Data.From}}"></label>
 <label>To <input name="to" value="{{.Data.To}}"></label>
 <label><input type="checkbox" name="include_deleted" value="1"{{if .Data.IncludeDeleted}} checked{{end}}> Include deleted entries</label>
-<button type="submit">Filter</button>
+<button type="submit" class="btn primary">Filter</button>
 </form>
 {{range .Data.Days}}
 <section aria-label="{{day .Date}}">

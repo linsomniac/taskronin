@@ -14,20 +14,20 @@
 <form method="post" action="/ui/tasks/{{.ID}}/undelete">
 {{template "hidden" $}}
 <input type="hidden" name="etag" value="{{etag $.Gen .Version}}">
-<button type="submit" class="btn primary">Undelete</button>
+<button type="submit" class="btn secondary">Undelete</button>
 </form>
 {{else if eq .Status "open"}}
-{{/* AIDEV-NOTE: One Complete form submits both ways. Keep its button outside the options disclosure so it is always visible. */}}
+{{/* AIDEV-NOTE: One Complete form submits both ways. Keep its button before the options disclosure so it is always visible. */}}
 <form method="post" action="/ui/tasks/{{.ID}}/complete">
 {{template "hidden" $}}
 <input type="hidden" name="etag" value="{{etag $.Gen .Version}}">
+<button type="submit" class="btn primary">Complete</button>
 <details class="more"><summary>Complete with options</summary>
 <label>Complete as (optional title) <input name="as"></label>
 <label>Completion date <input name="date" placeholder="today"></label>
 <label>Log title (optional) <input name="log"></label>
 <label>Log notes <textarea name="notes"></textarea></label>
 </details>
-<button type="submit" class="btn primary">Complete</button>
 </form>
 <form method="post" action="/ui/focus">
 {{template "hidden" $}}
@@ -45,7 +45,7 @@
 {{template "hidden" $}}
 <input type="hidden" name="etag" value="{{etag $.Gen .Version}}">
 <label><input type="checkbox" name="remove_entry" value="1"> Remove completion entry</label>
-<button type="submit" class="btn primary">Reopen</button>
+<button type="submit" class="btn secondary">Reopen</button>
 </form>
 {{end}}
 </div>
@@ -123,7 +123,7 @@
 <option value="M"{{if eq .Priority "M"}} selected{{end}}>Medium</option>
 <option value="L"{{if eq .Priority "L"}} selected{{end}}>Low</option>
 </select></label>
-<button type="submit">Save task</button>
+<button type="submit" class="btn primary">Save task</button>
 </form>
 </details>
 
@@ -133,14 +133,14 @@
 {{template "hidden" $}}
 <input type="hidden" name="etag" value="{{etag $.Gen .Version}}">
 <label>Add tags <input name="add" required></label>
-<button type="submit">Add tags</button>
+<button type="submit" class="btn secondary">Add tags</button>
 </form>
 {{range .Tags}}
 <form method="post" action="/ui/tasks/{{$.Data.ID}}/tags">
 {{template "hidden" $}}
 <input type="hidden" name="etag" value="{{etag $.Gen $.Data.Version}}">
 <input type="hidden" name="remove" value="{{.}}">
-<button type="submit">Remove {{.}}</button>
+<button type="submit" class="btn secondary">Remove {{.}}</button>
 </form>
 {{end}}
 </section>
@@ -149,7 +149,7 @@
 {{template "hidden" $}}
 <input type="hidden" name="etag" value="{{etag $.Gen .Version}}">
 <label>Due (or none) <input name="due" value="{{if .DueDate.Valid}}{{.DueDate.V}}{{if .DueMin.Valid}} {{hhmm .DueMin.V}}{{end}}{{end}}" required></label>
-<button type="submit">Set due</button>
+<button type="submit" class="btn primary">Set due</button>
 </form>
 {{end}}
 </article>
