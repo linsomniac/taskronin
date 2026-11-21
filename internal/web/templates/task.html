@@ -14,7 +14,7 @@
 <form method="post" action="/ui/tasks/{{.ID}}/undelete">
 {{template "hidden" $}}
 <input type="hidden" name="etag" value="{{etag $.Gen .Version}}">
-<button type="submit" class="btn secondary">Undelete</button>
+<button type="submit" class="btn primary">Undelete</button>
 </form>
 {{else if eq .Status "open"}}
 {{/* AIDEV-NOTE: One Complete form submits both ways. Keep its button before the options disclosure so it is always visible. */}}
@@ -45,7 +45,7 @@
 {{template "hidden" $}}
 <input type="hidden" name="etag" value="{{etag $.Gen .Version}}">
 <label><input type="checkbox" name="remove_entry" value="1"> Remove completion entry</label>
-<button type="submit" class="btn secondary">Reopen</button>
+<button type="submit" class="btn primary">Reopen</button>
 </form>
 {{end}}
 </div>

@@ -80,7 +80,7 @@ The taskheading, tasklink and taskmeta display partials take a TaskView directly
 <form method="post" action="/ui/entries/{{.V.ID}}/undelete">
 {{template "hidden" .P}}
 <input type="hidden" name="etag" value="{{etag .P.Gen .V.Version}}">
-<button type="submit" class="btn secondary">Undelete</button>
+<button type="submit" class="btn primary">Undelete</button>
 </form>
 {{else}}
 <details><summary>Edit entry</summary>

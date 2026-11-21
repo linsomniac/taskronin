@@ -269,8 +269,8 @@ func TestEveryButtonHasClass(t *testing.T) {
 			want := "btn secondary"
 			switch label {
 			case "Add task", "Log entry", "Complete", "Set focus", "Log in", "Save task", "Save entry",
-				"Set due", "Change defer", "Show recap", "Filter", "Search":
-				want = "btn primary"
+				"Set due", "Change defer", "Show recap", "Filter", "Search", "Reopen", "Undelete":
+				want = "btn primary" // Reopen/Undelete are the primary action on a closed task.
 			case "Drop", "Delete", "Delete entry":
 				want = "btn danger"
 			case "Undo", "Redo", "Log out":
