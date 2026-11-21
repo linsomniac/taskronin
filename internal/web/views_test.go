@@ -143,6 +143,11 @@ func TestTodayPage(t *testing.T) {
 		t.Error("missing focus task or today's block")
 	}
 	requireText(t, body, "13:00", "15:00", "Drafted intro", "Triage (1)")
+	focus := requireElement(t, parseHTML(t, body), "div", "class", "card focus")
+	title := requireElement(t, focus, "h3", "class", "card-title")
+	if got := nodeText(title); got != "▶ #1 Write report" {
+		t.Errorf("focus title = %q", got)
+	}
 	if got := dataIDs(t, body, "data-banner"); !reflect.DeepEqual(got, []string{"backup_stale", "ai_changes"}) {
 		t.Errorf("banners = %v, want service banners once each", got)
 	}
@@ -182,7 +187,7 @@ func TestTriagePage(t *testing.T) {
 	if got := dataIDs(t, body, "data-task"); !reflect.DeepEqual(got, []string{"1", "3"}) {
 		t.Errorf("triage rows = %v", got)
 	}
-	requireText(t, body, "new", "writing", "Docs", "H", "0/0", "Accept the new tasks on this page at bottom")
+	requireText(t, body, "new", "writing", "Docs", "prio H", "Accept the new tasks on this page at bottom")
 	form := scrapeForm(t, body, "/ui/tasks")
 	for _, key := range []string{"title", "notes", "due", "tags", "project", "priority", "place", "ref", "defer", "span"} {
 		if !form.Has(key) {
@@ -221,6 +226,48 @@ func TestTriagePage(t *testing.T) {
 	if forms := scrapeForms(t, ta.viewBody("/ui/triage"), "/ui/triage/accept-new"); len(forms) != 0 {
 		t.Error("accept-new rendered without new-only tasks")
 	}
+}
+
+func TestTaskCardChips(t *testing.T) {
+	ta := newTestApp(t)
+	id := ta.addTask(service.AddTaskIn{Title: "Draft", Due: ptrMoment(testutil.Moment("10-29")),
+		Tags: []string{"docs", "web"}, Project: "Writing", Priority: domain.PriorityH})
+	first := ta.task(id)
+	// Scheduling a block acknowledges "new". Supply the slip counts on the
+	// snapshot to exercise both presentations together in the Triage template.
+	first.SlipsLifetime, first.SlipsSinceTriage = 2, 1
+	second := ta.task(ta.addTask(service.AddTaskIn{Title: "No misses"}))
+	tmpl, err := ta.App.Template("triage")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body bytes.Buffer
+	data := map[string]any{"Items": []domain.TaskDetail{first, second}}
+	if err := tmpl.ExecuteTemplate(&body, "layout", web.Page{Data: data, Gen: ta.Svc.Generation()}); err != nil {
+		t.Fatal(err)
+	}
+	page := parseHTML(t, body.String())
+	card := requireElement(t, page, "article", "data-task", "1")
+	if got := attr(card, "class"); got != "card task" {
+		t.Errorf("task card class = %q", got)
+	}
+	zero := requireElement(t, page, "article", "data-task", "2")
+	if strings.Contains(nodeText(zero), "slipped") || strings.Contains(nodeText(page), "Slips L/S") {
+		t.Error("unexpected slip count on Triage")
+	}
+	meta := requireElement(t, card, "p", "class", "meta")
+	var spans []string
+	walkHTML(meta, func(n *html.Node) {
+		if n.Data == "span" {
+			spans = append(spans, attr(n, "class")+" | "+nodeText(n))
+		}
+	})
+	want := []string{"chip warn reason | new", "chip bad | slipped ×2", "chip warn | due Thu 2026-10-29",
+		"chip warn | due soon", "chip tag | docs", "chip tag | web", "muted | Writing", "chip | prio H"}
+	if !slices.Equal(spans, want) {
+		t.Errorf("task metadata = %q, want %q", spans, want)
+	}
+	requireElement(t, meta, "span", "title", "Slips: lifetime / since triage")
 }
 
 func TestBacklogPage(t *testing.T) {
@@ -408,7 +455,11 @@ func TestViewsEscapeHostileMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertInert(t, body.String())
-	requireText(t, body.String(), "Project: "+hostile, "Remove "+hostile)
+	project := requireElement(t, parseHTML(t, body.String()), "span", "class", "muted")
+	if got := nodeText(project); got != hostile {
+		t.Errorf("project text = %q, want %q", got, hostile)
+	}
+	requireText(t, body.String(), "Remove "+hostile)
 	edit := scrapeForm(t, body.String(), "/ui/tasks/1/edit")
 	if edit.Get("project") != hostile || edit.Get("notes") != hostile || edit.Get("title") != hostile {
 		t.Error("hostile edit values did not round-trip")

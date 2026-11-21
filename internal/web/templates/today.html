@@ -8,7 +8,9 @@
 <section aria-label="Focus">
 <h2>Focus</h2>
 {{with .Data.Focus}}
-{{template "taskrow" (row $ .)}}
+<div class="card focus" data-task="{{.ID}}">
+<h3 class="card-title">▶ {{template "tasklink" .}}</h3>
+{{template "taskmeta" .}}
 <form method="post" action="/ui/tasks/{{.ID}}/complete">
 {{template "hidden" $}}
 <input type="hidden" name="etag" value="{{etag $.Gen .Version}}">
@@ -19,6 +21,7 @@
 <input type="hidden" name="task_id" value="">
 <button type="submit">Clear focus</button>
 </form>
+</div>
 {{else}}<p>No focus task.</p>{{end}}
 <form method="post" action="/ui/focus">
 {{template "hidden" $}}

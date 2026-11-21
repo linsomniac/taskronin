@@ -14,17 +14,25 @@ row data and .P for page state, including {{template "hidden" .P}} and
 {{etag .P.Gen .V.Version}} and {{md .P.MD .V.Notes}}. Page-level forms use {{template "hidden" $}}. */}}
 
 {{define "taskrow"}}
-<article data-task="{{.V.ID}}">
-<p><a href="/ui/tasks/{{.V.ID}}">#{{.V.ID}} {{.V.Title}}</a></p>
-<p>{{range .V.Reasons}}<span class="reason">{{.Reason}}</span> {{end}}
-<span title="Slips: lifetime / since triage">Slips L/S: {{.V.SlipsLifetime}}/{{.V.SlipsSinceTriage}}</span>
-{{if .V.DueDate.Valid}} · Due {{day .V.DueDate.V}}{{if .V.DueMin.Valid}} {{hhmm .V.DueMin.V}}{{end}}{{end}}
-{{if ne .V.DuePhase "none"}} · {{.V.DuePhase}}{{end}}{{if .V.DueSoon}} · due soon{{end}}
-{{if .V.DeferDate.Valid}} · Deferred until {{day .V.DeferDate.V}}{{if .V.DeferMin.Valid}} {{hhmm .V.DeferMin.V}}{{end}}{{end}}
-{{range .V.Tags}} · <span class="tag">{{.}}</span>{{end}}
-{{if .V.Project}} · Project: {{.V.Project}}{{end}}
-{{if .V.Priority}} · Priority: {{.V.Priority}}{{end}}</p>
+<article class="card task" data-task="{{.V.ID}}">
+<h3 class="card-title">{{template "tasklink" .V}}</h3>
+{{template "taskmeta" .V}}
 </article>
+{{end}}
+
+{{define "tasklink"}}<a href="/ui/tasks/{{.ID}}"><span class="id">#{{.ID}}</span> {{.Title}}</a>{{end}}
+
+{{define "taskmeta"}}
+<p class="meta">
+{{range .Reasons}}<span class="chip warn reason">{{.Reason}}</span> {{end}}
+{{if gt .SlipsLifetime 0}}<span class="chip bad" title="Slips: lifetime / since triage">slipped ×{{.SlipsLifetime}}</span>{{end}}
+{{if eq .DuePhase "overdue"}}<span class="chip bad">overdue</span>{{else if .DueDate.Valid}}<span class="chip warn">due {{day .DueDate.V}}</span>{{end}}
+{{if .DueSoon}}<span class="chip warn">due soon</span>{{end}}
+{{if .DeferDate.Valid}}<span class="chip">deferred until {{day .DeferDate.V}}{{if .DeferMin.Valid}} {{hhmm .DeferMin.V}}{{end}}</span>{{end}}
+{{range .Tags}}<span class="chip tag">{{.}}</span> {{end}}
+{{if .Project}}<span class="muted">{{.Project}}</span>{{end}}
+{{if .Priority}}<span class="chip">prio {{.Priority}}</span>{{end}}
+</p>
 {{end}}
 
 {{define "taskactions"}}
@@ -53,9 +61,9 @@ row data and .P for page state, including {{template "hidden" .P}} and
 {{end}}
 
 {{define "entryrow"}}
-<article data-entry="{{.V.ID}}">
-<p>{{if .V.OccurredMin.Valid}}<time>{{hhmm .V.OccurredMin.V}}</time> {{end}}{{if eq .V.Kind "complete"}}✓ {{end}}{{.V.Title}}{{if .V.Reopened}} (reopened){{end}}{{if .V.DeletedAt.Valid}} (deleted){{end}}</p>
-<p>{{if .V.TaskID.Valid}}<a href="/ui/tasks/{{.V.TaskID.V}}">#{{.V.TaskID.V}} {{.V.TaskTitle}}</a>{{else}}standalone{{end}}</p>
+<article class="card entry" data-entry="{{.V.ID}}">
+<p class="card-title">{{if .V.OccurredMin.Valid}}<time>{{hhmm .V.OccurredMin.V}}</time> {{end}}{{if eq .V.Kind "complete"}}<span class="ok">✓</span> {{end}}{{.V.Title}}{{if .V.Reopened}} (reopened){{end}}{{if .V.DeletedAt.Valid}} (deleted){{end}}</p>
+<p class="meta">{{if .V.TaskID.Valid}}<a href="/ui/tasks/{{.V.TaskID.V}}"><span class="id">#{{.V.TaskID.V}}</span> {{.V.TaskTitle}}</a>{{else}}standalone{{end}}</p>
 {{if .V.Notes}}<div class="notes">{{md .P.MD .V.Notes}}</div>{{end}}
 {{/* AIDEV-NOTE: Deleted task pages retain entries but offer only task undelete. */}}
 {{if and (ne .P.Tab "today") (not (and (eq .P.Tab "task") (eq .P.Data.View "deleted")))}}
@@ -99,9 +107,11 @@ row data and .P for page state, including {{template "hidden" .P}} and
 {{end}}
 
 {{define "blockrow"}}
-<article data-block="{{.V.ID}}"{{if .V.Current}} class="current" aria-current="time"{{end}}>
-<p>{{if .V.Current}}<mark>Current block</mark> {{end}}{{day .V.Span.Date}} <time>{{hhmm .V.Span.Start}}</time>–<time>{{hhmm .V.Span.End}}</time>
-<a href="/ui/tasks/{{.V.TaskID}}">#{{.V.TaskID}} {{.V.TaskTitle}}</a> · {{.V.Status}}{{if .V.NeedsReblock}} · <strong>reblock?</strong>{{end}}</p>
+<article class="card block{{if .V.Current}} current{{end}}" data-block="{{.V.ID}}"{{if .V.Current}} aria-current="time"{{end}}>
+<p class="card-title">{{if .V.Current}}<mark>Current block</mark> {{end}}{{day .V.Span.Date}} <time>{{hhmm .V.Span.Start}}</time>–<time>{{hhmm .V.Span.End}}</time>
+<a href="/ui/tasks/{{.V.TaskID}}"><span class="id">#{{.V.TaskID}}</span> {{.V.TaskTitle}}</a></p>
+<p class="meta"><span class="chip{{if eq .V.Status "worked" "done"}} ok{{else if eq .V.Status "missed"}} bad{{else if eq .V.Status "cancelled"}} muted{{end}}">{{.V.Status}}</span>
+{{if .V.NeedsReblock}}<strong class="chip warn">reblock?</strong>{{end}}</p>
 {{if eq .V.Status "planned"}}
 {{/* AIDEV-NOTE: Reblock needs both snapshot versions (R4-7). Task/recap
 pages set Tab to task/recap to offer it for every planned block (DF20). */}}

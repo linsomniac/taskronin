@@ -40,7 +40,7 @@
 {{end}}
 <main class="page">
 {{if .Flash}}<section class="flash" role="status" aria-label="Action result">
-<span class="flash-mark">✓</span>
+<span class="flash-mark" aria-hidden="true">✓</span>
 <ul>{{range .Flash}}<li>{{.}}</li>{{end}}</ul>
 </section>{{end}}
 {{template "content" .}}</main>

@@ -29,7 +29,8 @@ func TestTaskDetailOpen(t *testing.T) {
 	before := ta.opKinds()
 	body := ta.viewBody("/ui/tasks/1")
 	assertInert(t, body)
-	requireText(t, body, "Database work", "infra.kc", "H", "db", "infra", "0/0", "Fri 2026-10-30", "13:00", "15:00", "Investigated schema")
+	requireText(t, body, "Database work", "infra.kc", "prio H", "db", "infra", "Fri 2026-10-30", "13:00", "15:00", "Investigated schema")
+	requireElementText(t, body, "p", "Slips L/S: 0/0")
 	requireElementText(t, body, "strong", "bold")
 	requireElementText(t, body, "strong", "entry notes")
 	link, history := false, false

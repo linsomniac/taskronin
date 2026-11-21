@@ -3,6 +3,7 @@
 <h1>#{{.ID}} {{.Title}}</h1>
 <p>Status: {{.Status}} · View: <strong>{{.View}}</strong></p>
 {{template "taskrow" (row $ .TaskView)}}
+<p>Slips L/S: {{.SlipsLifetime}}/{{.SlipsSinceTriage}}</p>
 <p>Created {{wall .CreatedAt}} · Updated {{wall .UpdatedAt}}{{if .CompletedDate.Valid}} · Completed {{day .CompletedDate.V}}{{end}}{{if .DeletedAt.Valid}} · Deleted {{wall .DeletedAt.V}}{{end}}</p>
 {{if .Notes}}<div class="notes">{{md $.MD .Notes}}</div>{{end}}
 <p><a href="/ui/tasks/{{.ID}}/history">History</a></p>

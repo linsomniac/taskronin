@@ -110,7 +110,17 @@ func TestAddEntryWarningFlash(t *testing.T) {
 	ta.addTask(service.AddTaskIn{Title: "Replica"})
 	ta.mustOp(ta.Svc.Complete(t.Context(), ta.meta(), service.CompleteIn{ID: 1, Expect: ta.taskExpect(1)}))
 	assertRedirect(t, ta.submit("/ui/log", "/ui/entries", url.Values{"task_id": {"1"}, "title": {"Follow-up"}}), "/ui/log")
-	if got := flashText(t, ta.viewBody("/ui/log")); !slices.Contains(strings.Split(got, "\n"), "logged against a done task") {
+	body := ta.viewBody("/ui/log")
+	page := parseHTML(t, body)
+	mark := requireElement(t, page, "span", "class", "flash-mark")
+	if attr(mark, "aria-hidden") != "true" {
+		t.Error("decorative flash mark is exposed to screen readers")
+	}
+	card := requireElement(t, page, "article", "data-entry", "1")
+	if got := nodeText(requireElement(t, card, "span", "class", "ok")); got != "✓" {
+		t.Errorf("completion mark = %q", got)
+	}
+	if got := flashText(t, body); !slices.Contains(strings.Split(got, "\n"), "logged against a done task") {
 		t.Errorf("warning flash = %q", got)
 	}
 	if entry := ta.entry(2); !entry.TaskID.Valid || entry.TaskID.V != 1 || entry.Title != "Follow-up" {

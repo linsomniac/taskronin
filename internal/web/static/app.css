@@ -218,6 +218,13 @@ details.more > summary {
   font-size: 0.8125rem;
 }
 
+@media (max-width: 40rem), (pointer: coarse) {
+  .topbar .btn.small {
+    padding-block: 0.625rem;
+    min-height: 2.25rem;
+  }
+}
+
 button:hover,
 .btn:hover,
 details.more > summary:hover {
