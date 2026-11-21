@@ -144,10 +144,9 @@ func (a *App) shortModeHelp(k keyMap) actionKeys {
 		keys = recapActions
 	}
 	if deck != nil {
-		if _, hasCard := deck.current(); hasCard {
-			// Both card layouts already render cardLegend in the body.
-			return actionKeys{k.Help, k.Quit, k.Escape}
-		}
+		// Both card layouts already render cardLegend in the body, and
+		// without a card (clear, loading, failed) the card keys are inert.
+		return actionKeys{k.Help, k.Quit, k.Escape}
 	}
 	return appendKeys(keys, k.Help, k.exitHint())
 }
