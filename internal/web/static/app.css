@@ -197,7 +197,7 @@ details.more > summary {
 }
 
 .btn,
-input,
+input:not([type="hidden"], [type="checkbox"], [type="radio"]),
 select {
   min-height: 2.75rem;
 }
