@@ -191,17 +191,78 @@ func TestModeShortHelp(t *testing.T) {
 		t.Helper()
 		a.Update(tea.WindowSizeMsg{Width: width, Height: 24})
 		lines := strings.Split(viewText(a), "\n")
-		eq(t, lines[len(lines)-1], want)
+		if got := lines[len(lines)-1]; got != want {
+			t.Errorf("footer = %q, want %q", got, want)
+		}
 	}
-	check(80, "1–5/tab tabs • a add • l log • ? help • q quit/back")
+	check(80, "1–5/tab tabs • a add • l log • ? help • q quit")
 	drain(t, a, a.enterMode(ModeRecap, newRecapMode(f.clock.Today)))
-	check(80, "w worked · m missed · a auto · x done · l log · L link · ? help · q quit")
+	check(80, "w worked · m missed · a auto · x done · l log · L link · ? help · q back")
 	drain(t, a, a.enterMode(ModeTriage, newCardMode(0)))
-	check(160, cardLegend+" · ? help · q quit")
+	check(80, "? help · q back · esc back")
+	press(t, a, "?")
+	if !strings.Contains(a.helpView(80), "q back") {
+		t.Error(a.helpView(80))
+	}
+	press(t, a, "?")
 	drain(t, a, a.enterMode(ModePlan, newPlanMode()))
-	check(160, cardLegend+" · enter skip to backlog · ? help · q quit")
+	check(80, "? help · q back · esc back")
 	press(t, a, "enter")
-	check(80, "j/↓ down · k/↑ up · B block today · enter summary · ? help · q quit")
+	check(80, "j/↓ down · k/↑ up · B block today · enter summary · ? help · q back")
 	press(t, a, "enter")
-	check(80, "enter finish · ? help · q quit")
+	check(80, "enter finish · ? help · q back")
+}
+
+func TestCardLegendAndExpandedHelp(t *testing.T) {
+	for _, mode := range []Mode{ModeTriage, ModePlan} {
+		t.Run(fmt.Sprint(mode), func(t *testing.T) {
+			f := newFake()
+			f.tasks["triage"] = []api.Task{task(1, "triage")}
+			a := newTestApp(t, f, func(c *Config) { c.StartMode = mode })
+			a.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
+			frame := viewText(a)
+			eq(t, strings.Count(frame, cardLegend), 1)
+			if !strings.HasSuffix(frame, "\n? help · q quit · esc quit") {
+				t.Error(frame)
+			}
+			press(t, a, "?")
+			help := a.helpView(160)
+			for _, hint := range strings.Split(cardLegend, " · ") {
+				if !strings.Contains(help, hint) {
+					t.Errorf("expanded help missing %q", hint)
+				}
+			}
+			if mode == ModePlan && !strings.Contains(help, "enter skip to backlog") {
+				t.Error(help)
+			}
+			a.setBanner(bannerInfo, "saved")
+			if !strings.Contains(a.helpView(160), "esc clear") {
+				t.Error(a.helpView(160))
+			}
+		})
+	}
+}
+
+func TestOverlayHelpShowsBackKey(t *testing.T) {
+	for _, mode := range []Mode{ModeTabs, ModeRecap} {
+		t.Run(fmt.Sprint(mode), func(t *testing.T) {
+			f := detailFixture()
+			f.days[f.clock.Today] = recapFixture(f.clock.Today)
+			a := newTestApp(t, f, func(c *Config) { c.StartMode = mode })
+			drain(t, a, a.openDetail(42))
+			press(t, a, "h")
+			for _, expanded := range []bool{false, true} {
+				a.help.ShowAll = expanded
+				help := a.helpView(100)
+				if !strings.Contains(help, "esc back") || strings.Contains(help, "q ") {
+					t.Errorf("expanded=%v: %q", expanded, help)
+				}
+			}
+			press(t, a, "q")
+			eq(t, len(a.overlays), 2)
+			press(t, a, "esc", "esc")
+			eq(t, len(a.overlays), 0)
+			eq(t, a.quitting, false)
+		})
+	}
 }

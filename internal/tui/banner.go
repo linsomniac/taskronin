@@ -57,9 +57,9 @@ func (a *App) appendBanner(s string) {
 	a.banner.text += textsafe.SanitizeLine(s)
 }
 
-// AIDEV-NOTE: A failed follow-up changes the banner kind. Server warnings
-// describe a successful mutation and keep their own inline warning mark.
 func (a *App) appendBannerError(s string) {
+	// AIDEV-NOTE: Response warnings keep bannerOK and their inline warning mark.
+	// Only a failed follow-up switches the banner to bannerError.
 	a.banner.kind = bannerError
 	a.appendBanner(s)
 }
