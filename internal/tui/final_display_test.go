@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -178,6 +179,51 @@ func TestHeaderFitsTabStrip(t *testing.T) {
 					}
 				}
 			}
+		}
+	}
+}
+
+func TestHeaderNeverOverflows(t *testing.T) {
+	for _, color := range []bool{false, true} {
+		a := newTestApp(t, newFake(), func(c *Config) { c.Color = color })
+		for width := 20; width <= 120; width++ {
+			a.Update(tea.WindowSizeMsg{Width: width, Height: 24})
+			for i := range tabNames {
+				a.tab = Tab(i)
+				line, _, _ := strings.Cut(viewText(a), "\n")
+				if got := lipgloss.Width(line); got > width {
+					t.Fatalf("color %t width %d tab %d: header uses %d cells", color, width, i+1, got)
+				}
+				plain := ansi.Strip(line)
+				fields := strings.Fields(strings.ReplaceAll(plain, "[", ""))
+				for _, number := range []string{"1", "2", "3", "4", "5"} {
+					if !slices.Contains(fields, number) {
+						t.Fatalf("color %t width %d tab %d: missing tab %s in %q", color, width, i+1, number, plain)
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestHeaderNarrowForms(t *testing.T) {
+	for _, tc := range []struct {
+		width int
+		tab   Tab
+		color bool
+		want  string
+	}{
+		{54, TabToday, false, "[1 Today] 2 Triage 3 Backlog 4 Upcoming 5 Log"},
+		{45, TabToday, false, "[1 Today] 2 Triage 3 Backlog 4 Upcoming 5 Log"},
+		{44, TabToday, false, "[1 Today] 2 3 4 5"},
+		{30, TabUpcoming, false, "1 2 3 [4 Upcoming] 5"},
+		{44, TabTriage, true, "1  2 Triage  3 4 5"},
+	} {
+		a := newTestApp(t, newFake(), func(c *Config) { c.Color, c.StartTab = tc.color, tc.tab })
+		a.Update(tea.WindowSizeMsg{Width: tc.width, Height: 24})
+		line, _, _ := strings.Cut(viewText(a), "\n")
+		if got := ansi.Strip(line); got != tc.want {
+			t.Errorf("color %t width %d tab %d: got %q, want %q", tc.color, tc.width, tc.tab+1, got, tc.want)
 		}
 	}
 }

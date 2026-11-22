@@ -120,17 +120,25 @@ func (a *App) header(w int) string {
 		}
 		tabs = append(tabs, style.Render(label))
 	}
-	strip := strings.Join(tabs, " ")
-	clock := a.clock.Now.Format("Mon 2006-01-02 15:04")
-	prefix := "Taskronin · " + clock
-	available := w - lipgloss.Width(strip) - 1
-	if lipgloss.Width(prefix) > available {
-		prefix = clock
+	// AIDEV-NOTE: J§9 owns the give-way order: brand, date, clock, then inactive tab names.
+	header := strings.Join(tabs, " ")
+	stripWidth := lipgloss.Width(header)
+	if stripWidth > w {
+		for i := range tabs {
+			if Tab(i) != a.tab {
+				tabs[i] = a.styles.TabOff.Render(fmt.Sprint(i + 1))
+			}
+		}
+		header = strings.Join(tabs, " ")
+	} else {
+		clock := a.clock.Now.Format("Mon 2006-01-02 15:04")
+		for _, prefix := range []string{"Taskronin · " + clock, clock, a.clock.Now.Format("Mon 15:04")} {
+			if lipgloss.Width(prefix)+1+stripWidth <= w {
+				header = a.styles.Head.Render(prefix) + " " + header
+				break
+			}
+		}
 	}
-	if lipgloss.Width(prefix) > available {
-		prefix = a.clock.Now.Format("Mon 15:04")
-	}
-	header := a.styles.Head.Render(prefix) + " " + strip
 	if a.today != nil {
 		backup, purge, timezone := !a.today.Backup.Healthy, false, false
 		var status []string
