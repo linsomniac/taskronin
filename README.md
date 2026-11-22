@@ -7,6 +7,61 @@ tasks. It ships as one Go binary, `tkr`, over a single SQLite database.
 
 New here? The [quickstart](docs/quickstart.md) shows a five-minute tour.
 
+## Why not Taskwarrior?
+
+Taskronin exists because Taskwarrior failed its author in two specific ways: it
+was *out of sight* (nothing pulled him back to the plan during the day) and
+*interrupts won* (new work displaced what he had planned, silently). It is not
+a Taskwarrior replacement in general; it fixes those two things and the
+problems next to them.
+
+- **It pulls you back during the day.** A bare `tkr` dashboard, a
+  `tkr status --short` line for your prompt or tmux, a single focus task, and
+  a morning plan and evening recap loop. Taskwarrior only speaks when you run
+  it.
+- **Interruptions are recorded instead of winning.** `tkr add` lands in triage
+  without touching your plan or focus. `tkr add … --now` records what
+  displaced what, and the displaced block shows up at recap as a slip instead
+  of vanishing. Taskwarrior has no notion of planned versus happened.
+- **Triage is an inbox you must clear, not an urgency score.** New, slipped,
+  surfaced and overdue work enters one list, each item saying why it is there,
+  and leaves only by an explicit decision: order, defer, block, finish or
+  drop. A computed score that reorders the list behind your back is a
+  deliberate anti-goal.
+- **Time blocks have outcomes.** Blocks are marked worked, partial, missed or
+  cancelled; missed blocks come back for re-triage the same day and slips are
+  counted per task. Taskwarrior's `scheduled` is a timestamp with no
+  follow-through.
+- **The work log is first class.** `tkr log` entries attach to a task or
+  stand alone, and `tkr report --week` rolls them into a dated "what I did"
+  report. Taskwarrior gets partway there with annotations plus Timewarrior.
+- **Undo is a real audit trail.** Every write is an operation with an ID, an
+  actor and an idempotency key. `undo`, `redo`, `revert OPID` and `history`
+  all work from that record, and undo says in words what it put back.
+- **AI assistance with guardrails.** The built-in MCP server lets an assistant
+  read, add, log, complete, defer and edit, never delete. AI-created tasks
+  always land in triage, writes are rate limited, and `tkr ai-changes` lists
+  every change made by a non-owner token for review or one-command revert.
+- **Four front doors, one database.** CLI, TUI, a phone-friendly web UI and
+  MCP all talk to one local server. Taskwarrior is CLI only; its TUIs, web
+  UIs and sync come from separate projects.
+- **Built to be trusted.** Verified snapshots with restore, portable JSON
+  export and import, stale-view detection instead of silent overwrites, and a
+  loopback-only web UI with password login, CSRF and a strict CSP.
+
+Where Taskwarrior still wins, so you can decide with open eyes:
+
+| Taskwarrior has | Taskronin's position |
+|---|---|
+| Recurring tasks | Not in v1 |
+| Multi-device sync | Single workstation only in v1 |
+| Filter and report language, UDAs, hooks | Tags, an optional project, priority and search; no query language |
+| Ecosystem (vit, Timewarrior, Bugwarrior, taskwarrior-tui) | None |
+| Years of hardening and documentation | New, and built for one user first |
+
+Choose Taskronin if your problem was never a lack of a powerful task database
+but that the plan kept losing to the day.
+
 ## Install
 
 Taskronin needs Go (see `go.mod` for the toolchain) and runs on Linux.
