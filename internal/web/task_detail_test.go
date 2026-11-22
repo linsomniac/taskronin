@@ -1,6 +1,7 @@
 package web_test
 
 import (
+	"bytes"
 	"database/sql"
 	"fmt"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"taskronin/internal/domain"
 	"taskronin/internal/service"
 	"taskronin/internal/testutil"
+	"taskronin/internal/web"
 )
 
 func TestTaskDetailOpen(t *testing.T) {
@@ -30,7 +32,9 @@ func TestTaskDetailOpen(t *testing.T) {
 	body := ta.viewBody("/ui/tasks/1")
 	assertInert(t, body)
 	requireText(t, body, "Database work", "infra.kc", "prio H", "db", "infra", "Fri 2026-10-30", "13:00", "15:00", "Investigated schema")
-	requireElementText(t, body, "p", "Slips L/S: 0/0")
+	if strings.Contains(body, "Slips L/S") || strings.Contains(body, "Slipped ×") {
+		t.Error("task that never slipped has a slips paragraph")
+	}
 	requireElementText(t, body, "strong", "bold")
 	requireElementText(t, body, "strong", "entry notes")
 	link, history := false, false
@@ -119,6 +123,24 @@ func TestTaskDetailOpen(t *testing.T) {
 	}
 	if !reflect.DeepEqual(before, ta.opKinds()) {
 		t.Error("task GET created a user operation")
+	}
+}
+
+func TestTaskDetailSlips(t *testing.T) {
+	ta := newTestApp(t)
+	task := ta.task(ta.addTask(service.AddTaskIn{Title: "Rescheduled"}))
+	task.SlipsLifetime, task.SlipsSinceTriage = 2, 1
+	tmpl, err := ta.App.Template("task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body bytes.Buffer
+	if err := tmpl.ExecuteTemplate(&body, "layout", web.Page{Data: task, Gen: ta.Svc.Generation()}); err != nil {
+		t.Fatal(err)
+	}
+	requireElementText(t, body.String(), "p", "Slipped ×2 lifetime, ×1 since last triage.")
+	if strings.Contains(body.String(), "Slips L/S") {
+		t.Error("task still shows the old slips paragraph")
 	}
 }
 

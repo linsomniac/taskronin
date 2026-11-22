@@ -20,7 +20,7 @@
 {{end}}
 </article>
 {{else}}<p>No AI changes.</p>{{end}}
-{{if .Data.More}}<a href="{{.Data.More}}">More</a>{{end}}
+{{if .Data.More}}<p><a class="btn secondary" href="{{.Data.More}}">More changes</a></p>{{end}}
 {{if .Data.Review}}
 {{template "aireview" .Data.Review}}
 {{end}}

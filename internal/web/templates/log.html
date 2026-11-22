@@ -12,6 +12,6 @@
 {{range .Entries}}{{template "entryrow" (row $ .)}}{{end}}
 </section>
 {{else}}<p class="empty">No entries in this range. Log one below.</p>{{end}}
-{{if .Data.More}}<a href="{{.Data.More}}">More</a>{{end}}
+{{if .Data.More}}<p><a class="btn secondary" href="{{.Data.More}}">More entries</a></p>{{end}}
 {{template "logentry" (row $ .Data.LogEntry)}}
 {{end}}

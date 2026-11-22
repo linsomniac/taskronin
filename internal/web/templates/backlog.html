@@ -2,7 +2,7 @@
 <h1>Backlog</h1>
 {{range .Data.Items}}
 <article class="card task" data-task="{{.ID}}" aria-label="Task #{{.ID}}">
-{{template "taskheading" .TaskView}}
+{{template "taskheading2" .TaskView}}
 <div class="actions">
 {{if .Prev}}
 <form method="post" action="/ui/tasks/{{.ID}}/place">
@@ -53,5 +53,5 @@
 </details>
 </article>
 {{else}}<p class="empty">Backlog empty. New tasks start in Triage.</p>{{end}}
-{{if .Data.More}}<a href="{{.Data.More}}">More</a>{{end}}
+{{if .Data.More}}<p><a class="btn secondary" href="{{.Data.More}}">More tasks</a></p>{{end}}
 {{end}}

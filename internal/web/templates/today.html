@@ -20,7 +20,7 @@
 </form>
 </div>
 </div>
-{{else}}<p class="empty">No focus. Pick a task below, or set one by ID.</p>{{end}}
+{{else}}<p class="empty">No focus. Set one by task ID, or use Focus on a task.</p>{{end}}
 <form method="post" action="/ui/focus">
 {{template "hidden" $}}
 <label>Task ID <input name="task_id" required></label>

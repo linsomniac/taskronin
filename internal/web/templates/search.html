@@ -18,7 +18,7 @@
 <p data-snippet>{{.Snippet}}</p>
 </article>
 {{else}}<p class="empty">No matches for “{{.Data.Query}}”.</p>{{end}}
-{{if .Data.More}}<a href="{{.Data.More}}">More</a>{{end}}
+{{if .Data.More}}<p><a class="btn secondary" href="{{.Data.More}}">More results</a></p>{{end}}
 </section>
 {{end}}
 {{end}}

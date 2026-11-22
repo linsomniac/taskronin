@@ -12,7 +12,7 @@
 {{/* AIDEV-NOTE: Invoke row form partials with (row $ .). In them, use .V for
 row data and .P for page state, including {{template "hidden" .P}} and
 {{etag .P.Gen .V.Version}} and {{md .P.MD .V.Notes}}. Page-level forms use {{template "hidden" $}}.
-The taskheading, tasklink and taskmeta display partials take a TaskView directly. */}}
+The taskheading, taskheading2, tasklink and taskmeta display partials take a TaskView directly. */}}
 
 {{define "taskrow"}}
 <article class="card task" data-task="{{.V.ID}}">
@@ -25,19 +25,26 @@ The taskheading, tasklink and taskmeta display partials take a TaskView directly
 {{template "taskmeta" .}}
 {{end}}
 
+{{define "taskheading2"}}
+<h2 class="card-title">{{template "tasklink" .}}</h2>
+{{template "taskmeta" .}}
+{{end}}
+
 {{define "tasklink"}}<a href="/ui/tasks/{{.ID}}"><span class="id">#{{.ID}}</span> {{.Title}}</a>{{end}}
 
-{{define "taskmeta"}}
+{{define "taskmeta" -}}
+{{if or .Reasons (gt .SlipsLifetime 0) .DueDate.Valid .DeferDate.Valid .Tags .Project .Priority}}
 <p class="meta">
 {{range .Reasons}}<span class="chip warn reason">{{.Reason}}</span> {{end}}
-{{if gt .SlipsLifetime 0}}<span class="chip bad" title="Slips: lifetime / since triage">slipped ×{{.SlipsLifetime}}</span>{{end}}
-{{if eq .DuePhase "overdue"}}<span class="chip bad">overdue</span>{{else if .DueDate.Valid}}<span class="chip warn">due {{day .DueDate.V}}{{if .DueMin.Valid}} {{hhmm .DueMin.V}}{{end}}</span>{{end}}
+{{if gt .SlipsLifetime 0}}<span class="chip bad" title="slipped ×{{.SlipsLifetime}} lifetime, ×{{.SlipsSinceTriage}} since last triage">slipped ×{{.SlipsLifetime}}</span>{{end}}
+{{if eq .DuePhase "overdue"}}<span class="chip bad">overdue · due {{day .DueDate.V}}{{if .DueMin.Valid}} {{hhmm .DueMin.V}}{{end}}</span>{{else if .DueDate.Valid}}<span class="chip warn">due {{day .DueDate.V}}{{if .DueMin.Valid}} {{hhmm .DueMin.V}}{{end}}</span>{{end}}
 {{if .DueSoon}}<span class="chip warn">due soon</span>{{end}}
 {{if .DeferDate.Valid}}<span class="chip">deferred until {{day .DeferDate.V}}{{if .DeferMin.Valid}} {{hhmm .DeferMin.V}}{{end}}</span>{{end}}
 {{range .Tags}}<span class="chip tag">{{.}}</span> {{end}}
 {{if .Project}}<span class="muted">{{.Project}}</span>{{end}}
 {{if .Priority}}<span class="chip">prio {{.Priority}}</span>{{end}}
 </p>
+{{end -}}
 {{end}}
 
 {{/* AIDEV-NOTE: Today, Triage and Backlog keep Complete in the primary row. Triage and Backlog render taskactions inside More. */}}

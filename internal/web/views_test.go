@@ -124,14 +124,106 @@ func moreLink(t *testing.T, body string) string {
 	t.Helper()
 	var link string
 	walkHTML(parseHTML(t, body), func(n *html.Node) {
-		if n.Type == html.ElementNode && n.Data == "a" && strings.TrimSpace(nodeText(n)) == "More" {
+		if n.Type != html.ElementNode || n.Data != "a" {
+			return
+		}
+		href := attr(n, "href")
+		if u, err := url.Parse(href); err == nil && u.Query().Has("cursor") {
 			if link != "" {
 				t.Error("multiple More links")
 			}
-			link = attr(n, "href")
+			link = href
 		}
 	})
 	return link
+}
+
+func TestPagerLabels(t *testing.T) {
+	ta := newTestApp(t).login()
+	id := ta.addTask(service.AddTaskIn{Title: "Journal"})
+	actor := testutil.TokenActor("bot", domain.MCPDefaultScopes)
+	for i := range 101 {
+		title := fmt.Sprintf("Draft %d", i)
+		ta.addTask(service.AddTaskIn{Title: title})
+		ta.addTask(service.AddTaskIn{Title: title, Place: &service.AddPlacement{How: "bottom"}})
+		// Linked AI entries also fill the task history and AI changes pages.
+		ta.mustOp(ta.Svc.AddEntry(t.Context(), testutil.Meta(actor, ta.Svc.Generation()),
+			service.AddEntryIn{TaskID: sql.Null[domain.TaskID]{V: id, Valid: true}, Title: title}))
+	}
+	for _, tc := range []struct{ path, label string }{
+		{"/ui/triage", "More tasks"}, {"/ui/backlog", "More tasks"}, {"/ui/search?q=Draft", "More results"},
+		{"/ui/ai-changes", "More changes"}, {taskPagePath(id) + "/history", "More history"}, {"/ui/log", "More entries"},
+	} {
+		t.Run(strings.ReplaceAll(tc.path, "/", ""), func(t *testing.T) {
+			body := ta.viewBody(tc.path)
+			href := moreLink(t, body)
+			if href == "" {
+				t.Fatal("missing pager link")
+			}
+			page := parseHTML(t, body)
+			pager := requireElement(t, page, "a", "href", href)
+			if got := nodeText(pager); got != tc.label || attr(pager, "class") != "btn secondary" || pager.Parent.Data != "p" {
+				t.Errorf("pager = <%s><a class=%q>%s, want secondary button labeled %q in a paragraph", pager.Parent.Data, attr(pager, "class"), got, tc.label)
+			}
+			walkHTML(page, func(n *html.Node) {
+				if n.Type == html.ElementNode && n.Data != "summary" && strings.TrimSpace(nodeText(n)) == "More" {
+					t.Errorf("unexpected More label on <%s>", n.Data)
+				}
+			})
+		})
+	}
+}
+
+func TestHeadingLevels(t *testing.T) {
+	p := newFormPages(t)
+	taskPath := taskPagePath(p.middle)
+	title := p.task(p.middle).Title
+	headings := []string{"h1", "h2", "h3", "h4", "h5", "h6"}
+	for _, path := range []string{"/ui/", "/ui/triage", "/ui/backlog", "/ui/upcoming", "/ui/report?todo=1&upcoming=1",
+		taskPath, taskPath + "/history", "/ui/search?q=Middle"} {
+		t.Run(strings.ReplaceAll(path, "/", ""), func(t *testing.T) {
+			main := requireElement(t, parseHTML(t, p.viewBody(path)), "main", "class", "page")
+			h1s, previous := 0, 0
+			walkHTML(main, func(n *html.Node) {
+				level := slices.Index(headings, n.Data) + 1
+				if n.Type != html.ElementNode || level == 0 {
+					return
+				}
+				if level > previous+1 {
+					t.Errorf("heading %q at level %d follows level %d", nodeText(n), level, previous)
+				}
+				previous = level
+				if level == 1 {
+					h1s++
+				}
+				if path == taskPath && strings.Contains(nodeText(n), title) != (level == 1) {
+					t.Errorf("task title %q must appear only in the h1, got <%s>%s", title, n.Data, nodeText(n))
+				}
+			})
+			if h1s != 1 {
+				t.Errorf("found %d h1 headings, want one", h1s)
+			}
+		})
+	}
+}
+
+func TestTaskMetaOmittedWhenEmpty(t *testing.T) {
+	ta := newTestApp(t).login()
+	place := &service.AddPlacement{How: "bottom"}
+	bare := ta.addTask(service.AddTaskIn{Title: "Bare", Place: place})
+	tagged := ta.addTask(service.AddTaskIn{Title: "Tagged", Place: place, Tags: []string{"docs"}})
+	page := parseHTML(t, ta.viewBody("/ui/backlog"))
+	card := requireElement(t, page, "article", "data-task", fmt.Sprint(bare))
+	walkHTML(card, func(n *html.Node) {
+		if n.Data == "p" && attr(n, "class") == "meta" {
+			t.Error("bare task has a metadata paragraph")
+		}
+	})
+	card = requireElement(t, page, "article", "data-task", fmt.Sprint(tagged))
+	meta := requireElement(t, card, "p", "class", "meta")
+	if got := strings.TrimSpace(nodeText(meta)); got != "docs" {
+		t.Errorf("tagged task metadata = %q", got)
+	}
 }
 
 func TestTodayPage(t *testing.T) {
@@ -245,6 +337,7 @@ func TestTaskCardChips(t *testing.T) {
 	// snapshot to exercise both presentations together in the Triage template.
 	first.SlipsLifetime, first.SlipsSinceTriage = 2, 1
 	id = ta.addTask(service.AddTaskIn{Title: "No misses", Due: ptrMoment(testutil.Moment("10-29"))})
+	timedID := ta.addTask(service.AddTaskIn{Title: "Timed deadline", Due: ptrMoment(testutil.Moment("10-29 15:30"))})
 	ta.Clock.Set(testutil.Local(t, "2026-10-30 10:00"))
 	second := ta.task(id)
 	tmpl, err := ta.App.Template("triage")
@@ -252,7 +345,7 @@ func TestTaskCardChips(t *testing.T) {
 		t.Fatal(err)
 	}
 	var body bytes.Buffer
-	data := map[string]any{"Items": []domain.TaskDetail{first, second}}
+	data := map[string]any{"Items": []domain.TaskDetail{first, second, ta.task(timedID)}}
 	if err := tmpl.ExecuteTemplate(&body, "layout", web.Page{Data: data, Gen: ta.Svc.Generation()}); err != nil {
 		t.Fatal(err)
 	}
@@ -266,8 +359,12 @@ func TestTaskCardChips(t *testing.T) {
 		t.Error("unexpected slip count on Triage")
 	}
 	overdue := requireElement(t, zero, "span", "class", "chip bad")
-	if got := nodeText(overdue); got != "overdue" {
+	if got := nodeText(overdue); got != "overdue · due Thu 2026-10-29" {
 		t.Errorf("overdue chip = %q", got)
+	}
+	timed := requireElement(t, page, "article", "data-task", fmt.Sprint(timedID))
+	if got := nodeText(requireElement(t, timed, "span", "class", "chip bad")); got != "overdue · due Thu 2026-10-29 15:30" {
+		t.Errorf("timed overdue chip = %q", got)
 	}
 	meta := requireElement(t, card, "p", "class", "meta")
 	var spans []string
@@ -281,7 +378,7 @@ func TestTaskCardChips(t *testing.T) {
 	if !slices.Equal(spans, want) {
 		t.Errorf("task metadata = %q, want %q", spans, want)
 	}
-	requireElement(t, meta, "span", "title", "Slips: lifetime / since triage")
+	requireElement(t, meta, "span", "title", "slipped ×2 lifetime, ×1 since last triage")
 }
 
 func TestBacklogPage(t *testing.T) {
@@ -687,14 +784,14 @@ type emptyPage struct {
 
 func emptyPageCopy(taskPath string) []emptyPage {
 	return []emptyPage{
-		{"/ui/", []string{"No focus. Pick a task below, or set one by ID.", "No blocks today. Schedule one from a task's actions.", "Triage clear.", "Nothing logged yet today.", "No interruptions today."}},
+		{"/ui/", []string{"No focus. Set one by task ID, or use Focus on a task.", "No blocks today. Schedule one from a task's actions.", "Triage clear.", "Nothing logged yet today.", "No interruptions today."}},
 		{"/ui/triage", []string{"Triage clear. Nothing needs a decision."}},
 		{"/ui/backlog", []string{"Backlog empty. New tasks start in Triage."}},
 		{"/ui/upcoming", []string{"Nothing deferred."}},
 		{"/ui/log", []string{"No entries in this range. Log one below."}},
 		{"/ui/search?q=" + url.QueryEscape("<b>needle</b>"), []string{"No matches for “<b>needle</b>”."}},
 		{"/ui/report", []string{"No work logged in this range."}},
-		{"/ui/recap", []string{"Nothing to recap for today.", "No blocks on this date.", "No linked entries on this date.", "No unlinked entries.", "No interruptions on this date."}},
+		{"/ui/recap", []string{"Nothing to recap for today.", "No blocks on this date.", "No linked entries on this date.", "No unlinked entries on this date.", "No interruptions on this date."}},
 		{taskPath, []string{"No blocks.", "No entries.", "No interruptions."}},
 	}
 }

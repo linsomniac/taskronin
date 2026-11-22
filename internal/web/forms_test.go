@@ -315,7 +315,7 @@ func TestFixedHiddenActionValues(t *testing.T) {
 		{"/ui/", "data-task", fmt.Sprint(p.focus), "task_id", map[string]string{"Clear focus": ""}},
 		{"/ui/recap", "data-block", "1", "outcome", map[string]string{"Worked": "worked", "Missed": "missed", "Auto outcome": "auto"}},
 	} {
-		t.Run(tc.page+"/"+tc.field, func(t *testing.T) {
+		t.Run(strings.ReplaceAll(tc.page, "/", "")+" "+tc.field, func(t *testing.T) {
 			tag := "article"
 			if tc.page == "/ui/" {
 				tag = "div"
@@ -409,7 +409,7 @@ func TestPrimaryActionRows(t *testing.T) {
 		{taskPagePath(p.deleted), p.deleted, []string{"Undelete"}, nil},
 		{"/ui/", p.focus, []string{"Complete", "Clear focus"}, nil},
 	} {
-		t.Run(tc.page+"/"+fmt.Sprint(tc.id), func(t *testing.T) {
+		t.Run(strings.ReplaceAll(tc.page, "/", "")+" "+fmt.Sprint(tc.id), func(t *testing.T) {
 			tag := "article"
 			if tc.page == "/ui/" {
 				tag = "div"
