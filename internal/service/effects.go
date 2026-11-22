@@ -50,6 +50,8 @@ const (
 	EffBlockCancelled EffectKind = "block_cancelled"
 	// EffBlockResolved denotes an automatically resolved block.
 	EffBlockResolved EffectKind = "block_resolved"
+	// EffBlockRestored denotes a block returned to planned status or undeleted.
+	EffBlockRestored EffectKind = "block_restored"
 	// EffOutcomeSet denotes an explicit block outcome.
 	EffOutcomeSet EffectKind = "outcome_set"
 	// EffSlipped denotes a newly slipped block.
@@ -110,6 +112,7 @@ func EffectKinds() []EffectKind {
 		EffBlockMoved,
 		EffBlockCancelled,
 		EffBlockResolved,
+		EffBlockRestored,
 		EffOutcomeSet,
 		EffSlipped,
 		EffUnslipped,
@@ -306,10 +309,14 @@ func blockEffects(b, a effectColumns, add func(EffectKind, string, string)) {
 	if a.changed(b, "date") || a.changed(b, "start_min") || a.changed(b, "end_min") {
 		add(EffBlockMoved, "", "")
 	}
-	if (a.changed(b, "status") && a.text("status") == string(domain.BlockCancelled)) || (a.changed(b, "deleted_at") && a.nonnull("deleted_at")) {
+	statusChanged := a.changed(b, "status")
+	status := domain.BlockStatus(a.text("status"))
+	deletionChanged := a.changed(b, "deleted_at")
+	cancelled := (statusChanged && status == domain.BlockCancelled) || (deletionChanged && a.nonnull("deleted_at"))
+	if cancelled {
 		add(EffBlockCancelled, "", "")
-	} else if a.changed(b, "status") {
-		switch domain.BlockStatus(a.text("status")) {
+	} else if statusChanged {
+		switch status {
 		case domain.BlockDone, domain.BlockWorked, domain.BlockMissed:
 			switch domain.OutcomeSource(a.text("outcome_source")) {
 			case domain.OutcomeUser:
@@ -320,6 +327,11 @@ func blockEffects(b, a effectColumns, add func(EffectKind, string, string)) {
 			}
 		default:
 		}
+	}
+	// AIDEV-NOTE: Update events contain only changed columns. Either change can
+	// restore the same block, so report it once and without a time span.
+	if !cancelled && ((statusChanged && status == domain.BlockPlanned) || (deletionChanged && !a.nonnull("deleted_at"))) {
+		add(EffBlockRestored, "", "")
 	}
 	if a.changed(b, "slipped") {
 		if a.number("slipped") == 1 && b.number("slipped") == 0 {

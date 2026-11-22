@@ -88,6 +88,8 @@ func effectLine(effect service.Effect) string {
 			return fmt.Sprintf("b%d resolved", effect.BlockID)
 		}
 		return fmt.Sprintf("b%d %s", effect.BlockID, effect.To)
+	case service.EffBlockRestored:
+		return fmt.Sprintf("b%d restored", effect.BlockID)
 	case service.EffOutcomeSet:
 		return fmt.Sprintf("b%d marked %s", effect.BlockID, effect.To)
 	case service.EffSlipped:

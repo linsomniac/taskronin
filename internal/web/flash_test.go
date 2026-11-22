@@ -64,6 +64,7 @@ func TestFlashLinesEveryEffectKind(t *testing.T) {
 		service.EffBlockMoved:     {"13:00-15:00", "15:00-17:00", "b7 moved 13:00–15:00 → 15:00–17:00"},
 		service.EffBlockCancelled: {"", "user", "b7 cancelled · user"},
 		service.EffBlockResolved:  {"", "missed", "b7 missed"},
+		service.EffBlockRestored:  {"", "", "b7 restored"},
 		service.EffOutcomeSet:     {"", "worked", "b7 marked worked"},
 		service.EffSlipped:        {"", "", "b7 slipped"},
 		service.EffUnslipped:      {"", "", "b7 no longer counts as slipped"},

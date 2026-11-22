@@ -290,6 +290,22 @@ func TestUndoRedo(t *testing.T) {
 	}
 }
 
+func TestUndoUnblockReportsRestoredBlock(t *testing.T) {
+	_, sys := captureServer(t)
+	captureRun(t, sys, "", "add", "First")
+	captureRun(t, sys, "", "block", "1", "13:00-15:00", "--date", "tomorrow")
+	captureRun(t, sys, "", "unblock", "b1")
+
+	undo := captureRun(t, sys, "", "undo")
+	opID := captureOpID.FindString(undo)
+	if opID == "" || undo != "undid unblock (op "+opID+")\nb1 restored\n" {
+		t.Fatalf("undo stdout=%q", undo)
+	}
+	if redo := captureRun(t, sys, "", "redo"); redo != "redid unblock (op "+opID+")\nb1 cancelled\n" {
+		t.Fatalf("redo stdout=%q", redo)
+	}
+}
+
 func TestUndoJSONCarriesVia(t *testing.T) {
 	srv, sys := captureServer(t)
 	captureTask(t, srv, "Set up keycloak")
@@ -580,6 +596,7 @@ func TestCaptureEffects(t *testing.T) {
 		{Kind: "block_cancelled", BlockID: 7},
 		{Kind: "block_resolved", BlockID: 7, To: "done"},
 		{Kind: "block_resolved", BlockID: 7},
+		{Kind: "block_restored", BlockID: 7},
 		{Kind: "outcome_set", BlockID: 7, To: "worked"},
 		{Kind: "slipped", BlockID: 7},
 		{Kind: "unslipped", BlockID: 7},

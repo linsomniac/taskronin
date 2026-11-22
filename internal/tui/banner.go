@@ -188,6 +188,8 @@ func effectsLine(effs []api.Effect) string {
 				to = "resolved"
 			}
 			part = fmt.Sprintf("b%d %s", e.BlockID, to)
+		case "block_restored":
+			part = fmt.Sprintf("b%d restored", e.BlockID)
 		case "completed":
 			part = fmt.Sprintf("#%d completed", e.TaskID)
 		case "entry_logged":

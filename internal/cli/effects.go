@@ -240,6 +240,8 @@ func (e *env) formatEffect(effect api.Effect, p paint) string {
 			return fmt.Sprintf("%s resolved", p.blockID(effect.BlockID))
 		}
 		return fmt.Sprintf("%s %s", p.blockID(effect.BlockID), p.status(to))
+	case "block_restored":
+		return fmt.Sprintf("%s restored", p.blockID(effect.BlockID))
 	case "outcome_set":
 		return fmt.Sprintf("%s marked %s", p.blockID(effect.BlockID), p.status(to))
 	case "slipped":

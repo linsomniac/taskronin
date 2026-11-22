@@ -281,6 +281,7 @@ func TestRevertBannerKeepsConsequencesAndWarnings(t *testing.T) {
 }
 
 func TestEffectsLine(t *testing.T) {
+	eq(t, effectsLine([]api.Effect{{Kind: "block_restored", BlockID: 9}}), "b9 restored")
 	eq(t, effectsLine([]api.Effect{{Kind: "block_cancelled", BlockID: 7}, {Kind: "slipped", BlockID: 7},
 		{Kind: "reason_added", TaskID: 42, Reason: "slipped"}, {Kind: "updated", TaskID: 42}}), "b7 cancelled · b7 slipped · #42 needs triage (slipped)")
 	eq(t, effectsLine([]api.Effect{{Kind: "interrupted", TaskID: 42, From: "17"}, {Kind: "unslipped", BlockID: 7},
