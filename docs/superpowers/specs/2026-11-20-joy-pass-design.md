@@ -117,7 +117,8 @@ Both change to this table. `<day>` is the relative-day rule from §3.
 | `reverted` | `reverted op bb277cbf` | `undid complete (op bb277cbf)` / `redid …` / `reverted …` by `Via` — see §4.2 |
 | `created` | `#5 created` | `#5 created` (only ever visible under undo/redo) |
 | `updated` | `#5 updated` | **suppressed** when the same response's headline is an `added …` headline (the metadata is folded into that headline, §4.1); otherwise `#5 updated` |
-| `placed`, `moved` | `#3 placed` | `#3 placed`, `#3 moved` (visible only under undo/redo/revert) |
+| `placed`, `moved` | `#3 placed` | `#3 placed`, `#3 moved` (visible only under undo/redo/revert, and never for a task the same response deletes or restores, §4.4) |
+| `block_restored` | (new kind, §4.5) | `b1 restored` |
 | `deleted`, `undeleted`, `reopened`, `dropped`, `completed` | `#3 deleted` … | unchanged |
 
 ### 4.1 CLI headlines
@@ -218,6 +219,34 @@ not parse untouched. "Today" for that rule comes from the CLI's cached
 once, and if that read fails the absolute form is printed (never an error:
 the write already succeeded).
 
+### 4.4 Lines implied by a deletion or a restore (added 2026-11-22)
+
+`tkr undo` after `tkr add --top -t ci` used to print `#9 updated`, `#9 placed`
+and `#9 deleted`; only the last says anything. The rule, wherever effect lines
+are listed (CLI op output, `tkr ai-changes`, the web flash):
+
+- When the same response reports a task `deleted`, that task's `placed`,
+  `moved`, `updated`, `reason_removed` and `undeferred` lines are not printed.
+- When it reports a task `undeleted`, that task's `placed`, `moved` and
+  `updated` lines are not printed.
+- Everything else is always printed: `reason_added`, `deferred`, `due_set`,
+  focus lines, and every block and entry line. The rule is keyed by task ID,
+  so another task's lines in the same response are untouched.
+
+The predicate is `domain.EffectImplied`, shared by the CLI and web mirrors.
+API and `--json` responses keep every effect; only the lines are filtered.
+
+### 4.5 Restored blocks are reported (added 2026-11-22)
+
+`tkr undo` after `tkr unblock b3` printed only `undid unblock (op …)` while
+the block silently came back; the same happened to a task's blocks on undo of
+a delete and on redo of an add. A block update whose status returns to
+`planned` from any other status, or whose `deleted_at` is cleared, now emits
+`block_restored` once for that block. Update events carry only the changed
+columns, so the effect has no span; the line is `b3 restored` in all three
+mirrors. This is the second additive effect kind of the joy work (after the
+`via` field of §4.2).
+
 ## 5. Noticing progress (J2)
 
 ### 5.1 Completion tally (CLI)
@@ -303,11 +332,12 @@ titles; metadata. It is not applied inside `--json`, `status --short`, or
 | TUI Log empty | `no log entries` | `No entries for <day> — l logs work` |
 | TUI Plan step 2 backlog empty | `backlog is empty` | `Backlog empty — nothing to block` |
 | TUI Recap empty | `no blocks or unlinked entries` | `Nothing to recap for <day>` |
-| Web Today Focus | `No focus task.` | `No focus. Pick a task below, or set one by ID.` |
+| Web Today Focus | `No focus task.` | `No focus. Set one by task ID, or use Focus on a task.` (rows on Today have no Focus button, so "pick a task below" pointed nowhere; revised 2026-11-22) |
 | Web Today Blocks | `No blocks today.` | `No blocks today.` + muted `Schedule one from a task's actions.` |
 | Web Triage | `Nothing to triage.` | `Triage clear. Nothing needs a decision.` |
 | Web Backlog | `No backlog tasks.` | `Backlog empty. New tasks start in Triage.` (no add form is added to Backlog; its default placement is Triage) |
 | Web Upcoming / Log / Search / Report | (builder checks) | one sentence each in the same voice |
+| Web Recap, unlinked entries | `No unlinked entries.` | `No unlinked entries on this date.` (matches its three siblings; revised 2026-11-22) |
 
 ## 8. Errors that help (J5)
 
@@ -332,7 +362,10 @@ titles; metadata. It is not applied inside `--json`, `status --short`, or
 
 - Header: one line, `Taskronin · Fri 2026-11-20 15:04` bold, tabs as
   `1 Today  2 Triage …` with the active tab in reverse video; the warning/AI
-  status items stay on the optional second line.
+  status items stay on the optional second line. On narrow frames the
+  brand, then the date, then the clock give way; when the five tab labels
+  alone do not fit (below 45 columns) the inactive tabs show only their
+  number, as in `1 [2 Triage] 3 4 5` (added 2026-11-22).
 - Rows: the cursor row is reverse video across the frame width (existing `›`
   kept); IDs cyan; reasons `{new, slipped}` yellow; `◀ now` green; `reblock?`
   yellow; `missed`/`slipped` red; `✓` green.
@@ -361,6 +394,15 @@ existing template test enforces it). Template changes are structural only.
   project muted text, `due <day>` a yellow badge, `overdue` red, `slipped ×N`
   red and shown only when N > 0 (the `Slips L/S` text is removed from rows and
   kept on the task page).
+  Revised 2026-11-22: the overdue chip keeps its date (`overdue · due
+  <day>`); the slips chip's `title` and the task page's line both read
+  `slipped ×L lifetime, ×S since last triage`, and the task page shows the
+  line only when L > 0; a task with no metadata gets no empty meta
+  paragraph. Card titles are `h2` where cards sit directly under the page
+  `h1` (Triage, Backlog) and `h3` under a section `h2`; the task page shows
+  its title once, in the `h1`. Pager links name what they load (`More
+  tasks`, `More results`, `More changes`, `More history`, `More entries`),
+  so they cannot be confused with a card's `More` disclosure.
 - **Actions.** Each card has one primary row: on Triage `Keep · Top · Bottom`
   and `Complete`; on Backlog `Up · Down · Focus · Complete`; the rest
   (`Before/After ID`, `Defer`, `Block`, `Drop`, `Send to triage`) sit in a
@@ -427,6 +469,20 @@ Builder-check rulings (2026-11-20, after a fresh reviewer read this document):
     rule; day words apply to headlines, effect lines, empty states and the
     triage card only. The two interfaces share the palette, not the row
     format.
+
+Polish residuals (2026-11-22, Plan H):
+19. A deleted or restored task prints one line, not three (§4.4).
+20. Restored blocks get a line, through the new `block_restored` effect kind
+    (§4.5). Additive in `--json`.
+21. The web overdue chip keeps its date; the cryptic `Slips L/S: 0/0` line
+    on the task page becomes the shared slips sentence, shown only when the
+    task has slipped (§10).
+22. Web headings no longer skip a level, and the task page shows its title
+    once (§10).
+23. Pager links are named for what they load (§10).
+24. Two web empty states reworded for accuracy and consistency (§7).
+25. The TUI header degrades to numbered tabs on frames under 45 columns
+    (§9).
 
 ## 13. Questions for Sean (answered by default; change any later)
 
