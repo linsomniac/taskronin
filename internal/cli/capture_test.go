@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -306,17 +307,99 @@ func TestUndoUnblockReportsRestoredBlock(t *testing.T) {
 	}
 }
 
+func TestUndoAddImpliedLines(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		flags      []string
+		undo, redo string
+	}{
+		{"triage", nil, "#1 deleted\n", ""},
+		{"tagged", []string{"--top", "-t", "ci"}, "#1 deleted\n", "#1 undeleted\n"},
+		{"now", []string{"--now"}, "#1 deleted\nfocus cleared\n", ""},
+		{"block", []string{"--block", "tomorrow 09:00-10:00"}, "b1 cancelled\n#1 deleted\n", "#1 undeleted\nb1 restored\n"},
+		{"defer", []string{"--defer", "tomorrow"}, "#1 deleted\n", "#1 undeleted\n#1 deferred to tomorrow\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, sys := captureServer(t)
+			captureRun(t, sys, "", append([]string{"add", "A"}, tc.flags...)...)
+			out := captureRun(t, sys, "", "undo")
+			op := captureOpID.FindString(out)
+			if want := "undid add (op " + op + ")\n" + tc.undo; op == "" || out != want {
+				t.Errorf("undo stdout = %q, want %q", out, want)
+			}
+			if tc.redo != "" {
+				out = captureRun(t, sys, "", "redo")
+				if want := "redid add (op " + op + ")\n" + tc.redo; out != want {
+					t.Errorf("redo stdout = %q, want %q", out, want)
+				}
+			}
+		})
+	}
+}
+
+func TestDeleteImpliedLines(t *testing.T) {
+	_, sys := captureServer(t)
+	captureRun(t, sys, "", "add", "A")
+	if out := captureRun(t, sys, "", "delete", "1", "-y"); out != "#1 'A' deleted\n" {
+		t.Errorf("delete stdout = %q", out)
+	}
+	out := captureRun(t, sys, "", "undo")
+	op := captureOpID.FindString(out)
+	if want := "undid delete (op " + op + ")\n#1 needs triage (new)\n#1 undeleted\n"; op == "" || out != want {
+		t.Errorf("undo stdout = %q, want %q", out, want)
+	}
+}
+
+func TestImpliedLinesKeyedByTask(t *testing.T) {
+	var out bytes.Buffer
+	e := &env{out: &out}
+	e.printOp(&api.OpResponse{Effects: []api.Effect{
+		{Kind: "deleted", TaskID: 1}, {Kind: "placed", TaskID: 2}, {Kind: "focus_cleared"},
+	}}, plainHeadline("Effects"))
+	if want := "Effects\n#1 deleted\n#2 placed\nfocus cleared\n"; out.String() != want {
+		t.Errorf("stdout = %q, want %q", out.String(), want)
+	}
+}
+
+func TestAIChangesImpliedLinesPerOp(t *testing.T) {
+	var out bytes.Buffer
+	e := &env{out: &out}
+	err := e.printAIChanges(&api.AIChanges{Ops: []api.OpSummary{
+		{Effects: []api.Effect{{Kind: "placed", TaskID: 1}, {Kind: "deleted", TaskID: 1}}},
+		{Effects: []api.Effect{{Kind: "placed", TaskID: 1}}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lines []string
+	for line := range strings.SplitSeq(out.String(), "\n") {
+		if strings.HasPrefix(line, "  ") {
+			lines = append(lines, line)
+		}
+	}
+	if want := []string{"  #1 deleted", "  #1 placed"}; !slices.Equal(lines, want) {
+		t.Errorf("effect lines = %q, want %q", lines, want)
+	}
+}
+
 func TestUndoJSONCarriesVia(t *testing.T) {
-	srv, sys := captureServer(t)
-	captureTask(t, srv, "Set up keycloak")
+	_, sys := captureServer(t)
+	captureRun(t, sys, "", "add", "A", "--top", "-t", "ci")
 	out := captureRun(t, sys, "", "undo", "--json")
 	var res struct {
-		Effects []map[string]any `json:"effects"`
+		Effects []struct {
+			Kind string `json:"kind"`
+			Via  string `json:"via"`
+		} `json:"effects"`
 	}
 	if err := json.Unmarshal([]byte(out), &res); err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Effects) == 0 || res.Effects[0]["kind"] != "reverted" || res.Effects[0]["via"] != "undo" {
+	var kinds []string
+	for _, effect := range res.Effects {
+		kinds = append(kinds, effect.Kind)
+	}
+	if !slices.Equal(kinds, []string{"reverted", "updated", "placed", "deleted"}) || res.Effects[0].Via != "undo" {
 		t.Fatalf("undo --json effects = %v", res.Effects)
 	}
 }
@@ -621,8 +704,9 @@ func TestCaptureEffects(t *testing.T) {
 		{Kind: "completed", TaskID: 42},
 		{Kind: "reopened", TaskID: 42},
 		{Kind: "dropped", TaskID: 42},
-		{Kind: "deleted", TaskID: 42},
-		{Kind: "undeleted", TaskID: 42},
+		// Separate tasks keep every kind visible in this wording fixture.
+		{Kind: "deleted", TaskID: 43},
+		{Kind: "undeleted", TaskID: 44},
 		{Kind: "reviewed", To: "123"},
 		{Kind: "purged", TaskID: 42},
 	}}

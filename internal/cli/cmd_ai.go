@@ -110,7 +110,11 @@ func (e *env) printAIChanges(changes *api.AIChanges) error {
 			return line
 		})
 		fmt.Fprintln(&out, line)
+		deleted, undeleted := deletedAndUndeletedTasks(op.Effects)
 		for _, effect := range op.Effects {
+			if domain.EffectImplied(effect.Kind, deleted[effect.TaskID], undeleted[effect.TaskID]) {
+				continue
+			}
 			fmt.Fprintln(&out, "  "+e.effectLine(effect, p))
 		}
 	}

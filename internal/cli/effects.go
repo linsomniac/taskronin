@@ -38,7 +38,23 @@ func (e *env) operationOutputError() error {
 	return nil
 }
 
-// printOp echoes all consequences except those already stated in the headline.
+func deletedAndUndeletedTasks(effects []api.Effect) (deleted, undeleted map[int64]bool) {
+	deleted, undeleted = make(map[int64]bool), make(map[int64]bool)
+	for _, effect := range effects {
+		if effect.TaskID == 0 {
+			continue
+		}
+		switch effect.Kind {
+		case "deleted":
+			deleted[effect.TaskID] = true
+		case "undeleted":
+			undeleted[effect.TaskID] = true
+		}
+	}
+	return deleted, undeleted
+}
+
+// printOp echoes consequences beyond the headline and any task deletion or restore.
 func (e *env) printOp(resp *api.OpResponse, headline opHeadline) {
 	// AIDEV-NOTE: preserve this void interface while retaining the first
 	// write error for outputOp. The mutation has already succeeded.
@@ -50,11 +66,13 @@ func (e *env) printOp(resp *api.OpResponse, headline opHeadline) {
 	if _, e.opOutputErr = fmt.Fprintln(e.out, display); e.opOutputErr != nil {
 		return
 	}
+	deleted, undeleted := deletedAndUndeletedTasks(resp.Effects)
 	for _, effect := range resp.Effects {
-		if !e.effectInHeadline(resp, effect, plain) {
-			if _, e.opOutputErr = fmt.Fprintln(e.out, e.effectLine(effect, p)); e.opOutputErr != nil {
-				return
-			}
+		if domain.EffectImplied(effect.Kind, deleted[effect.TaskID], undeleted[effect.TaskID]) || e.effectInHeadline(resp, effect, plain) {
+			continue
+		}
+		if _, e.opOutputErr = fmt.Fprintln(e.out, e.effectLine(effect, p)); e.opOutputErr != nil {
+			return
 		}
 	}
 }

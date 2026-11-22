@@ -39,8 +39,25 @@ func (lines flashMessage) HasEffects() bool {
 }
 
 func flashLines(res *service.OpResult) []string {
+	deleted, undeleted := make(map[domain.TaskID]bool), make(map[domain.TaskID]bool)
+	for _, effect := range res.Effects {
+		if effect.TaskID == 0 {
+			continue
+		}
+		switch effect.Kind {
+		case service.EffDeleted:
+			deleted[effect.TaskID] = true
+		case service.EffUndeleted:
+			undeleted[effect.TaskID] = true
+		default:
+			// Only task deletions and restores imply other effect lines.
+		}
+	}
 	lines := make([]string, 0, len(res.Effects)+len(res.Warnings)+2)
 	for _, effect := range res.Effects {
+		if domain.EffectImplied(string(effect.Kind), deleted[effect.TaskID], undeleted[effect.TaskID]) {
+			continue
+		}
 		lines = append(lines, effectLine(effect))
 	}
 	for _, warning := range res.Warnings {

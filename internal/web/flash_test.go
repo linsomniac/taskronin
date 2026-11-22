@@ -130,6 +130,39 @@ func TestFlashLinesEffectVariants(t *testing.T) {
 	}
 }
 
+func TestFlashLinesImplied(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		effects []service.Effect
+		want    []string
+	}{
+		{"deleted", []service.Effect{
+			{Kind: service.EffDeleted, TaskID: 4},
+			{Kind: service.EffReasonRemoved, TaskID: 4, Reason: domain.ReasonNew},
+			{Kind: service.EffPlaced, TaskID: 4},
+			{Kind: service.EffUpdated, TaskID: 4},
+			{Kind: service.EffPlaced, TaskID: 5},
+			{Kind: service.EffFocusCleared},
+		}, []string{"#4 deleted", "#5 placed", "focus cleared"}},
+		{"undeleted", []service.Effect{
+			{Kind: service.EffUndeleted, TaskID: 4},
+			{Kind: service.EffPlaced, TaskID: 4},
+			{Kind: service.EffUpdated, TaskID: 4},
+			{Kind: service.EffReasonAdded, TaskID: 4, Reason: domain.ReasonNew},
+		}, []string{"#4 undeleted", "#4 needs triage (new)"}},
+		{"no task ID", []service.Effect{
+			{Kind: service.EffDeleted}, {Kind: service.EffPlaced},
+		}, []string{"#0 deleted", "#0 placed"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := web.FlashLines(&service.OpResult{Effects: tc.effects})
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("flash lines = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestFlashLinesWarningsAndFlags(t *testing.T) {
 	got := web.FlashLines(&service.OpResult{
 		Effects:  []service.Effect{{Kind: service.EffUpdated, TaskID: 42}},

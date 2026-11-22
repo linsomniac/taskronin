@@ -7,12 +7,27 @@ import (
 	"go/parser"
 	"go/token"
 	"reflect"
+	"slices"
 	"strconv"
 	"testing"
 
 	"taskronin/internal/domain"
 	"taskronin/internal/service"
 )
+
+func TestEffectImpliedKindsExist(t *testing.T) {
+	var got []string
+	for _, kind := range service.EffectKinds() {
+		if domain.EffectImplied(string(kind), true, true) {
+			got = append(got, string(kind))
+		}
+	}
+	slices.Sort(got)
+	want := []string{"moved", "placed", "reason_removed", "undeferred", "updated"}
+	if !slices.Equal(got, want) {
+		t.Errorf("implied effect kinds = %q, want %q", got, want)
+	}
+}
 
 func TestEffectKindsMatchDeclarations(t *testing.T) {
 	file, err := parser.ParseFile(token.NewFileSet(), "effects.go", nil, 0)
