@@ -403,6 +403,7 @@ existing template test enforces it). Template changes are structural only.
   its title once, in the `h1`. Pager links name what they load (`More
   tasks`, `More results`, `More changes`, `More history`, `More entries`),
   so they cannot be confused with a card's `More` disclosure.
+  An overdue task shows no `due soon` chip; the two contradict each other.
 - **Actions.** Each card has one primary row: on Triage `Keep · Top · Bottom`
   and `Complete`; on Backlog `Up · Down · Focus · Complete`; the rest
   (`Before/After ID`, `Defer`, `Block`, `Drop`, `Send to triage`) sit in a
