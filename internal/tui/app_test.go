@@ -288,7 +288,7 @@ func TestEffectsLine(t *testing.T) {
 		{Kind: "focus_set", TaskID: 42}, {Kind: "focus_cleared"}, {Kind: "block_resolved", BlockID: 7},
 		{Kind: "block_resolved", BlockID: 8, To: "worked"}, {Kind: "completed", TaskID: 42},
 		{Kind: "entry_logged", EntryID: 9}, {Kind: "reverted"}}),
-		"interrupted #17 · b7 unslipped · focus #42 · focus cleared · b7 resolved · b8 worked · #42 completed · e9 logged · reverted")
+		"interrupted #17 · b7 no longer counts as slipped · focus → #42 · focus cleared · b7 resolved · b8 worked · #42 completed · e9 logged · reverted")
 }
 
 func TestEffectsLineReverted(t *testing.T) {

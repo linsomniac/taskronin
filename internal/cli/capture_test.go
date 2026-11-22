@@ -313,9 +313,9 @@ func TestUndoAddImpliedLines(t *testing.T) {
 		flags      []string
 		undo, redo string
 	}{
-		{"triage", nil, "#1 deleted\n", ""},
+		{"triage", nil, "#1 deleted\n", "#1 undeleted\n#1 needs triage (new)\n"},
 		{"tagged", []string{"--top", "-t", "ci"}, "#1 deleted\n", "#1 undeleted\n"},
-		{"now", []string{"--now"}, "#1 deleted\nfocus cleared\n", ""},
+		{"now", []string{"--now"}, "#1 deleted\nfocus cleared\n", "#1 undeleted\nfocus → #1\n"},
 		{"block", []string{"--block", "tomorrow 09:00-10:00"}, "b1 cancelled\n#1 deleted\n", "#1 undeleted\nb1 restored\n"},
 		{"defer", []string{"--defer", "tomorrow"}, "#1 deleted\n", "#1 undeleted\n#1 deferred to tomorrow\n"},
 	} {
@@ -327,11 +327,9 @@ func TestUndoAddImpliedLines(t *testing.T) {
 			if want := "undid add (op " + op + ")\n" + tc.undo; op == "" || out != want {
 				t.Errorf("undo stdout = %q, want %q", out, want)
 			}
-			if tc.redo != "" {
-				out = captureRun(t, sys, "", "redo")
-				if want := "redid add (op " + op + ")\n" + tc.redo; out != want {
-					t.Errorf("redo stdout = %q, want %q", out, want)
-				}
+			out = captureRun(t, sys, "", "redo")
+			if want := "redid add (op " + op + ")\n" + tc.redo; out != want {
+				t.Errorf("redo stdout = %q, want %q", out, want)
 			}
 		})
 	}
@@ -354,9 +352,10 @@ func TestImpliedLinesKeyedByTask(t *testing.T) {
 	var out bytes.Buffer
 	e := &env{out: &out}
 	e.printOp(&api.OpResponse{Effects: []api.Effect{
-		{Kind: "deleted", TaskID: 1}, {Kind: "placed", TaskID: 2}, {Kind: "focus_cleared"},
+		{Kind: "deleted", TaskID: 1}, {Kind: "placed", TaskID: 1}, {Kind: "placed", TaskID: 2}, {Kind: "focus_cleared"},
+		{Kind: "deleted", TaskID: 0}, {Kind: "placed", TaskID: 0},
 	}}, plainHeadline("Effects"))
-	if want := "Effects\n#1 deleted\n#2 placed\nfocus cleared\n"; out.String() != want {
+	if want := "Effects\n#1 deleted\n#2 placed\nfocus cleared\n#0 deleted\n#0 placed\n"; out.String() != want {
 		t.Errorf("stdout = %q, want %q", out.String(), want)
 	}
 }
@@ -721,6 +720,9 @@ func TestCaptureEffects(t *testing.T) {
 	}
 	res.Effects = append(res.Effects, api.Effect{Kind: "future_kind", TaskID: 42})
 	e.printOp(res, plainHeadline("Effects"))
+	if got, want := bytes.Count(out.Bytes(), []byte("\n")), 1+len(res.Effects); got != want {
+		t.Errorf("output has %d lines, want %d (headline plus every effect)", got, want)
+	}
 	testutil.Golden(t, "effects", out.Bytes())
 	plain := out.String()
 	out.Reset()

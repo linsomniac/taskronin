@@ -170,14 +170,16 @@ func effectsLine(effs []api.Effect) string {
 	for _, e := range effs {
 		var part string
 		switch e.Kind {
-		case "slipped", "unslipped":
-			part = fmt.Sprintf("b%d %s", e.BlockID, e.Kind)
+		case "slipped":
+			part = fmt.Sprintf("b%d slipped", e.BlockID)
+		case "unslipped":
+			part = fmt.Sprintf("b%d no longer counts as slipped", e.BlockID)
 		case "reason_added":
 			part = fmt.Sprintf("#%d needs triage (%s)", e.TaskID, e.Reason)
 		case "interrupted":
 			part = "interrupted #" + e.From
 		case "focus_set":
-			part = fmt.Sprintf("focus #%d", e.TaskID)
+			part = fmt.Sprintf("focus → #%d", e.TaskID)
 		case "focus_cleared":
 			part = "focus cleared"
 		case "block_cancelled":

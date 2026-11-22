@@ -38,7 +38,7 @@ The taskheading, taskheading2, tasklink and taskmeta display partials take a Tas
 {{range .Reasons}}<span class="chip warn reason">{{.Reason}}</span> {{end}}
 {{if gt .SlipsLifetime 0}}<span class="chip bad" title="slipped ×{{.SlipsLifetime}} lifetime, ×{{.SlipsSinceTriage}} since last triage">slipped ×{{.SlipsLifetime}}</span>{{end}}
 {{if eq .DuePhase "overdue"}}<span class="chip bad">overdue · due {{day .DueDate.V}}{{if .DueMin.Valid}} {{hhmm .DueMin.V}}{{end}}</span>{{else if .DueDate.Valid}}<span class="chip warn">due {{day .DueDate.V}}{{if .DueMin.Valid}} {{hhmm .DueMin.V}}{{end}}</span>{{end}}
-{{if .DueSoon}}<span class="chip warn">due soon</span>{{end}}
+{{if and .DueSoon (ne .DuePhase "overdue")}}<span class="chip warn">due soon</span>{{end}}
 {{if .DeferDate.Valid}}<span class="chip">deferred until {{day .DeferDate.V}}{{if .DeferMin.Valid}} {{hhmm .DeferMin.V}}{{end}}</span>{{end}}
 {{range .Tags}}<span class="chip tag">{{.}}</span> {{end}}
 {{if .Project}}<span class="muted">{{.Project}}</span>{{end}}

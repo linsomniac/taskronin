@@ -706,10 +706,11 @@ type Effect struct {
 	From    string // e.g. old title, old date
 	To      string
 }
-type EffectKind string // created, updated, retitled, placed, moved, deferred, undeferred, due_set,
-	// due_cleared, blocked, block_moved, block_cancelled, block_resolved, block_restored, outcome_set, slipped,
-	// unslipped, reason_added, reason_removed, focus_set, focus_cleared, interrupted,
-	// entry_logged, entry_updated, entry_relinked, entry_deleted, entry_restored, completed,
+type EffectKind string // created, updated, retitled, placed, moved, deferred,
+	// undeferred, due_set, due_cleared, blocked, block_moved, block_cancelled,
+	// block_resolved, block_restored, outcome_set, slipped, unslipped, reason_added,
+	// reason_removed, focus_set, focus_cleared, interrupted, entry_logged,
+	// entry_updated, entry_relinked, entry_deleted, entry_restored, completed,
 	// reopened, dropped, deleted, undeleted, reverted, reviewed, purged
 ```
 

@@ -39,6 +39,8 @@ func (lines flashMessage) HasEffects() bool {
 }
 
 func flashLines(res *service.OpResult) []string {
+	// AIDEV-NOTE: Keep these sets in step with deletedAndUndeletedTasks in
+	// internal/cli/effects.go. A§1.3 keeps the renderers separate. Task ID 0 is not a task.
 	deleted, undeleted := make(map[domain.TaskID]bool), make(map[domain.TaskID]bool)
 	for _, effect := range res.Effects {
 		if effect.TaskID == 0 {

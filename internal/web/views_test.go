@@ -130,7 +130,7 @@ func moreLink(t *testing.T, body string) string {
 		href := attr(n, "href")
 		if u, err := url.Parse(href); err == nil && u.Query().Has("cursor") {
 			if link != "" {
-				t.Error("multiple More links")
+				t.Error("multiple links with a cursor query parameter")
 			}
 			link = href
 		}
@@ -185,8 +185,11 @@ func TestHeadingLevels(t *testing.T) {
 			main := requireElement(t, parseHTML(t, p.viewBody(path)), "main", "class", "page")
 			h1s, previous := 0, 0
 			walkHTML(main, func(n *html.Node) {
+				if n.Type != html.ElementNode {
+					return
+				}
 				level := slices.Index(headings, n.Data) + 1
-				if n.Type != html.ElementNode || level == 0 {
+				if level == 0 {
 					return
 				}
 				if level > previous+1 {
@@ -362,6 +365,11 @@ func TestTaskCardChips(t *testing.T) {
 	if got := nodeText(overdue); got != "overdue · due Thu 2026-10-29" {
 		t.Errorf("overdue chip = %q", got)
 	}
+	walkHTML(zero, func(n *html.Node) {
+		if n.Type == html.ElementNode && strings.TrimSpace(nodeText(n)) == "due soon" {
+			t.Error("overdue task also shows due soon")
+		}
+	})
 	timed := requireElement(t, page, "article", "data-task", fmt.Sprint(timedID))
 	if got := nodeText(requireElement(t, timed, "span", "class", "chip bad")); got != "overdue · due Thu 2026-10-29 15:30" {
 		t.Errorf("timed overdue chip = %q", got)

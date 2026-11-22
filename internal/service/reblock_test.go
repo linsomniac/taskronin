@@ -427,6 +427,15 @@ func TestBLK50(t *testing.T) {
 	slip := s.BlockView(b)
 	s.At("10-28 17:00").Outcome(b, domain.SetAuto)
 	requireBlockState(t, s, b, "{planned, –, 0, –}")
+	var restored []domain.BlockID
+	for _, effect := range s.Last.Effects {
+		if effect.Kind == service.EffBlockRestored {
+			restored = append(restored, effect.BlockID)
+		}
+	}
+	if !slices.Equal(restored, []domain.BlockID{b}) {
+		t.Errorf("restored block IDs = %v, want [%d]", restored, b)
+	}
 	v := s.BlockView(b)
 	if v.ResolvedAt.Valid || v.ResolvedSeq.Valid || v.SlippedAt != slip.SlippedAt || v.SlippedSeq != slip.SlippedSeq {
 		t.Fatalf("auto reset metadata = %+v", v)

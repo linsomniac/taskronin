@@ -183,6 +183,27 @@ func TestHeaderFitsTabStrip(t *testing.T) {
 	}
 }
 
+func TestHeaderPrefixBoundaries(t *testing.T) {
+	a := newTestApp(t, newFake(), func(c *Config) { c.Color, c.StartTab = false, TabToday })
+	for _, tc := range []struct {
+		width  int
+		prefix string
+	}{
+		{78, "Taskronin · Wed 2026-10-28 10:00 "},
+		{77, "Wed 2026-10-28 10:00 "},
+		{66, "Wed 2026-10-28 10:00 "},
+		{65, "Wed 10:00 "},
+		{55, "Wed 10:00 "},
+		{54, "[1 Today]"},
+	} {
+		a.Update(tea.WindowSizeMsg{Width: tc.width, Height: 24})
+		line, _, _ := strings.Cut(viewText(a), "\n")
+		if !strings.HasPrefix(line, tc.prefix) {
+			t.Errorf("width %d: header %q, want prefix %q", tc.width, line, tc.prefix)
+		}
+	}
+}
+
 func TestHeaderNeverOverflows(t *testing.T) {
 	for _, color := range []bool{false, true} {
 		a := newTestApp(t, newFake(), func(c *Config) { c.Color = color })

@@ -121,8 +121,10 @@ func (a *App) header(w int) string {
 		tabs = append(tabs, style.Render(label))
 	}
 	// AIDEV-NOTE: J§9 owns the give-way order: brand, date, clock, then inactive tab names.
-	header := strings.Join(tabs, " ")
-	stripWidth := lipgloss.Width(header)
+	// The compact strip never adds the clock or brand back, even when it would fit.
+	strip := strings.Join(tabs, " ")
+	stripWidth := lipgloss.Width(strip)
+	header := strip
 	if stripWidth > w {
 		for i := range tabs {
 			if Tab(i) != a.tab {
@@ -134,7 +136,7 @@ func (a *App) header(w int) string {
 		clock := a.clock.Now.Format("Mon 2006-01-02 15:04")
 		for _, prefix := range []string{"Taskronin · " + clock, clock, a.clock.Now.Format("Mon 15:04")} {
 			if lipgloss.Width(prefix)+1+stripWidth <= w {
-				header = a.styles.Head.Render(prefix) + " " + header
+				header = a.styles.Head.Render(prefix) + " " + strip
 				break
 			}
 		}

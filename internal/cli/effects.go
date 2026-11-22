@@ -38,6 +38,8 @@ func (e *env) operationOutputError() error {
 	return nil
 }
 
+// AIDEV-NOTE: Keep these sets in step with flashLines in internal/web/flash.go.
+// A§1.3 keeps the renderers separate. Task ID 0 is not a task.
 func deletedAndUndeletedTasks(effects []api.Effect) (deleted, undeleted map[int64]bool) {
 	deleted, undeleted = make(map[int64]bool), make(map[int64]bool)
 	for _, effect := range effects {
