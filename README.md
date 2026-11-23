@@ -64,6 +64,7 @@ but that the plan kept losing to the day.
 
 ## Install
 
+Taskronin runs on Linux.
 [GitHub releases](https://github.com/linsomniac/taskronin/releases) carry a
 `.deb` and a static binary tarball for each of amd64 and arm64, plus the source.
 
@@ -81,8 +82,9 @@ tkr init
 taskronin.url = "github:linsomniac/taskronin";
 ```
 
-In your NixOS configuration, with the flake's `inputs` in scope, import the
-module and enable the package.
+In your NixOS configuration, with the flake's `inputs` in scope (for example by
+passing `specialArgs = { inherit inputs; };` to `nixpkgs.lib.nixosSystem`),
+import the module and enable the package.
 
 ```nix
 imports = [ inputs.taskronin.nixosModules.default ];
@@ -95,16 +97,21 @@ Rebuild your system, then initialize Taskronin as your own user.
 tkr init
 ```
 
-The flake pins its own nixpkgs, and following yours requires Go 1.26 or newer.
+The flake pins its own nixpkgs. If you make its nixpkgs input follow yours,
+that nixpkgs needs Go 1.26 or newer.
 It also provides `packages.<system>.default` and `overlays.default`. Nix
 builds report a version made from the commit date and short revision.
 
 The systemd units point at the profile's `tkr`, so they keep working across
-upgrades. If you use `nix run` or `nix shell` and the same build is absent
-from the standard profiles, `tkr init` refuses to write units. If you keep
-your build outside those profiles, install it into a standard profile or copy
-the binary out of the Nix store and run init from that copy. After moving
-`tkr` between profiles, rewrite the units from the new profile.
+upgrades. `tkr init` looks in your user profile (`~/.nix-profile` or
+`~/.local/state/nix/profile`), `/etc/profiles/per-user/<user>`, the default
+profile (`/nix/var/nix/profiles/default`) and the system profile
+(`/run/current-system/sw`). If the `tkr` you run is in none of these profiles,
+as can happen with `nix run` or `nix shell`, `tkr init` stops with an error
+before it writes anything. Install Taskronin into one of those profiles, copy
+the binary out of the Nix store and run init from the copy, or pass
+`--no-systemd` to initialize without units. After moving `tkr` between
+profiles, rewrite the units from the new profile.
 
 ```sh
 tkr init --units-only
@@ -140,7 +147,8 @@ sure that directory is on your `PATH`, and run `tkr init` from the installed
 copy. The systemd units point at the binary that ran `tkr init`. After moving
 it, rewrite them from the new location with `tkr init --units-only`.
 
-**Verify a download.** Check the build attestation for the file you downloaded.
+**Verify a download.** Before installing, check the download. Verify the build
+attestation for the file you downloaded.
 
 ```sh
 gh attestation verify taskronin_*_amd64.deb --repo linsomniac/taskronin

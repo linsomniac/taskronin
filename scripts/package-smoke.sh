@@ -11,7 +11,7 @@ client_line() {
 	output=$("$1" version) || fail "$1 version failed"
 	line=$(printf '%s\n' "$output" | sed -n '1p')
 	case "$line" in
-		*dev*) fail "development version: $line" ;;
+		"tkr dev "*) fail "unstamped version: $line" ;;
 		*'()') fail "empty commit: $line" ;;
 		"tkr "[0-9]*) printf '%s\n' "$line" ;;
 		*) fail "unexpected client version: $line" ;;

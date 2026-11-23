@@ -1,5 +1,10 @@
 # Releasing Taskronin
 
+## One-time setup
+
+We recommend protecting `v*` tags with a repository ruleset so only the owner
+can create them.
+
 ## Prepare the release
 
 Start from a clean `main`. To write your own release notes, commit them in
@@ -8,8 +13,9 @@ the filename. Otherwise the release lists commit subjects since the previous
 tag, or from the whole history for the first release. GoReleaser skips
 subjects beginning with `Merge `.
 
-Wait for CI to pass on the exact commit you intend to tag. Dry-run the build,
-smoke-test the packages in `dist/` with Docker, and run the Nix checks.
+Wait for CI to pass on the exact commit you intend to tag, including the arm64
+and Nix jobs. The release workflow tests amd64 only. The dry run needs
+GoReleaser v2.20.0 (the version pinned in the workflows), Docker and Nix.
 
 ```sh
 make snapshot
@@ -17,10 +23,12 @@ make package-smoke
 nix flake check
 ```
 
+Run `make vuln` just before tagging because the release build checks the live
+vulnerability database.
+
 ## Tag and publish
 
 Use a new version. A suffix such as `-rc1` marks a GitHub prerelease.
-Protect `v*` tags with a repository ruleset so only Sean can create them.
 
 ```sh
 git tag vX.Y.Z
@@ -46,9 +54,14 @@ attests the files listed in `checksums.txt`. It then creates the GitHub
 release with all six files and appends verification instructions to the notes.
 Only this job has write and signing permissions. It runs no project code.
 
-**Never reuse a version.** The Go module proxy may already have recorded the
-tag. Re-run a failed workflow from the Actions page. If the source needs a
-fix, commit it and release the next patch version.
+Re-run a failed workflow from the Actions page. If the publish job failed
+after it began creating the release, delete the leftover draft release first.
+The build artifact is kept for seven days. After it expires, choose
+“Re-run all jobs” to rebuild the same bytes.
+
+**Never reuse a version.** Never delete or move the tag. The Go module proxy
+may already have recorded it. If the source needs a fix, commit it and release
+the next patch version.
 
 ## Update dependencies
 

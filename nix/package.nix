@@ -28,8 +28,10 @@ buildGoModule {
   # the mismatch error. CI's nix job fails until it matches.
   vendorHash = "sha256-8Ardy2QW1QnfDqm65jL7qxApEe5gaqyZ6fK8QTIXufs=";
 
-  # AIDEV-NOTE: Keep bin/tkr unwrapped. Init matches the running executable's
-  # basename and resolved path against profile entries when writing user units.
+  # AIDEV-NOTE: Keep bin/tkr unwrapped. wrapProgram or makeWrapper renames the
+  # ELF to .tkr-wrapped, and the profile's tkr resolves to the wrapper script.
+  # No profile entry matches the running ELF, so tkr init refuses to write
+  # units on every NixOS install.
   subPackages = [ "cmd/tkr" ];
   env.CGO_ENABLED = 0;
   ldflags = [
@@ -39,8 +41,9 @@ buildGoModule {
     "-X github.com/linsomniac/taskronin/internal/buildinfo.Commit=${commit}"
   ];
 
-  # AIDEV-NOTE: CI runs the Go suite on both architectures and the VM test
-  # exercises this binary. Avoid rerunning the suite on every user update.
+  # AIDEV-NOTE: The Go suite takes about two and a half minutes, a cost every
+  # NixOS user would pay on each update. CI runs it on both architectures,
+  # and the VM test exercises the built binary end to end.
   doCheck = false;
 
   nativeBuildInputs = [ installShellFiles ];

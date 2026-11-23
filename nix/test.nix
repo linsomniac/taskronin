@@ -63,6 +63,7 @@ pkgs.testers.runNixOSTest (
       assert program == "tkr" and version.startswith("unstable-"), client
       assert server == f"server {version}", server
 
+      alice("rm ~/.config/systemd/user/taskronin.service")
       alice("${pkg}/bin/tkr init --units-only")
       check_unit()
 

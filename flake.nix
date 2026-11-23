@@ -11,6 +11,7 @@
         "aarch64-linux"
       ];
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
+      # Flakes cannot see tags, so builds report the commit date and revision.
       version = "unstable-${builtins.substring 0 8 (self.lastModifiedDate or "19700101")}-${
         self.shortRev or self.dirtyShortRev or "unknown"
       }";
