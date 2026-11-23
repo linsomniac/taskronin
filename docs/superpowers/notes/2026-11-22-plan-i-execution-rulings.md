@@ -74,6 +74,27 @@ Tasks: no Critical findings. Important findings, all fixed: a relative
 Whole-branch review: "ship", six Minor findings. One fix wave applied them
 together with the Minor findings carried from the tasks.
 
+## Release 0.1.0 (2026-11-23)
+
+Claude pushed `main` and, once CI was green on `95b725c`, the tag `v0.1.0`.
+CI needed three runs: the first two failed only in the arm64 race job
+(R-I14). The release workflow passed on its first tag run (build 18.5
+minutes, publish 8 seconds).
+
+Checked from outside afterwards: all six assets present; `sha256sum -c
+checksums.txt` passes; `gh attestation verify` passes for all five artifacts
+(signer `release.yml` at `refs/tags/v0.1.0`); the published `.deb` and
+tarball pass `scripts/package-smoke.sh` in `debian:stable`; a rebuild on the
+workstation reproduces both tarballs and both `.deb` files byte for byte
+(the source tarball has identical contents and different gzip bytes);
+`go install …/cmd/tkr@v0.1.0` works and reports `dev`;
+`nix build github:linsomniac/taskronin/v0.1.0#taskronin` builds. The arm64
+`.deb` was smoke-tested on GitHub's ARM runner in CI, not from the published
+release.
+
+Dependabot opened its first pull request (a patch bump of the Nix installer
+action) minutes after the workflows landed; it is Sean's to merge.
+
 ## Left for Sean
 
 - Whether "linux arm" meant 32-bit ARM as well (R-I1).

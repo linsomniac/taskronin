@@ -88,7 +88,10 @@ The binary is static (`CGO_ENABLED=0`, `-trimpath`, `-s -w`) and carries
 commit). File times inside archives and packages are the commit time, and
 owners are root, so rebuilding a clean checkout of a tag gives the same bytes.
 Go records whether the work tree was modified, so any untracked, unignored
-file changes the binary.
+file changes the binary. This holds for the tarballs and the Debian packages
+(checked for v0.1.0: a rebuild on the workstation matched all four published
+files). The source tarball has the same contents on every machine, but its
+compressed bytes depend on the git and zlib versions that wrote it.
 
 **Binary tarball contents** (flat, no top directory, as in ipsak):
 `tkr`, `LICENSE`, `README.md`, `quickstart.md`, `THIRD_PARTY_LICENSES.txt`,
