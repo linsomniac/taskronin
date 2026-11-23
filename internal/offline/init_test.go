@@ -495,6 +495,93 @@ func TestInitSystemd(t *testing.T) {
 	}
 }
 
+const (
+	uninstalledBinary = "/nix/store/0000-taskronin/bin/tkr"
+	storeBinaryDetail = "tkr is running from the Nix store (" + uninstalledBinary + ") and is not installed in a Nix profile, " +
+		"so systemd units would break when that store path is collected. Install tkr into a profile (on NixOS: programs.taskronin.enable = true)"
+)
+
+func storeBinaryOptions(t *testing.T, e *offline.Env, o offline.InitOptions) offline.InitOptions {
+	t.Helper()
+	e.TTY = true
+	e.ReadPassword = func(string) (string, error) {
+		t.Fatal("unexpected password prompt")
+		return "", nil
+	}
+	o.Systemctl = func(context.Context, ...string) error {
+		t.Fatal("unexpected systemctl call")
+		return nil
+	}
+	o.Binary = uninstalledBinary
+	o.ProfileBins = []string{t.TempDir()}
+	o.NoSystemd, o.PasswordStdin = false, false
+	return o
+}
+
+func TestInitRefusesStoreBinaryOutsideProfiles(t *testing.T) {
+	e, o := initEnv(t)
+	o = storeBinaryOptions(t, e, o)
+	_, err := offline.Init(t.Context(), e, o)
+	requireDetail(t, err, domain.CodeValidation, storeBinaryDetail+", or pass --no-systemd.")
+	for _, path := range []string{e.Paths.DB, e.Paths.LockFile(), e.Paths.ServerConfig, e.Paths.ClientConfig, e.Paths.OwnerToken,
+		filepath.Join(e.Paths.UnitsDir(), "taskronin.service"), filepath.Join(e.Paths.UnitsDir(), "taskronin.socket")} {
+		requireAbsent(t, path)
+	}
+}
+
+func TestInitUnitsOnlyRefusesStoreBinary(t *testing.T) {
+	testUnitsOnlyStoreBinary(t, false)
+}
+
+func TestInitUnitsOnlyNoSystemdStillRefusesStoreBinary(t *testing.T) {
+	testUnitsOnlyStoreBinary(t, true)
+}
+
+func testUnitsOnlyStoreBinary(t *testing.T, noSystemd bool) {
+	t.Helper()
+	e, o := initEnv(t)
+	if _, err := offline.Init(t.Context(), e, o); err != nil {
+		t.Fatal(err)
+	}
+	units := map[string]string{"taskronin.service": "# existing service\n", "taskronin.socket": "# existing socket\n"}
+	for name, data := range units {
+		writeFile(t, filepath.Join(e.Paths.UnitsDir(), name), data)
+	}
+	o = storeBinaryOptions(t, e, o)
+	o.UnitsOnly, o.NoSystemd = true, noSystemd
+	_, err := offline.Init(t.Context(), e, o)
+	requireDetail(t, err, domain.CodeValidation, storeBinaryDetail+".")
+	for name, data := range units {
+		if got := fileBytes(t, filepath.Join(e.Paths.UnitsDir(), name)); string(got) != data {
+			t.Errorf("%s changed to %q", name, got)
+		}
+	}
+}
+
+func TestInitNoSystemdIgnoresStoreBinary(t *testing.T) {
+	e, o := initEnv(t)
+	o = storeBinaryOptions(t, e, o)
+	o.NoSystemd, o.PasswordStdin = true, true
+	if _, err := offline.Init(t.Context(), e, o); err != nil {
+		t.Fatal(err)
+	}
+	requireMode(t, e.Paths.DB, 0o600)
+	requireAbsent(t, filepath.Join(e.Paths.UnitsDir(), "taskronin.service"))
+	requireAbsent(t, filepath.Join(e.Paths.UnitsDir(), "taskronin.socket"))
+}
+
+func TestInitRefusesUnsafeBinaryEarly(t *testing.T) {
+	e, o := initEnv(t)
+	o = storeBinaryOptions(t, e, o)
+	o.Binary = "/opt/my tools/tkr"
+	_, err := offline.Init(t.Context(), e, o)
+	if got := detailOf(err); got != `unsafe systemd Binary path "/opt/my tools/tkr"` {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	requireAbsent(t, e.Paths.LockFile())
+	requireAbsent(t, e.Paths.DB)
+}
+
 func TestInitUnitsOnly(t *testing.T) {
 	e, o := initEnv(t)
 	if _, err := offline.Init(t.Context(), e, o); err != nil {

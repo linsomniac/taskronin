@@ -20,6 +20,19 @@ type UnitData struct {
 	ExtraRW                                       []string
 }
 
+// CheckUnitPath reports whether path may be written into a unit file;
+// field names the path in the error.
+func CheckUnitPath(field, path string) error {
+	// AIDEV-NOTE: the templates deliberately do no systemd escaping;
+	// whitespace, specifiers, single/double quotes and controls must never reach them.
+	if strings.ContainsFunc(path, func(r rune) bool {
+		return unicode.IsSpace(r) || unicode.IsControl(r) || strings.ContainsRune("%'\"\\", r)
+	}) {
+		return fmt.Errorf("unsafe systemd %s path %q", field, path)
+	}
+	return nil
+}
+
 // RenderUnits renders the architecture's user units. Callers install both
 // files with mode 0644, including when their process umask is 0077.
 func RenderUnits(d UnitData) (service, socket []byte, err error) {
@@ -31,12 +44,8 @@ func RenderUnits(d UnitData) (service, socket []byte, err error) {
 		paths = append(paths, struct{ field, path string }{"ExtraRW", path})
 	}
 	for _, p := range paths {
-		// AIDEV-NOTE: the templates deliberately do no systemd escaping;
-		// whitespace, specifiers, single/double quotes and controls must never reach them.
-		if strings.ContainsFunc(p.path, func(r rune) bool {
-			return unicode.IsSpace(r) || unicode.IsControl(r) || strings.ContainsRune("%'\"\\", r)
-		}) {
-			return nil, nil, fmt.Errorf("unsafe systemd %s path %q", p.field, p.path)
+		if err := CheckUnitPath(p.field, p.path); err != nil {
+			return nil, nil, err
 		}
 	}
 	var serviceBuf, socketBuf bytes.Buffer

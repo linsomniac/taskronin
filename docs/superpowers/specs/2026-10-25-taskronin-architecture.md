@@ -2606,7 +2606,8 @@ SystemCallFilter=~@privileged @resources
 [Install]
 WantedBy=default.target
 ```
-- `{{.Binary}}` = `os.Executable()` resolved at init; `ExtraRW` = backup dir if
+- `{{.Binary}}` = `os.Executable()` resolved at init, or, when that is inside
+  `/nix/store`, the first Nix profile entry that links to it (packaging design P§6); `ExtraRW` = backup dir if
   outside the data dir. Re-run `tkr init --units-only` after moving the binary.
 - The service starts at login (web listener) and is also socket-activated
   (CLI always works). Offline commands tell the user to stop **both** units

@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"time"
@@ -31,6 +32,8 @@ type InitOptions struct {
 	LocaltimePath, PasswdPath                          string
 	Systemctl                                          func(ctx context.Context, args ...string) error
 	Binary                                             string
+	// Nix profile bin directories searched for a link to the binary; nil means the standard ones for this user.
+	ProfileBins []string
 }
 
 // InitResult contains file paths, never bearer secrets.
@@ -47,6 +50,13 @@ func Init(ctx context.Context, e *Env, o InitOptions) (result InitResult, err er
 	if err := ctx.Err(); err != nil {
 		return result, err
 	}
+	var binary string
+	if o.UnitsOnly || !o.NoSystemd {
+		binary, err = initUnitBinary(o)
+		if err != nil {
+			return result, err
+		}
+	}
 	// AIDEV-NOTE: BF03 forbids begin for units-only: even its chmod, lock and
 	// temp cleanup would mutate data/state. Load configuration without opening DBs.
 	if o.UnitsOnly {
@@ -55,7 +65,7 @@ func Init(ctx context.Context, e *Env, o InitOptions) (result InitResult, err er
 			return result, err
 		}
 		e.Paths = e.Paths.WithServerPaths(e.Server.Paths.DataDir, e.Server.Paths.Socket, e.Server.Backup.Dir)
-		return result, installInitUnits(ctx, e, o)
+		return result, installInitUnits(ctx, e, binary, o.Systemctl)
 	}
 	serverExists, err := initFileExists(e.Paths.ServerConfig)
 	if err != nil {
@@ -159,7 +169,7 @@ func Init(ctx context.Context, e *Env, o InitOptions) (result InitResult, err er
 	// All DB work is closed before releasing the instance lock here.
 	release()
 	if !o.NoSystemd {
-		if err := installInitUnits(ctx, e, o); err != nil {
+		if err := installInitUnits(ctx, e, binary, o.Systemctl); err != nil {
 			return result, err
 		}
 	}
@@ -477,18 +487,43 @@ func initMCPToken(ctx context.Context, e *Env, expires sql.Null[time.Time]) (err
 	return checkpoint(ctx, st)
 }
 
-func installInitUnits(ctx context.Context, e *Env, o InitOptions) error {
+func initUnitBinary(o InitOptions) (string, error) {
 	binary := o.Binary
 	if binary == "" {
 		var err error
 		binary, err = os.Executable()
 		if err != nil {
-			return err
+			return "", err
 		}
 	}
 	if !filepath.IsAbs(binary) {
-		return domain.Errorf(domain.CodeValidation, "systemd binary path must be absolute")
+		return "", domain.Errorf(domain.CodeValidation, "systemd binary path must be absolute")
 	}
+	bins := o.ProfileBins
+	if bins == nil {
+		home, _ := os.UserHomeDir()
+		var login string
+		if u, err := user.Current(); err == nil {
+			login = u.Username
+		}
+		bins = systemd.NixProfileBins(home, os.Getenv("XDG_STATE_HOME"), login)
+	}
+	path, err := systemd.StableBinary(binary, bins)
+	if errors.Is(err, systemd.ErrStoreBinary) {
+		suffix := ", or pass --no-systemd."
+		if o.UnitsOnly {
+			suffix = "."
+		}
+		return "", domain.Errorf(domain.CodeValidation, "tkr is running from the Nix store (%s) and is not installed in a Nix profile, "+
+			"so systemd units would break when that store path is collected. Install tkr into a profile (on NixOS: programs.taskronin.enable = true)%s", binary, suffix)
+	}
+	if err != nil {
+		return "", err
+	}
+	return path, systemd.CheckUnitPath("Binary", path)
+}
+
+func installInitUnits(ctx context.Context, e *Env, binary string, run func(context.Context, ...string) error) error {
 	// AIDEV-NOTE: socket activation recreates the configured socket's parent.
 	// An unused XDG runtime directory can disappear at reboot; requiring it in
 	// ReadWritePaths would then prevent the service from starting.
@@ -513,7 +548,6 @@ func installInitUnits(ctx context.Context, e *Env, o InitOptions) error {
 			return err
 		}
 	}
-	run := o.Systemctl
 	if run == nil {
 		run = func(ctx context.Context, args ...string) error {
 			args = append([]string{"--user"}, args...)
