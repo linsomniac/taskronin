@@ -18,6 +18,10 @@ import (
 	"github.com/linsomniac/taskronin/internal/domain"
 )
 
+// AIDEV-NOTE: Argon2 under the race detector on a small ARM runner takes several
+// seconds. This bound on positive waits only limits how long a failing test runs.
+const slowRunnerWait = 60 * time.Second
+
 const testGeneration = "0123456789abcdef"
 
 type recordedRequest struct {
@@ -77,7 +81,7 @@ func newFake(t *testing.T, h http.Handler) (*Client, *recorder) {
 	if err := os.WriteFile(r.tokenFile, []byte(r.token), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	srv := &http.Server{ReadHeaderTimeout: time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	srv := &http.Server{ReadHeaderTimeout: slowRunnerWait, Handler: http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		body, err := io.ReadAll(req.Body)
 		if err != nil {
 			t.Errorf("read request: %v", err)

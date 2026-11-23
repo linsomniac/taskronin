@@ -313,7 +313,7 @@ func checkFocusMidnight(t *testing.T, setAt, beforeMidnight, midnight string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(s.Ctx(), time.Second)
+	ctx, cancel := context.WithTimeout(s.Ctx(), slowRunnerWait)
 	defer cancel()
 	err = s.Svc.Reconcile(ctx)
 	if closeErr := conn.Close(); closeErr != nil {

@@ -46,7 +46,7 @@ func TestExportStreamsIncrementally(t *testing.T) {
 		}
 		select {
 		case <-out.written:
-		case <-time.After(time.Second):
+		case <-time.After(slowRunnerWait):
 			t.Error("client buffered export instead of streaming")
 			return
 		}

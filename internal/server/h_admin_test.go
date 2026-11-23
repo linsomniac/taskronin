@@ -262,7 +262,7 @@ func TestExportStalledReaderDoesNotBlockShutdown(t *testing.T) {
 		t.Fatal(err)
 	}
 	// AIDEV-NOTE: Bound real socket I/O independently of the frozen domain clock.
-	if err := conn.SetReadDeadline(clock.Real{}.Now().Add(time.Second)); err != nil {
+	if err := conn.SetReadDeadline(clock.Real{}.Now().Add(slowRunnerWait)); err != nil {
 		t.Fatal(err)
 	}
 	resp, err := http.ReadResponse(bufio.NewReader(conn), nil)

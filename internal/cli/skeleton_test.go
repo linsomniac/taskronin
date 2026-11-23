@@ -23,6 +23,10 @@ import (
 	"github.com/linsomniac/taskronin/internal/testutil"
 )
 
+// AIDEV-NOTE: Argon2 under the race detector on a small ARM runner takes several
+// seconds. This bound on positive waits only limits how long a failing test runs.
+const slowRunnerWait = 60 * time.Second
+
 func TestVersionWithoutServer(t *testing.T) {
 	s, _ := testSys(t)
 	out, stderr, code := runCLI(t, s, "", "version")
@@ -247,13 +251,13 @@ func TestTerminalCancellation(t *testing.T) {
 				_, _ = master.Write([]byte("\n\n"))
 				select {
 				case <-done:
-				case <-time.After(2 * time.Second):
+				case <-time.After(slowRunnerWait):
 					t.Error("terminal reader did not stop")
 				}
 			})
 			select {
 			case <-stderr.seen:
-			case <-time.After(2 * time.Second):
+			case <-time.After(slowRunnerWait):
 				t.Fatal("terminal prompt did not appear")
 			}
 			if kind == "password-ctrl-c" {
@@ -275,7 +279,7 @@ func TestTerminalCancellation(t *testing.T) {
 				_, _ = master.Write([]byte("\n\n"))
 				select {
 				case <-done:
-				case <-time.After(2 * time.Second):
+				case <-time.After(slowRunnerWait):
 					t.Fatal("could not release terminal reader")
 				}
 				t.Fatal("cancellation did not unblock terminal input within 1s")
@@ -314,13 +318,13 @@ func TestTerminalPasswordDoesNotEchoOrLoseInput(t *testing.T) {
 		_, _ = master.Write([]byte("\n\n"))
 		select {
 		case <-done:
-		case <-time.After(2 * time.Second):
+		case <-time.After(slowRunnerWait):
 			t.Error("terminal reader did not stop")
 		}
 	})
 	select {
 	case <-stderr.seen:
-	case <-time.After(2 * time.Second):
+	case <-time.After(slowRunnerWait):
 		t.Fatal("password prompt did not appear")
 	}
 	if _, err := master.Write([]byte(testutil.Password + "\n" + testutil.Password + "\n")); err != nil {
@@ -331,7 +335,7 @@ func TestTerminalPasswordDoesNotEchoOrLoseInput(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("exit %d, stderr %q", code, stderr.String())
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(slowRunnerWait):
 		cancel()
 		t.Fatal("password reader lost buffered input")
 	}

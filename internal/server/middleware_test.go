@@ -469,7 +469,7 @@ func TestLongRouteBlockedSocketWrite(t *testing.T) {
 		_, err := w.Write(make([]byte, 8<<20))
 		finished <- err
 	}}})
-	srv := &http.Server{Handler: h, ConnContext: server.ConnContext, ReadHeaderTimeout: time.Second}
+	srv := &http.Server{Handler: h, ConnContext: server.ConnContext, ReadHeaderTimeout: slowRunnerWait}
 	served := make(chan error, 1)
 	go func() { served <- srv.Serve(ln) }()
 	t.Cleanup(func() {

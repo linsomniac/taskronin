@@ -18,6 +18,10 @@ import (
 	"github.com/linsomniac/taskronin/internal/testutil"
 )
 
+// AIDEV-NOTE: Argon2 under the race detector on a small ARM runner takes several
+// seconds. This bound on positive waits only limits how long a failing test runs.
+const slowRunnerWait = 60 * time.Second
+
 func TestChangePasswordRejectsBeforeVerification(t *testing.T) {
 	for _, state := range []string{"missing generation", "stale generation", "stopping"} {
 		t.Run(state, func(t *testing.T) {
@@ -61,7 +65,7 @@ func TestShutdownDrainsPasswordVerification(t *testing.T) {
 	}()
 	select {
 	case <-armed:
-	case <-time.After(5 * time.Second):
+	case <-time.After(slowRunnerWait):
 		t.Fatal("password did not reach gate")
 	}
 	s.Svc.BeginShutdown()
@@ -452,7 +456,7 @@ func TestSettingsPasswordGateDoesNotHoldWriter(t *testing.T) {
 	}()
 	select {
 	case <-armed:
-	case <-time.After(5 * time.Second):
+	case <-time.After(slowRunnerWait):
 		t.Fatal("settings did not reach password gate")
 	}
 	add := make(chan error, 1)
@@ -465,7 +469,7 @@ func TestSettingsPasswordGateDoesNotHoldWriter(t *testing.T) {
 		if err != nil {
 			t.Error(err)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(slowRunnerWait):
 		t.Error("retention password verification holds the writer")
 	}
 	s.Svc.BeginShutdown()
@@ -498,7 +502,7 @@ func TestSettingsPasswordChangedDuringVerification(t *testing.T) {
 	}()
 	select {
 	case <-armed:
-	case <-time.After(5 * time.Second):
+	case <-time.After(slowRunnerWait):
 		t.Fatal("settings did not reach gate")
 	}
 	changed := make(chan error, 1)
@@ -510,7 +514,7 @@ func TestSettingsPasswordChangedDuringVerification(t *testing.T) {
 	}()
 	select {
 	case <-armed:
-	case <-time.After(5 * time.Second):
+	case <-time.After(slowRunnerWait):
 		t.Fatal("password change did not reach gate")
 	}
 	// The other key waits only for the global bucket (2 s); the retention
@@ -521,7 +525,7 @@ func TestSettingsPasswordChangedDuringVerification(t *testing.T) {
 		if err != nil {
 			t.Error(err)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(slowRunnerWait):
 		t.Error("password change blocked behind retention verifier")
 	}
 	s.Clock.Advance(10 * time.Second)

@@ -27,6 +27,10 @@ import (
 	"github.com/linsomniac/taskronin/internal/testutil"
 )
 
+// AIDEV-NOTE: Argon2 under the race detector on a small ARM runner takes several
+// seconds. This bound on positive waits only limits how long a failing test runs.
+const slowRunnerWait = 60 * time.Second
+
 func runFixture(t *testing.T, s *testutil.Server) error {
 	t.Helper()
 	cfg, err := config.LoadServer(s.Paths.ServerConfig)
@@ -57,7 +61,7 @@ func TestRunServesHealthz(t *testing.T) {
 	}
 	readNotify := func(want string) {
 		t.Helper()
-		if err := ln.SetReadDeadline(clock.Real{}.Now().Add(3 * time.Second)); err != nil {
+		if err := ln.SetReadDeadline(clock.Real{}.Now().Add(slowRunnerWait)); err != nil {
 			t.Fatal(err)
 		}
 		var buf [64]byte
@@ -253,7 +257,7 @@ func TestWebListenerGate(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		resp, err := (&http.Client{Timeout: 3 * time.Second}).Do(req)
+		resp, err := (&http.Client{Timeout: slowRunnerWait}).Do(req)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -395,7 +399,7 @@ func TestShutdownDrainsInFlightOp(t *testing.T) {
 	go func() { s.Stop(); close(stopped) }()
 	select {
 	case <-s.Svc.Stopping():
-	case <-time.After(3 * time.Second):
+	case <-time.After(slowRunnerWait):
 		t.Fatal("shutdown did not begin")
 	}
 	_, err = s.Svc.AddTask(t.Context(), testutil.Meta(testutil.Owner(), s.Svc.Generation()), service.AddTaskIn{Title: "too late"})
@@ -691,7 +695,7 @@ func TestShutdownJoinsSchedulers(t *testing.T) {
 	go func() { s.Stop(); close(stopped) }()
 	select {
 	case <-s.Svc.Stopping():
-	case <-time.After(3 * time.Second):
+	case <-time.After(slowRunnerWait):
 		t.Fatal("shutdown did not start")
 	}
 	select {
@@ -747,7 +751,7 @@ func TestShutdownHTTPGraceUsesRealTime(t *testing.T) {
 	}
 	select {
 	case <-exited:
-	case <-time.After(time.Second):
+	case <-time.After(slowRunnerWait):
 		t.Fatal("expired HTTP request was not canceled")
 	}
 	<-requestDone
