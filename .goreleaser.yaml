@@ -1,0 +1,99 @@
+# AIDEV-NOTE: the release workflow's build job runs this with --skip=publish.
+# CI's packages job builds a snapshot from it. Any untracked, unignored file
+# in the work tree changes the binary's bytes.
+version: 2
+project_name: taskronin
+
+before:
+  hooks:
+    - ./scripts/release-assets.sh
+
+builds:
+  - main: ./cmd/tkr
+    binary: tkr
+    env: [CGO_ENABLED=0]
+    flags: [-trimpath]
+    goos: [linux]
+    goarch: [amd64, arm64]
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    ldflags:
+      - -s -w -X {{ .ModulePath }}/internal/buildinfo.Version={{ .Version }} -X {{ .ModulePath }}/internal/buildinfo.Commit={{ .ShortCommit }}
+
+archives:
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    builds_info: &archive_info
+      owner: root
+      group: root
+      mtime: "{{ .CommitDate }}"
+    files:
+      - src: LICENSE
+        info: *archive_info
+      - src: README.md
+        info: *archive_info
+      - src: docs/quickstart.md
+        strip_parent: true
+        info: *archive_info
+      - src: THIRD_PARTY_LICENSES.txt
+        info: *archive_info
+      - src: build/completions/*
+        dst: completions
+        strip_parent: true
+        info: *archive_info
+
+source:
+  enabled: true
+  name_template: "{{ .ProjectName }}_{{ .Version }}_source"
+  prefix_template: "{{ .ProjectName }}-{{ .Version }}/"
+
+checksum:
+  name_template: checksums.txt
+
+nfpms:
+  - package_name: taskronin
+    file_name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Arch }}"
+    vendor: Sean Reifschneider
+    maintainer: Sean Reifschneider <sean@realgo.com>
+    homepage: https://github.com/linsomniac/taskronin
+    description: |-
+      Task manager built around triage, daily focus and a work log
+      Taskronin is a single-user task manager built around triage (new, slipped and
+      due work must be consciously cleared), daily focus (time blocks, a "now working
+      on" focus, a morning plan and evening recap loop) and a work log linked to
+      tasks. It ships as one Go binary, tkr, over a single SQLite database.
+    license: CC0-1.0
+    section: utils
+    priority: optional
+    formats: [deb]
+    bindir: /usr/bin
+    mtime: "{{ .CommitDate }}"
+    contents:
+      - src: build/completions/tkr.bash
+        dst: /usr/share/bash-completion/completions/tkr
+        file_info: &doc_info
+          mode: 0644
+          mtime: "{{ .CommitDate }}"
+      - src: build/completions/_tkr
+        dst: /usr/share/zsh/vendor-completions/_tkr
+        file_info: *doc_info
+      - src: build/completions/tkr.fish
+        dst: /usr/share/fish/vendor_completions.d/tkr.fish
+        file_info: *doc_info
+      - src: build/copyright
+        dst: /usr/share/doc/taskronin/copyright
+        file_info: *doc_info
+      - src: THIRD_PARTY_LICENSES.txt
+        dst: /usr/share/doc/taskronin/THIRD_PARTY_LICENSES.txt
+        file_info: *doc_info
+      - src: README.md
+        dst: /usr/share/doc/taskronin/README.md
+        file_info: *doc_info
+      - src: docs/quickstart.md
+        dst: /usr/share/doc/taskronin/quickstart.md
+        file_info: *doc_info
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^Merge "

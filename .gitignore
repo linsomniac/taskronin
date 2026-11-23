@@ -5,3 +5,7 @@
 .t-*/
 .init-*/
 .paths-*/
+
+/build/
+/dist/
+/result
