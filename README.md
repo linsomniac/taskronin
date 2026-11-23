@@ -64,28 +64,126 @@ but that the plan kept losing to the day.
 
 ## Install
 
-Taskronin needs Go (see `go.mod` for the toolchain) and runs on Linux.
+[GitHub releases](https://github.com/linsomniac/taskronin/releases) carry a
+`.deb` and a static binary tarball for each of amd64 and arm64, plus the source.
 
+**Debian and Ubuntu.** Download the package for your architecture. On amd64,
+run the following from the download directory (use `arm64` on ARM64).
+
+```sh
+sudo apt install ./taskronin_*_amd64.deb
+tkr init
 ```
+
+**NixOS.** Add Taskronin to your flake's `inputs` block.
+
+```nix
+taskronin.url = "github:linsomniac/taskronin";
+```
+
+In your NixOS configuration, with the flake's `inputs` in scope, import the
+module and enable the package.
+
+```nix
+imports = [ inputs.taskronin.nixosModules.default ];
+programs.taskronin.enable = true;
+```
+
+Rebuild your system, then initialize Taskronin as your own user.
+
+```sh
+tkr init
+```
+
+The flake pins its own nixpkgs, and following yours requires Go 1.26 or newer.
+It also provides `packages.<system>.default` and `overlays.default`. Nix
+builds report a version made from the commit date and short revision.
+
+The systemd units point at the profile's `tkr`, so they keep working across
+upgrades. If you use `nix run` or `nix shell` and the same build is absent
+from the standard profiles, `tkr init` refuses to write units. If you keep
+your build outside those profiles, install it into a standard profile or copy
+the binary out of the Nix store and run init from that copy. After moving
+`tkr` between profiles, rewrite the units from the new profile.
+
+```sh
+tkr init --units-only
+```
+
+**Other Linux systems.** Download the tarball for your architecture into an
+empty directory. On amd64, run the commands below with `~/.local/bin` on your
+`PATH` (use `arm64` on ARM64). Shell completions are in `completions/`.
+
+```sh
+tar -xzf taskronin_*_linux_amd64.tar.gz
+install -Dm755 tkr ~/.local/bin/tkr
+tkr init
+```
+
+**From source.** With Go installed, run the following with Go's binary
+directory on your `PATH`. This build reports version `dev`.
+
+```sh
+go install github.com/linsomniac/taskronin/cmd/tkr@latest
+tkr init
+```
+
+Or build from a checkout with the toolchain in `go.mod`.
+
+```sh
 make install                     # builds and installs ~/.local/bin/tkr
 tkr init
 ```
 
 `make install PREFIX=/some/dir` installs to `/some/dir/bin/tkr` instead. Make
 sure that directory is on your `PATH`, and run `tkr init` from the installed
-copy: the systemd units it writes point at the binary that ran it.
+copy. The systemd units point at the binary that ran `tkr init`. After moving
+it, rewrite them from the new location with `tkr init --units-only`.
 
-`tkr init` asks for an owner password (8 to 1024 bytes), creates the private
-data, state and config directories, the database, the `owner` token
-(`~/.local/state/taskronin/owner.token`) and, unless you pass `--no-systemd`,
-installs and enables two systemd user units:
+**Verify a download.** Check the build attestation for the file you downloaded.
 
-- `taskronin.socket` listens on `$XDG_RUNTIME_DIR/taskronin/sock`;
+```sh
+gh attestation verify taskronin_*_amd64.deb --repo linsomniac/taskronin
+```
+
+See `gh attestation verify --help` for stricter checks, such as pinning the
+signing workflow. To check the SHA-256 digest instead, download the release's
+`checksums.txt` into the same directory as the file and run the following.
+
+```sh
+sha256sum -c --ignore-missing checksums.txt
+```
+
+**Initialization.** `tkr init` asks for an owner password (8 to 1024 bytes)
+and creates the private data, state and config directories, the database and
+the `owner` token (`~/.local/state/taskronin/owner.token`). Unless you pass
+`--no-systemd`, it installs and enables two systemd user units.
+
+- `taskronin.socket` listens on `$XDG_RUNTIME_DIR/taskronin/sock`.
 - `taskronin.service` runs `tkr serve` and is started on first use.
 
-Useful `init` flags: `--timezone Area/City` (default: `/etc/localtime`),
-`--mcp-token`, `--password-stdin`, `-y`, and `--units-only` to reinstall the
-units. Check the service with `systemctl --user status taskronin.socket`.
+Other init flags include `--timezone Area/City` (defaults to the zone in
+`/etc/localtime`), `--mcp-token`, `--password-stdin`, `-y` and
+`--units-only`. Check the socket after initialization.
+
+```sh
+systemctl --user status taskronin.socket
+```
+
+### Upgrading
+
+Installing a new version replaces the binary. The running server keeps using
+the old one until you restart it. Restart the service and check the client
+and server versions.
+
+```sh
+systemctl --user restart taskronin.service
+tkr version
+```
+
+If the database schema has changed, the server takes a verified snapshot on
+startup and then migrates the database. An older binary refuses to open a
+database migrated to a newer schema.
 
 ## Daily use
 
@@ -240,15 +338,22 @@ move the old data directory aside rather than deleting just the database.
 ## Development
 
 - Run `make check` before every commit (fmt-check, vet, lint, race tests,
-  govulncheck, `go mod verify`, asset hashes).
+  govulncheck, `go mod verify`, asset hashes and third-party license notices).
 - `make fuzz` runs every `Fuzz*` target (`FUZZTIME=30s` by default).
 - Grep for `AIDEV-` anchors before editing a package, and never delete an
   `AIDEV-NOTE`.
 - Migrations are never edited once committed.
 - Layering is enforced by `internal/archtest`; see architecture section 1.3.
 
+Taskronin is dedicated to the public domain under CC0-1.0; see `LICENSE`.
+`THIRD_PARTY_LICENSES.txt` lists the licenses of the code compiled into the
+binary.
+
+To cut a release, follow the [release guide](docs/releasing.md).
+
 Specs:
 
 - [Design](docs/superpowers/specs/2026-10-25-taskronin-design.md)
 - [Architecture](docs/superpowers/specs/2026-10-25-taskronin-architecture.md)
 - [Behavior catalog](docs/superpowers/specs/2026-10-25-taskronin-behavior-catalog.md)
+- [Packaging design](docs/superpowers/specs/2026-11-22-packaging-design.md)

@@ -7,7 +7,7 @@ and turns what you did into a report, from the CLI, a TUI, a local web UI or you
 ## Install (Linux, about 1 minute)
 
 ```
-$ make install && tkr init          # sets a password, creates the DB, starts on demand via systemd
+$ sudo apt install ./taskronin_*_amd64.deb && tkr init   # Debian/Ubuntu, after downloading the amd64 package
 ```
 
 ## Capture now, decide later
