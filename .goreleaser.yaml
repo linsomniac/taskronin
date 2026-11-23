@@ -1,12 +1,14 @@
 # AIDEV-NOTE: the release workflow's build job runs this with --skip=publish.
 # CI's packages job builds a snapshot from it. Any untracked, unignored file
-# in the work tree changes the binary's bytes.
+# in the work tree changes the binary's bytes. Explicit archive modes keep
+# tarball bytes independent of the builder's umask and checkout permissions.
 version: 2
 project_name: taskronin
 
 before:
   hooks:
     - ./scripts/release-assets.sh
+    - cmp THIRD_PARTY_LICENSES.txt build/THIRD_PARTY_LICENSES.txt
 
 builds:
   - main: ./cmd/tkr
@@ -22,13 +24,18 @@ builds:
 archives:
   - formats: [tar.gz]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
-    builds_info: &archive_info
+    builds_info:
       owner: root
       group: root
+      mode: 0755
       mtime: "{{ .CommitDate }}"
     files:
       - src: LICENSE
-        info: *archive_info
+        info: &archive_info
+          owner: root
+          group: root
+          mode: 0644
+          mtime: "{{ .CommitDate }}"
       - src: README.md
         info: *archive_info
       - src: docs/quickstart.md

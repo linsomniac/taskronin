@@ -2,10 +2,11 @@
 set -eu
 export LC_ALL=C
 
+CDPATH='' cd "$(dirname "$0")/.."
 out=build
 mkdir -p "$out/completions"
 # Remove stale outputs, including a previous notice if module discovery fails.
-rm -f "$out/THIRD_PARTY_LICENSES.txt" "$out"/completions/*
+rm -f "$out/THIRD_PARTY_LICENSES.txt" "$out/copyright" "$out"/modules.* "$out"/completions/*
 trap 'rm -f "$out/tkr" "$out/modules.sorted" "$out/notices.tmp"' EXIT
 
 # AIDEV-NOTE: enumerate the static release builds separately. A failed go list

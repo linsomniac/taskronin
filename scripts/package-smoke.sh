@@ -12,15 +12,33 @@ client_line() {
 	line=$(printf '%s\n' "$output" | sed -n '1p')
 	case "$line" in
 		*dev*) fail "development version: $line" ;;
+		*'()') fail "empty commit: $line" ;;
 		"tkr "[0-9]*) printf '%s\n' "$line" ;;
 		*) fail "unexpected client version: $line" ;;
 	esac
 }
 
+stop_server() {
+	trap '' HUP INT TERM
+	trap - EXIT
+	kill -TERM "$server" 2>/dev/null || return 1
+	seconds=0
+	while kill -0 "$server" 2>/dev/null; do
+		if [ "$seconds" -ge 10 ]; then
+			kill -KILL "$server" 2>/dev/null || return 1
+			wait "$server" 2>/dev/null || :
+			return 1
+		fi
+		sleep 1
+		seconds=$((seconds + 1))
+	done
+	wait "$server"
+}
+
 if [ "${1:-}" = --as-user ]; then
 	export XDG_RUNTIME_DIR="$HOME/run"
-	mkdir -m 0700 "$XDG_RUNTIME_DIR"
-	cd "$HOME"
+	mkdir -m 0700 "$XDG_RUNTIME_DIR" || fail 'could not create private runtime directory'
+	cd "$HOME" || fail 'cannot open smoke home directory'
 	tkr init --no-systemd --password-stdin --timezone America/Denver -y <<'PASSWORD' || fail 'tkr init failed'
 package smoke password
 PASSWORD
@@ -28,7 +46,7 @@ PASSWORD
 	version=$(printf '%s\n' "$client" | awk '{print $2}')
 	tkr serve &
 	server=$!
-	trap 'kill -TERM "$server" 2>/dev/null || :; wait "$server" 2>/dev/null || :' EXIT
+	trap 'stop_server || :' EXIT
 	trap 'exit 1' HUP INT TERM
 
 	# AIDEV-NOTE: tkr version succeeds even when the server is unreachable.
@@ -45,9 +63,7 @@ PASSWORD
 	tkr add "package smoke" || fail 'tkr add failed'
 	tasks=$(tkr ls) || fail 'tkr ls failed'
 	printf '%s\n' "$tasks" | grep -Fq 'package smoke' || fail 'task missing from tkr ls'
-	kill -TERM "$server" || fail 'could not stop server'
-	wait "$server" || fail 'server exited unsuccessfully after SIGTERM'
-	trap - EXIT HUP INT TERM
+	stop_server || fail 'server did not exit cleanly within 10 seconds of SIGTERM'
 	echo 'package smoke: ok'
 	exit 0
 fi
@@ -71,15 +87,22 @@ case "$0" in
 	*) exec sh "$PWD/$0" "$@" ;;
 esac
 cd "${1:-/dist}" || fail 'cannot open dist directory'
-arch=$(dpkg --print-architecture)
+arch=$(dpkg --print-architecture) || fail 'cannot determine Debian architecture'
 deb=$(one_file "taskronin_*_${arch}.deb" taskronin_*_"$arch".deb)
 binary=$(one_file "taskronin_*_linux_${arch}.tar.gz" taskronin_*_linux_"$arch".tar.gz)
 source=$(one_file 'taskronin_*_source.tar.gz' taskronin_*_source.tar.gz)
-sha256sum -c checksums.txt || fail 'checksum verification failed'
+verified=$(sha256sum -c checksums.txt) || fail 'checksum verification failed'
+printf '%s\n' "$verified"
+for artifact in "$deb" "$binary" "$source"; do
+	printf '%s\n' "$verified" | grep -Fxq "$artifact: OK" || fail "checksums.txt lacks $artifact"
+done
 DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "./$deb" || fail "could not install $deb"
 
 package=$(dpkg-query -W -f='${Package}|${Depends}' taskronin) || fail 'taskronin is missing'
 [ "$package" = 'taskronin|' ] || fail "unexpected package or Depends: $package"
+for script in preinst postinst prerm postrm; do
+	[ ! -e "/var/lib/dpkg/info/taskronin.$script" ] || fail "unexpected maintainer script: taskronin.$script"
+done
 check_file /usr/bin/tkr 755
 check_file /usr/share/bash-completion/completions/tkr 644
 check_file /usr/share/zsh/vendor-completions/_tkr 644
@@ -90,10 +113,10 @@ done
 client=$(client_line /usr/bin/tkr)
 version=$(printf '%s\n' "$client" | awk '{print $2}')
 
-scratch=$(mktemp -d "$HOME/package-smoke.XXXXXX")
+scratch=$(mktemp -d "$HOME/package-smoke.XXXXXX") || fail 'could not create extraction directory'
 trap 'rm -rf "$scratch"' EXIT
-tar -tzf "$binary" >"$scratch/entries"
-sort "$scratch/entries" >"$scratch/sorted"
+tar -tzf "$binary" >"$scratch/entries" || fail "could not list $binary"
+sort "$scratch/entries" >"$scratch/sorted" || fail 'could not sort binary tarball entries'
 diff -u - "$scratch/sorted" <<'ENTRIES' || fail 'unexpected binary tarball contents'
 LICENSE
 README.md
@@ -104,16 +127,16 @@ completions/tkr.fish
 quickstart.md
 tkr
 ENTRIES
-tar -xzf "$binary" -C "$scratch" tkr
+tar -xzf "$binary" -C "$scratch" tkr || fail "could not extract tkr from $binary"
 archived=$(client_line "$scratch/tkr")
 [ "$archived" = "$client" ] || fail "tarball version differs from installed version: $archived"
 
-tar -tzf "$source" >"$scratch/entries"
+tar -tzf "$source" >"$scratch/entries" || fail "could not list $source"
 prefix="taskronin-$version/"
 awk -v prefix="$prefix" 'index($0, prefix) != 1 { exit 1 }' "$scratch/entries" || fail "unexpected source directory (expected $prefix)"
 for name in go.mod LICENSE cmd/tkr/main.go; do
 	grep -Fxq "$prefix$name" "$scratch/entries" || fail "source tarball lacks $prefix$name"
 done
 
-useradd -m smoke
+useradd -m smoke || fail 'could not create smoke user'
 setpriv --reuid=smoke --regid=smoke --init-groups env -i HOME=/home/smoke PATH=/usr/bin:/bin sh "$0" --as-user
