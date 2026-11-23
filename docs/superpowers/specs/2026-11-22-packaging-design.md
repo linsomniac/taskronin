@@ -331,9 +331,11 @@ cooldown (P§3.8).
 ### 8.4 Tests must not depend on this workstation
 
 The suite has only ever run on Sean's machine. Before the workflows are
-written it must pass in a container laid out like a GitHub runner: Ubuntu
-24.04 with systemd installed, an ordinary user with UID 1001, the checkout at
-`/home/runner/work/taskronin/taskronin`, and no `XDG_RUNTIME_DIR`. Tests that
+written it must pass in a container laid out like a GitHub runner: the
+Ubuntu release behind `ubuntu-latest` (26.04 as of 2026-11; the `-arm` jobs
+name 24.04) with systemd installed, an ordinary user with UID 1001, the
+checkout at `/home/runner/work/taskronin/taskronin`, and no
+`XDG_RUNTIME_DIR`. It passes on both 24.04 and 26.04. Tests that
 assume `/home/sean`, UID 1000, a session runtime directory or a short
 checkout path are fixed in the tests, not skipped.
 
@@ -367,7 +369,9 @@ snapshot release, a real (unpublished) release build in a scratch clone with
 a scratch tag, the amd64 package smoke test in Docker, `nix flake check`
 including the VM test, and `actionlint` and `zizmor` over the workflow files.
 The arm64 runner jobs, the artifact hand-off between the two release jobs,
-the attestation step and the release upload first run on GitHub.
+the attestation step and the release upload first run on GitHub. The release
+run tests amd64 only, so the commit to be tagged must already be green in CI,
+including the arm64 and Nix jobs.
 
 ## 11. Non-goals
 
