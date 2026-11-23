@@ -1,11 +1,12 @@
 package offline
 
 var (
-	VerifyPassword = (*Env).verifyPassword
-	Begin          = (*Env).begin
-	OpenStore      = (*Env).openStore
-	NewService     = (*Env).newService
-	CrashPoint     = crashPoint
+	VerifyPassword     = (*Env).verifyPassword
+	Begin              = (*Env).begin
+	OpenStore          = (*Env).openStore
+	NewService         = (*Env).newService
+	CrashPoint         = crashPoint
+	DefaultProfileBins = defaultProfileBins
 )
 
 const (

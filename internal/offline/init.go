@@ -50,6 +50,9 @@ func Init(ctx context.Context, e *Env, o InitOptions) (result InitResult, err er
 	if err := ctx.Err(); err != nil {
 		return result, err
 	}
+	// AIDEV-NOTE: P§6 requires resolving the unit binary before LoadServer,
+	// e.begin, and any prompt or write. BF03 forbids e.begin on the units-only
+	// path because its chmod, lock and temp cleanup would mutate data/state.
 	var binary string
 	if o.UnitsOnly || !o.NoSystemd {
 		binary, err = initUnitBinary(o)
@@ -57,9 +60,8 @@ func Init(ctx context.Context, e *Env, o InitOptions) (result InitResult, err er
 			return result, err
 		}
 	}
-	// AIDEV-NOTE: BF03 forbids begin for units-only: even its chmod, lock and
-	// temp cleanup would mutate data/state. Load configuration without opening DBs.
 	if o.UnitsOnly {
+		// Load configuration without opening the database.
 		e.Server, err = config.LoadServer(e.Paths.ServerConfig)
 		if err != nil {
 			return result, err
@@ -506,7 +508,7 @@ func initUnitBinary(o InitOptions) (string, error) {
 		if u, err := user.Current(); err == nil {
 			login = u.Username
 		}
-		bins = systemd.NixProfileBins(home, os.Getenv("XDG_STATE_HOME"), login)
+		bins = defaultProfileBins(home, os.Getenv("XDG_STATE_HOME"), login)
 	}
 	path, err := systemd.StableBinary(binary, bins)
 	if errors.Is(err, systemd.ErrStoreBinary) {
@@ -521,6 +523,16 @@ func initUnitBinary(o InitOptions) (string, error) {
 		return "", err
 	}
 	return path, systemd.CheckUnitPath("Binary", path)
+}
+
+func defaultProfileBins(home, stateHome, login string) []string {
+	if !filepath.IsAbs(home) {
+		home = ""
+	}
+	if !filepath.IsAbs(stateHome) {
+		stateHome = ""
+	}
+	return systemd.NixProfileBins(home, stateHome, login)
 }
 
 func installInitUnits(ctx context.Context, e *Env, binary string, run func(context.Context, ...string) error) error {

@@ -43,6 +43,7 @@ func TestStableBinary(t *testing.T) {
 	link(exe, path("upgradeable/tkr"))
 	link(exe, path("store/alias/bin/tkr"))
 	t.Setenv("PATH", first)
+	t.Chdir(root)
 
 	for _, tc := range []struct {
 		name, exe string
@@ -54,6 +55,7 @@ func TestStableBinary(t *testing.T) {
 		{"missing first entry", exe, []string{path("missing"), second}, filepath.Join(second, "tkr")},
 		{"symlinked directory", exe, []string{path("profile/bin")}, path("profile/bin/tkr")},
 		{"first match", exe, []string{first, second}, filepath.Join(first, "tkr")},
+		{"relative profile", exe, []string{"first"}, ""},
 		{"different build", exe, []string{path("different")}, ""},
 		{"skip unsuitable entries", exe, []string{path("different"), path("with space"), first}, filepath.Join(first, "tkr")},
 		{"store profile", exe, []string{path("store/alias/bin")}, ""},

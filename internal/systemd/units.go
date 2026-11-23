@@ -20,8 +20,8 @@ type UnitData struct {
 	ExtraRW                                       []string
 }
 
-// CheckUnitPath reports whether path may be written into a unit file;
-// field names the path in the error.
+// CheckUnitPath reports whether path may be written into a unit file
+// (the rule RenderUnits already applies); field names the path in the error.
 func CheckUnitPath(field, path string) error {
 	// AIDEV-NOTE: the templates deliberately do no systemd escaping;
 	// whitespace, specifiers, single/double quotes and controls must never reach them.

@@ -529,6 +529,33 @@ func TestInitRefusesStoreBinaryOutsideProfiles(t *testing.T) {
 	}
 }
 
+func TestDefaultProfileBins(t *testing.T) {
+	const (
+		homeBin      = "/home/alice/.nix-profile/bin"
+		stateBin     = "/state/nix/profile/bin"
+		homeStateBin = "/home/alice/.local/state/nix/profile/bin"
+		userBin      = "/etc/profiles/per-user/alice/bin"
+		defaultBin   = "/nix/var/nix/profiles/default/bin"
+		systemBin    = "/run/current-system/sw/bin"
+	)
+	for _, tc := range []struct {
+		name, home, state, login string
+		want                     []string
+	}{
+		{"all profiles", "/home/alice", "/state", "alice", []string{homeBin, stateBin, userBin, defaultBin, systemBin}},
+		{"relative home", "home", "/state", "alice", []string{stateBin, userBin, defaultBin, systemBin}},
+		{"relative home without state", "home", "", "alice", []string{userBin, defaultBin, systemBin}},
+		{"relative state", "/home/alice", "state", "alice", []string{homeBin, homeStateBin, userBin, defaultBin, systemBin}},
+		{"empty login", "/home/alice", "/state", "", []string{homeBin, stateBin, defaultBin, systemBin}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := offline.DefaultProfileBins(tc.home, tc.state, tc.login); !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestInitUnitsOnlyRefusesStoreBinary(t *testing.T) {
 	testUnitsOnlyStoreBinary(t, false)
 }

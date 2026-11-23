@@ -28,6 +28,8 @@ func NixProfileBins(home, stateHome, user string) []string {
 	if user != "" {
 		bins = append(bins, filepath.Join("/etc/profiles/per-user", user, "bin"))
 	}
+	// AIDEV-NOTE: On a single-user Nix install the installing account owns
+	// /nix/var/nix/profiles/default and the whole store, so this entry adds no new trust (P§6).
 	return append(bins, "/nix/var/nix/profiles/default/bin", "/run/current-system/sw/bin")
 }
 
@@ -49,7 +51,7 @@ func stableBinary(exe string, profileBins []string, storeDir string) (string, er
 	// entry can follow an upgrade, so return its path deliberately unresolved.
 	for _, dir := range profileBins {
 		candidate := filepath.Join(dir, filepath.Base(exe))
-		if CheckUnitPath("Binary", candidate) != nil || strings.HasPrefix(candidate, storePrefix) {
+		if !filepath.IsAbs(candidate) || CheckUnitPath("Binary", candidate) != nil || strings.HasPrefix(candidate, storePrefix) {
 			continue
 		}
 		if target, err := filepath.EvalSymlinks(candidate); err == nil && target == resolved {
