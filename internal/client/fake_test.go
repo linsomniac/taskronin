@@ -18,8 +18,9 @@ import (
 	"github.com/linsomniac/taskronin/internal/domain"
 )
 
-// AIDEV-NOTE: Argon2 under the race detector on a small ARM runner takes several
-// seconds. This bound on positive waits only limits how long a failing test runs.
+// AIDEV-NOTE: server start and stop and socket I/O under the race detector on a
+// small ARM runner can take several seconds. This bound on positive waits only
+// limits how long a failing test runs.
 const slowRunnerWait = 60 * time.Second
 
 const testGeneration = "0123456789abcdef"
