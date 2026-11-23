@@ -1,0 +1,12 @@
+version: 2
+updates:
+  # A go.sum update also needs a new Nix vendorHash and regenerated license notices.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]
