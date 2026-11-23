@@ -57,7 +57,7 @@ Only this job has write and signing permissions. It runs no project code.
 Re-run a failed workflow from the Actions page. If the publish job failed
 after it began creating the release, delete the leftover draft release first.
 The build artifact is kept for seven days. After it expires, choose
-“Re-run all jobs” to rebuild the same bytes.
+"Re-run all jobs" to rebuild the same bytes.
 
 **Never reuse a version.** Never delete or move the tag. The Go module proxy
 may already have recorded it. If the source needs a fix, commit it and release
