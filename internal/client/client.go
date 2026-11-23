@@ -11,11 +11,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"taskronin/internal/api"
-	"taskronin/internal/civil"
-	"taskronin/internal/clock"
-	"taskronin/internal/config"
-	"taskronin/internal/fsutil"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/civil"
+	"github.com/linsomniac/taskronin/internal/clock"
+	"github.com/linsomniac/taskronin/internal/config"
+	"github.com/linsomniac/taskronin/internal/fsutil"
 )
 
 // Options configures credentials, request budgets, retries and pending storage.

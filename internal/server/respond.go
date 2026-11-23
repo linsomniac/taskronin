@@ -7,10 +7,10 @@ import (
 	"strconv"
 	"time"
 
-	"taskronin/internal/api"
-	"taskronin/internal/domain"
-	"taskronin/internal/service"
-	"taskronin/internal/textsafe"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/service"
+	"github.com/linsomniac/taskronin/internal/textsafe"
 )
 
 func statusFor(c domain.Code) int {

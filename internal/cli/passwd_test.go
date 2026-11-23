@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"taskronin/internal/domain"
-	"taskronin/internal/testutil"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/testutil"
 )
 
 // scriptedPasswords answers ReadPassword in order and records the prompts.

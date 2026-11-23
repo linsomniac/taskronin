@@ -11,7 +11,7 @@ import (
 	"modernc.org/sqlite"
 	sqlite3 "modernc.org/sqlite/lib"
 
-	"taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/domain"
 )
 
 // ErrNotFound indicates that a store query found no matching row.

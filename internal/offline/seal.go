@@ -7,9 +7,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"taskronin/internal/domain"
-	"taskronin/internal/service"
-	"taskronin/internal/store"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/service"
+	"github.com/linsomniac/taskronin/internal/store"
 )
 
 // verifyAndSealStage is the shared tail of restore and import staging

@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"errors"
 
-	"taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/domain"
 )
 
 // RankPos identifies a position in the global (rank, id) task order.

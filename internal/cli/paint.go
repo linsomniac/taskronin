@@ -5,7 +5,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"taskronin/internal/textsafe"
+	"github.com/linsomniac/taskronin/internal/textsafe"
 )
 
 // AIDEV-NOTE: quotedTitle, reason, status and shortOpID sanitize their input.

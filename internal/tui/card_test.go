@@ -13,9 +13,9 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"taskronin/internal/api"
-	"taskronin/internal/civil"
-	"taskronin/internal/client"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/civil"
+	"github.com/linsomniac/taskronin/internal/client"
 )
 
 func cardApp(t *testing.T, f *fakeAPI) *App {

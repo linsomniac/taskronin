@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"net/url"
 
-	"taskronin/internal/domain"
-	"taskronin/internal/service"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/service"
 )
 
 func (a *app) blockRef(r *http.Request, form url.Values) (service.BlockRef, error) {

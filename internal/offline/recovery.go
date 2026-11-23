@@ -8,10 +8,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"taskronin/internal/config"
-	"taskronin/internal/domain"
-	"taskronin/internal/fsutil"
-	"taskronin/internal/textsafe"
+	"github.com/linsomniac/taskronin/internal/config"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/fsutil"
+	"github.com/linsomniac/taskronin/internal/textsafe"
 )
 
 // Recovery-file modes recorded on ledger complete lines (A§12.6 step 8).

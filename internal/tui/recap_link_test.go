@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"taskronin/internal/api"
-	"taskronin/internal/civil"
-	"taskronin/internal/client"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/civil"
+	"github.com/linsomniac/taskronin/internal/client"
 )
 
 func TestRecapLinkUnlinked(t *testing.T) { // RCP-09 (TUI side).

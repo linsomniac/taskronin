@@ -5,10 +5,10 @@ import (
 	"io"
 	"testing"
 
-	"taskronin/internal/backup"
-	"taskronin/internal/domain"
-	"taskronin/internal/service"
-	"taskronin/internal/testutil"
+	"github.com/linsomniac/taskronin/internal/backup"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/service"
+	"github.com/linsomniac/taskronin/internal/testutil"
 )
 
 func TestSCP01(t *testing.T) {

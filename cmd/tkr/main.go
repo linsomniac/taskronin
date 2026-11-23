@@ -8,7 +8,7 @@ import (
 	"syscall"
 	_ "time/tzdata"
 
-	"taskronin/internal/cli"
+	"github.com/linsomniac/taskronin/internal/cli"
 )
 
 func main() {

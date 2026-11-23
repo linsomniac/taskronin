@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"taskronin/internal/api"
-	"taskronin/internal/domain"
-	"taskronin/internal/server"
-	"taskronin/internal/service"
-	"taskronin/internal/testutil"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/server"
+	"github.com/linsomniac/taskronin/internal/service"
+	"github.com/linsomniac/taskronin/internal/testutil"
 )
 
 func TestFinalKeyedBudgetOverrunHTTP(t *testing.T) {

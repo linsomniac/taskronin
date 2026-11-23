@@ -3,7 +3,7 @@ package datespec
 import (
 	"time"
 
-	"taskronin/internal/civil"
+	"github.com/linsomniac/taskronin/internal/civil"
 )
 
 // Week returns the inclusive full week containing r.Today, starting on

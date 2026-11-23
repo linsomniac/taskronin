@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"taskronin/internal/clock"
-	"taskronin/internal/fsutil"
+	"github.com/linsomniac/taskronin/internal/clock"
+	"github.com/linsomniac/taskronin/internal/fsutil"
 )
 
 // SwapKind identifies the offline operation replacing a database file set.

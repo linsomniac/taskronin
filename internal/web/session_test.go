@@ -13,11 +13,11 @@ import (
 
 	"golang.org/x/net/html"
 
-	"taskronin/internal/auth"
-	"taskronin/internal/clock"
-	"taskronin/internal/service"
-	"taskronin/internal/testutil"
-	"taskronin/internal/web"
+	"github.com/linsomniac/taskronin/internal/auth"
+	"github.com/linsomniac/taskronin/internal/clock"
+	"github.com/linsomniac/taskronin/internal/service"
+	"github.com/linsomniac/taskronin/internal/testutil"
+	"github.com/linsomniac/taskronin/internal/web"
 )
 
 func TestLoginSuccess(t *testing.T) {

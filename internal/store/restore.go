@@ -3,7 +3,7 @@ package store
 import (
 	"context"
 
-	"taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/domain"
 )
 
 // ReplaceTokens deletes every api_tokens row and inserts tokens verbatim:

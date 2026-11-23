@@ -15,10 +15,10 @@ import (
 	"testing"
 	"time"
 
-	"taskronin/internal/api"
-	"taskronin/internal/clock"
-	"taskronin/internal/domain"
-	"taskronin/internal/service"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/clock"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/service"
 )
 
 func pendingClock() *clock.Fake {

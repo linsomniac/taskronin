@@ -13,9 +13,9 @@ import (
 	"sync"
 	"testing"
 
-	"taskronin/internal/client"
-	"taskronin/internal/config"
-	"taskronin/internal/testutil"
+	"github.com/linsomniac/taskronin/internal/client"
+	"github.com/linsomniac/taskronin/internal/config"
+	"github.com/linsomniac/taskronin/internal/testutil"
 )
 
 func TestRegressBusyRetryCommitsOnce(t *testing.T) {

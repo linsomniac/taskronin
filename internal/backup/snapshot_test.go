@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"taskronin/internal/clock"
-	"taskronin/internal/store"
+	"github.com/linsomniac/taskronin/internal/clock"
+	"github.com/linsomniac/taskronin/internal/store"
 )
 
 func TestSnapshotRoundTrip(t *testing.T) {

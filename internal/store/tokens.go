@@ -7,7 +7,7 @@ import (
 	"slices"
 	"time"
 
-	"taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/domain"
 )
 
 const tokenColumns = `id, name, secret_hash, scopes, is_owner, mutations_per_hour,

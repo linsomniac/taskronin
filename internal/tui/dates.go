@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"taskronin/internal/api"
-	"taskronin/internal/civil"
-	"taskronin/internal/datespec"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/civil"
+	"github.com/linsomniac/taskronin/internal/datespec"
 )
 
 func (a *App) ref() datespec.Ref {

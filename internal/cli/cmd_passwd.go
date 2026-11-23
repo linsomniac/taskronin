@@ -5,11 +5,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"taskronin/internal/api"
-	"taskronin/internal/config"
-	"taskronin/internal/domain"
-	"taskronin/internal/fsutil"
-	"taskronin/internal/offline"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/config"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/fsutil"
+	"github.com/linsomniac/taskronin/internal/offline"
 )
 
 func init() { register(passwdCommand) }

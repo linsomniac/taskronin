@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"time"
 
-	"taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/api"
 )
 
 // Tokens lists public token metadata without credentials.

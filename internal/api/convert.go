@@ -4,8 +4,8 @@ import (
 	"database/sql"
 	"time"
 
-	"taskronin/internal/civil"
-	"taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/civil"
+	"github.com/linsomniac/taskronin/internal/domain"
 )
 
 // Conv converts domain values using the instance generation and server location.

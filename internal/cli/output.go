@@ -3,7 +3,7 @@ package cli
 import (
 	"fmt"
 
-	"taskronin/internal/textsafe"
+	"github.com/linsomniac/taskronin/internal/textsafe"
 )
 
 func (e *env) colorEnabled() bool {

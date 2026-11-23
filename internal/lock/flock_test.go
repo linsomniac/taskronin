@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"taskronin/internal/lock"
+	"github.com/linsomniac/taskronin/internal/lock"
 )
 
 func TestLockExclusive(t *testing.T) {

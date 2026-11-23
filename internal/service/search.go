@@ -9,9 +9,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"taskronin/internal/civil"
-	"taskronin/internal/domain"
-	"taskronin/internal/store"
+	"github.com/linsomniac/taskronin/internal/civil"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/store"
 )
 
 // AIDEV-NOTE: DF30: every client reaches FTS through ftsQuery, so these caps

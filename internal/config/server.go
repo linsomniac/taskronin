@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"taskronin/internal/civil"
+	"github.com/linsomniac/taskronin/internal/civil"
 )
 
 // Server is the server.toml schema. Paths are resolved by init; loading a

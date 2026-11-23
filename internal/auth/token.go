@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"time"
 
-	"taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/domain"
 )
 
 // TokenPrefix identifies Taskronin API tokens.

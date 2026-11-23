@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/domain"
 )
 
 func importFile(tables map[string][]map[string]any) *ExportFile {

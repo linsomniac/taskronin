@@ -6,11 +6,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"taskronin/internal/api"
-	"taskronin/internal/client"
-	"taskronin/internal/datespec"
-	"taskronin/internal/editor"
-	"taskronin/internal/textsafe"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/client"
+	"github.com/linsomniac/taskronin/internal/datespec"
+	"github.com/linsomniac/taskronin/internal/editor"
+	"github.com/linsomniac/taskronin/internal/textsafe"
 )
 
 func init() { register(addCommand) }

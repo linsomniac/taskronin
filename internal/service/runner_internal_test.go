@@ -13,11 +13,11 @@ import (
 	"testing"
 	"time"
 
-	"taskronin/internal/auth"
-	"taskronin/internal/civil"
-	"taskronin/internal/clock"
-	"taskronin/internal/domain"
-	"taskronin/internal/store"
+	"github.com/linsomniac/taskronin/internal/auth"
+	"github.com/linsomniac/taskronin/internal/civil"
+	"github.com/linsomniac/taskronin/internal/clock"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/store"
 )
 
 func TestOpInvariantScopeAndRanks(t *testing.T) {

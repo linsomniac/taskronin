@@ -12,13 +12,13 @@ import (
 	"strings"
 	"time"
 
-	"taskronin/internal/auth"
-	"taskronin/internal/backup"
-	"taskronin/internal/domain"
-	"taskronin/internal/fsutil"
-	"taskronin/internal/service"
-	"taskronin/internal/store"
-	"taskronin/internal/textsafe"
+	"github.com/linsomniac/taskronin/internal/auth"
+	"github.com/linsomniac/taskronin/internal/backup"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/fsutil"
+	"github.com/linsomniac/taskronin/internal/service"
+	"github.com/linsomniac/taskronin/internal/store"
+	"github.com/linsomniac/taskronin/internal/textsafe"
 )
 
 // RestoreResult describes a published restore.

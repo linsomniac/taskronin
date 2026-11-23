@@ -14,8 +14,8 @@ import (
 	"slices"
 	"sync"
 
-	"taskronin/internal/domain"
-	"taskronin/internal/fsutil"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/fsutil"
 )
 
 const (

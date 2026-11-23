@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/domain"
 )
 
 func (a *app) routes() *http.ServeMux {

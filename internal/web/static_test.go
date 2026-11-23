@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"taskronin/internal/web"
+	"github.com/linsomniac/taskronin/internal/web"
 )
 
 func TestCSSSelfContained(t *testing.T) {

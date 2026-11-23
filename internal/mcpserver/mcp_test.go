@@ -17,12 +17,12 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"taskronin/internal/api"
-	"taskronin/internal/civil"
-	"taskronin/internal/client"
-	"taskronin/internal/datespec"
-	"taskronin/internal/domain"
-	"taskronin/internal/testutil"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/civil"
+	"github.com/linsomniac/taskronin/internal/client"
+	"github.com/linsomniac/taskronin/internal/datespec"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/testutil"
 )
 
 var readTools = []string{"today", "list_tasks", "get_task", "search", "work_report"}

@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"taskronin/internal/auth"
-	"taskronin/internal/domain"
-	"taskronin/internal/store"
-	"taskronin/internal/testutil"
+	"github.com/linsomniac/taskronin/internal/auth"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/store"
+	"github.com/linsomniac/taskronin/internal/testutil"
 )
 
 func TestRunForbidden(t *testing.T) {

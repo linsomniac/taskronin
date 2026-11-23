@@ -14,16 +14,16 @@ import (
 	"testing"
 	"time"
 
-	"taskronin/internal/api"
-	"taskronin/internal/backup"
-	"taskronin/internal/client"
-	"taskronin/internal/config"
-	"taskronin/internal/domain"
-	"taskronin/internal/offline"
-	"taskronin/internal/server"
-	"taskronin/internal/service"
-	"taskronin/internal/store"
-	"taskronin/internal/testutil"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/backup"
+	"github.com/linsomniac/taskronin/internal/client"
+	"github.com/linsomniac/taskronin/internal/config"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/offline"
+	"github.com/linsomniac/taskronin/internal/server"
+	"github.com/linsomniac/taskronin/internal/service"
+	"github.com/linsomniac/taskronin/internal/store"
+	"github.com/linsomniac/taskronin/internal/testutil"
 )
 
 var errRestoreCrash = errors.New("simulated restore crash")

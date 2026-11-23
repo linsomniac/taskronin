@@ -15,11 +15,11 @@ import (
 
 	"golang.org/x/net/html"
 
-	"taskronin/internal/clock"
-	"taskronin/internal/domain"
-	"taskronin/internal/service"
-	"taskronin/internal/testutil"
-	"taskronin/internal/web"
+	"github.com/linsomniac/taskronin/internal/clock"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/service"
+	"github.com/linsomniac/taskronin/internal/testutil"
+	"github.com/linsomniac/taskronin/internal/web"
 )
 
 const testListen = "127.0.0.1:7878"

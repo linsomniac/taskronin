@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
-	"taskronin/internal/auth"
-	"taskronin/internal/clock"
-	"taskronin/internal/domain"
-	"taskronin/internal/service"
-	"taskronin/internal/store"
-	"taskronin/internal/testutil"
+	"github.com/linsomniac/taskronin/internal/auth"
+	"github.com/linsomniac/taskronin/internal/clock"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/service"
+	"github.com/linsomniac/taskronin/internal/store"
+	"github.com/linsomniac/taskronin/internal/testutil"
 )
 
 func TestChangePasswordRejectsBeforeVerification(t *testing.T) {

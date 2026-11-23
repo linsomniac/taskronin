@@ -6,7 +6,7 @@ import (
 	binding "charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
-	"taskronin/internal/textsafe"
+	"github.com/linsomniac/taskronin/internal/textsafe"
 )
 
 type keyMap struct {

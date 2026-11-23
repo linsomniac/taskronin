@@ -6,10 +6,10 @@ import (
 	"sync"
 	"testing"
 
-	"taskronin/internal/auth"
-	"taskronin/internal/domain"
-	"taskronin/internal/service"
-	"taskronin/internal/store"
+	"github.com/linsomniac/taskronin/internal/auth"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/service"
+	"github.com/linsomniac/taskronin/internal/store"
 )
 
 // Password is the one fixed test password permitted by A§13.1.

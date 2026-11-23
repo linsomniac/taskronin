@@ -13,11 +13,11 @@ import (
 	"testing"
 	"time"
 
-	"taskronin/internal/api"
-	"taskronin/internal/client"
-	"taskronin/internal/clock"
-	"taskronin/internal/domain"
-	"taskronin/internal/testutil"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/client"
+	"github.com/linsomniac/taskronin/internal/clock"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/testutil"
 )
 
 func TestSCP11_AIChangesAck(t *testing.T) {

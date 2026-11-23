@@ -11,8 +11,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"taskronin/internal/api"
-	"taskronin/internal/client"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/client"
 )
 
 func TestTabKeys(t *testing.T) {

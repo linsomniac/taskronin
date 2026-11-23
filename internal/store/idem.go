@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/domain"
 )
 
 // IdemRow stores a request hash and replay references, or a terminal 409 problem.

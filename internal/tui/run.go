@@ -8,7 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"taskronin/internal/datespec"
+	"github.com/linsomniac/taskronin/internal/datespec"
 )
 
 // ErrUsage identifies invalid launch options before the terminal is opened.

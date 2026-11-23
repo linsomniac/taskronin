@@ -10,9 +10,9 @@ import (
 
 	"golang.org/x/net/html"
 
-	"taskronin/internal/domain"
-	"taskronin/internal/service"
-	"taskronin/internal/web"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/service"
+	"github.com/linsomniac/taskronin/internal/web"
 )
 
 func TestFlashDuplicateCookies(t *testing.T) {

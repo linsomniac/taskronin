@@ -12,10 +12,10 @@ import (
 	"runtime/debug"
 	"strings"
 
-	"taskronin/internal/api"
-	"taskronin/internal/buildinfo"
-	"taskronin/internal/domain"
-	"taskronin/internal/textsafe"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/buildinfo"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/textsafe"
 )
 
 type statusWriter struct {

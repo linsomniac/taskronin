@@ -6,8 +6,8 @@ import (
 	"errors"
 	"strconv"
 
-	"taskronin/internal/domain"
-	"taskronin/internal/store"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/store"
 )
 
 // UpdateSettingsIn changes optional retention counts, requiring a password to lower either.

@@ -6,8 +6,8 @@ import (
 	"slices"
 	"time"
 
-	"taskronin/internal/civil"
-	"taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/civil"
+	"github.com/linsomniac/taskronin/internal/domain"
 )
 
 const blockColumns = `id, task_id, date, start_min, end_min, status, outcome_source,

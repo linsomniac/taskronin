@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"taskronin/internal/clock"
+	"github.com/linsomniac/taskronin/internal/clock"
 )
 
 func TestDraftsNew(t *testing.T) {

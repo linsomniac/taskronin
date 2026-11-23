@@ -8,9 +8,9 @@ import (
 	"fmt"
 	"slices"
 
-	"taskronin/internal/backup"
-	"taskronin/internal/domain"
-	"taskronin/internal/store"
+	"github.com/linsomniac/taskronin/internal/backup"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/store"
 )
 
 // ReplayMode selects whether ledger replay reconciles time-dependent state.

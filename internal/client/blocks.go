@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/api"
 )
 
 // Reblock reschedules a block using both block and task preconditions.

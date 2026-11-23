@@ -6,10 +6,10 @@ import (
 	"strconv"
 	"strings"
 
-	"taskronin/internal/api"
-	"taskronin/internal/buildinfo"
-	"taskronin/internal/domain"
-	"taskronin/internal/service"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/buildinfo"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/service"
 )
 
 func (s *Server) opResponse(res *service.OpResult) api.OpResponse {

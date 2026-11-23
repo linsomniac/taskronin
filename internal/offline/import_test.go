@@ -10,13 +10,13 @@ import (
 	"strings"
 	"testing"
 
-	"taskronin/internal/api"
-	"taskronin/internal/civil"
-	"taskronin/internal/client"
-	"taskronin/internal/domain"
-	"taskronin/internal/offline"
-	"taskronin/internal/store"
-	"taskronin/internal/testutil"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/civil"
+	"github.com/linsomniac/taskronin/internal/client"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/offline"
+	"github.com/linsomniac/taskronin/internal/store"
+	"github.com/linsomniac/taskronin/internal/testutil"
 )
 
 // importSource builds server A's data (tasks with tags and a project, entries,

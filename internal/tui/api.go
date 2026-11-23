@@ -3,9 +3,9 @@ package tui
 import (
 	"context"
 
-	"taskronin/internal/api"
-	"taskronin/internal/civil"
-	"taskronin/internal/client"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/civil"
+	"github.com/linsomniac/taskronin/internal/client"
 )
 
 // API is the subset of client.Client used by the terminal user interface.

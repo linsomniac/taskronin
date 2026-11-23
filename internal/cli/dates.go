@@ -3,8 +3,8 @@ package cli
 import (
 	"context"
 
-	"taskronin/internal/api"
-	"taskronin/internal/civil"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/civil"
 )
 
 func formatDate(date civil.Date) string {

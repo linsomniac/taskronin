@@ -5,8 +5,8 @@ import (
 	"database/sql"
 	"time"
 
-	"taskronin/internal/civil"
-	"taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/civil"
+	"github.com/linsomniac/taskronin/internal/domain"
 )
 
 const entryColumns = `id, task_id, kind, title, notes, work_date, occurred_min,

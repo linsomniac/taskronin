@@ -7,9 +7,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"taskronin/internal/client"
-	"taskronin/internal/datespec"
-	"taskronin/internal/tui"
+	"github.com/linsomniac/taskronin/internal/client"
+	"github.com/linsomniac/taskronin/internal/datespec"
+	"github.com/linsomniac/taskronin/internal/tui"
 )
 
 func init() { launchTUI = runTUI }

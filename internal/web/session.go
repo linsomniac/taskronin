@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/domain"
 )
 
 func (a *app) session(next http.Handler) http.Handler {

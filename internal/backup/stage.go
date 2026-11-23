@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"taskronin/internal/store"
+	"github.com/linsomniac/taskronin/internal/store"
 )
 
 // FileSet names a database and its optional -wal sibling. SHM is not copied.

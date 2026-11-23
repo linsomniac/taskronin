@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/domain"
 )
 
 func TestOverlapTrigger(t *testing.T) {

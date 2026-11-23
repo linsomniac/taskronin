@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"taskronin/internal/clock"
-	"taskronin/internal/fsutil"
+	"github.com/linsomniac/taskronin/internal/clock"
+	"github.com/linsomniac/taskronin/internal/fsutil"
 )
 
 // Drafts stores editor buffers privately under Dir. A nil Clock uses real time.

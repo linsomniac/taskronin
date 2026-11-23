@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/domain"
 )
 
 func randomHash(t *testing.T) [32]byte {

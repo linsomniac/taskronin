@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"taskronin/internal/civil"
-	"taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/civil"
+	"github.com/linsomniac/taskronin/internal/domain"
 )
 
 const testRankGap int64 = 65536

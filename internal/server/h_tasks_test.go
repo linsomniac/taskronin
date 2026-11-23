@@ -14,11 +14,11 @@ import (
 	"testing"
 	"time"
 
-	"taskronin/internal/api"
-	"taskronin/internal/civil"
-	"taskronin/internal/client"
-	"taskronin/internal/domain"
-	"taskronin/internal/testutil"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/civil"
+	"github.com/linsomniac/taskronin/internal/client"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/testutil"
 )
 
 func mutateAPI(t *testing.T, srv *testutil.Server, method, path, body, etag string, overrides http.Header) (int, http.Header, []byte) {

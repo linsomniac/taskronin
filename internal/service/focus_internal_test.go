@@ -5,8 +5,8 @@ import (
 	"reflect"
 	"testing"
 
-	"taskronin/internal/domain"
-	"taskronin/internal/store"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/store"
 )
 
 func TestClearFocusIf(t *testing.T) {

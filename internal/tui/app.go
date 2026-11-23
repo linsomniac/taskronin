@@ -11,9 +11,9 @@ import (
 	binding "charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
-	"taskronin/internal/api"
-	"taskronin/internal/civil"
-	"taskronin/internal/client"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/civil"
+	"github.com/linsomniac/taskronin/internal/client"
 )
 
 // DefaultPollInterval is the dashboard refresh interval (A§14 D25).

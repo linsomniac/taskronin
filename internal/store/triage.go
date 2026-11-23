@@ -6,7 +6,7 @@ import (
 	"errors"
 	"time"
 
-	"taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/domain"
 )
 
 const triageRank = `CASE reason WHEN 'slipped' THEN 8 WHEN 'overdue' THEN 7

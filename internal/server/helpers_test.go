@@ -10,11 +10,11 @@ import (
 	"strings"
 	"testing"
 
-	"taskronin/internal/api"
-	"taskronin/internal/domain"
-	"taskronin/internal/server"
-	"taskronin/internal/service"
-	"taskronin/internal/testutil"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/server"
+	"github.com/linsomniac/taskronin/internal/service"
+	"github.com/linsomniac/taskronin/internal/testutil"
 )
 
 var sock = server.ConnInfo{Transport: server.TransportUnix, PeerOK: true, PeerUID: uint32(os.Getuid())}

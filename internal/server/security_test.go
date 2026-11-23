@@ -23,17 +23,17 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"taskronin/internal/api"
-	"taskronin/internal/backup"
-	"taskronin/internal/cli"
-	"taskronin/internal/client"
-	"taskronin/internal/config"
-	"taskronin/internal/domain"
-	"taskronin/internal/editor"
-	"taskronin/internal/mcpserver"
-	"taskronin/internal/offline"
-	"taskronin/internal/store"
-	"taskronin/internal/testutil"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/backup"
+	"github.com/linsomniac/taskronin/internal/cli"
+	"github.com/linsomniac/taskronin/internal/client"
+	"github.com/linsomniac/taskronin/internal/config"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/editor"
+	"github.com/linsomniac/taskronin/internal/mcpserver"
+	"github.com/linsomniac/taskronin/internal/offline"
+	"github.com/linsomniac/taskronin/internal/store"
+	"github.com/linsomniac/taskronin/internal/testutil"
 )
 
 // AIDEV-NOTE: BF30 - the only fixed password is testutil.Password; the new

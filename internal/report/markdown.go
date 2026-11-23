@@ -5,8 +5,8 @@ import (
 	"io"
 	"strings"
 
-	"taskronin/internal/api"
-	"taskronin/internal/textsafe"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/textsafe"
 )
 
 // Markdown writes a Markdown work report to w.

@@ -11,7 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/api"
 )
 
 type countingConn struct {

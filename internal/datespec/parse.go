@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"taskronin/internal/civil"
-	"taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/civil"
+	"github.com/linsomniac/taskronin/internal/domain"
 )
 
 // Mode selects how weekday names are resolved relative to today.

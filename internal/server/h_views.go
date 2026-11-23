@@ -7,10 +7,10 @@ import (
 	"net/url"
 	"strconv"
 
-	"taskronin/internal/api"
-	"taskronin/internal/civil"
-	"taskronin/internal/domain"
-	"taskronin/internal/service"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/civil"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/service"
 )
 
 func (s *Server) clockView(w http.ResponseWriter, r *http.Request) {

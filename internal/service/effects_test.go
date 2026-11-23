@@ -11,8 +11,8 @@ import (
 	"strconv"
 	"testing"
 
-	"taskronin/internal/domain"
-	"taskronin/internal/service"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/service"
 )
 
 func TestEffectImpliedKindsExist(t *testing.T) {

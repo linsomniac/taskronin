@@ -13,9 +13,9 @@ import (
 	"strings"
 	"time"
 
-	"taskronin/internal/api"
-	"taskronin/internal/clock"
-	"taskronin/internal/fsutil"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/clock"
+	"github.com/linsomniac/taskronin/internal/fsutil"
 )
 
 // PendingResendWindow bounds a resendable pending request's age: the server's

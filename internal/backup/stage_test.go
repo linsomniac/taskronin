@@ -12,9 +12,9 @@ import (
 	"strings"
 	"testing"
 
-	"taskronin/internal/backup"
-	"taskronin/internal/store"
-	"taskronin/internal/testutil"
+	"github.com/linsomniac/taskronin/internal/backup"
+	"github.com/linsomniac/taskronin/internal/store"
+	"github.com/linsomniac/taskronin/internal/testutil"
 )
 
 func TestStageRecoversWALOnlyChange(t *testing.T) {

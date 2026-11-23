@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/domain"
 )
 
 // ScrubResult counts changed task/entry rows, events and operations.

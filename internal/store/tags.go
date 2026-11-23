@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/domain"
 )
 
 // TaskTags returns stored tag names in case-insensitive name order.

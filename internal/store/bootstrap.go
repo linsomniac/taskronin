@@ -3,7 +3,7 @@ package store
 import (
 	"context"
 
-	"taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/domain"
 )
 
 // Bootstrap supplies initial settings, authentication and an owner token.

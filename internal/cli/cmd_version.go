@@ -7,8 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"taskronin/internal/buildinfo"
-	"taskronin/internal/textsafe"
+	"github.com/linsomniac/taskronin/internal/buildinfo"
+	"github.com/linsomniac/taskronin/internal/textsafe"
 )
 
 func init() { register(versionCommand) }

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"taskronin/internal/fsutil"
+	"github.com/linsomniac/taskronin/internal/fsutil"
 )
 
 const (

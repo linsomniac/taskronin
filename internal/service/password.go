@@ -4,9 +4,9 @@ import (
 	"context"
 	"encoding/json"
 
-	"taskronin/internal/auth"
-	"taskronin/internal/domain"
-	"taskronin/internal/store"
+	"github.com/linsomniac/taskronin/internal/auth"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/store"
 )
 
 // ChangePasswordIn supplies the current and replacement owner passwords.

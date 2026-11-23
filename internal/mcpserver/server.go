@@ -22,12 +22,12 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"taskronin/internal/api"
-	"taskronin/internal/buildinfo"
-	"taskronin/internal/civil"
-	"taskronin/internal/client"
-	"taskronin/internal/datespec"
-	"taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/buildinfo"
+	"github.com/linsomniac/taskronin/internal/civil"
+	"github.com/linsomniac/taskronin/internal/client"
+	"github.com/linsomniac/taskronin/internal/datespec"
+	"github.com/linsomniac/taskronin/internal/domain"
 )
 
 // instructions is shown to MCP clients. It is advice, not a security control (D§10.5).

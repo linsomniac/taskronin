@@ -8,7 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/exp/teatest/v2"
 
-	"taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/api"
 )
 
 func TestPollNotModifiedKeepsState(t *testing.T) {

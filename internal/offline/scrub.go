@@ -9,13 +9,13 @@ import (
 	"path/filepath"
 	"strings"
 
-	"taskronin/internal/backup"
-	"taskronin/internal/config"
-	"taskronin/internal/domain"
-	"taskronin/internal/fsutil"
-	"taskronin/internal/service"
-	"taskronin/internal/store"
-	"taskronin/internal/textsafe"
+	"github.com/linsomniac/taskronin/internal/backup"
+	"github.com/linsomniac/taskronin/internal/config"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/fsutil"
+	"github.com/linsomniac/taskronin/internal/service"
+	"github.com/linsomniac/taskronin/internal/store"
+	"github.com/linsomniac/taskronin/internal/textsafe"
 )
 
 // Per-set scrub statuses.

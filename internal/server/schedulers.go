@@ -7,13 +7,13 @@ import (
 	"sync"
 	"time"
 
-	"taskronin/internal/backup"
-	"taskronin/internal/civil"
-	"taskronin/internal/clock"
-	"taskronin/internal/config"
-	"taskronin/internal/domain"
-	"taskronin/internal/service"
-	"taskronin/internal/textsafe"
+	"github.com/linsomniac/taskronin/internal/backup"
+	"github.com/linsomniac/taskronin/internal/civil"
+	"github.com/linsomniac/taskronin/internal/clock"
+	"github.com/linsomniac/taskronin/internal/config"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/service"
+	"github.com/linsomniac/taskronin/internal/textsafe"
 )
 
 // Test observers are configured before Run and restored after it has returned.

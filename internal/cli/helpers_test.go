@@ -17,12 +17,12 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/sys/unix"
 
-	"taskronin/internal/api"
-	"taskronin/internal/auth"
-	"taskronin/internal/client"
-	"taskronin/internal/config"
-	"taskronin/internal/datespec"
-	"taskronin/internal/fsutil"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/auth"
+	"github.com/linsomniac/taskronin/internal/client"
+	"github.com/linsomniac/taskronin/internal/config"
+	"github.com/linsomniac/taskronin/internal/datespec"
+	"github.com/linsomniac/taskronin/internal/fsutil"
 )
 
 func runCLI(t *testing.T, sys sysDeps, stdin string, args ...string) (stdout, stderr string, code int) {

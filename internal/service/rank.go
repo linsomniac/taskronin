@@ -4,8 +4,8 @@ import (
 	"database/sql"
 	"encoding/json"
 
-	"taskronin/internal/domain"
-	"taskronin/internal/store"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/store"
 )
 
 // Gap is the default spacing between task ranks.

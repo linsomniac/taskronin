@@ -10,8 +10,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"taskronin/internal/api"
-	"taskronin/internal/civil"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/civil"
 )
 
 const plainLsFixture = "Triage\n  #1  [new] Keycloak  infra.keycloak +db\n\nBacklog\n  #2  Infrastructure  infrastructure\n"

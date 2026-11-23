@@ -7,7 +7,7 @@ import (
 	"io"
 	"time"
 
-	"taskronin/internal/civil"
+	"github.com/linsomniac/taskronin/internal/civil"
 )
 
 // Time encodes an instant with millisecond precision in its existing location.

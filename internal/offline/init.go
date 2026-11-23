@@ -13,15 +13,15 @@ import (
 	"strings"
 	"time"
 
-	"taskronin/internal/auth"
-	"taskronin/internal/civil"
-	"taskronin/internal/config"
-	"taskronin/internal/domain"
-	"taskronin/internal/fsutil"
-	"taskronin/internal/service"
-	"taskronin/internal/store"
-	"taskronin/internal/systemd"
-	"taskronin/internal/textsafe"
+	"github.com/linsomniac/taskronin/internal/auth"
+	"github.com/linsomniac/taskronin/internal/civil"
+	"github.com/linsomniac/taskronin/internal/config"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/fsutil"
+	"github.com/linsomniac/taskronin/internal/service"
+	"github.com/linsomniac/taskronin/internal/store"
+	"github.com/linsomniac/taskronin/internal/systemd"
+	"github.com/linsomniac/taskronin/internal/textsafe"
 )
 
 // InitOptions controls first-run initialization and unit regeneration.

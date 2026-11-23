@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"taskronin/internal/domain"
-	"taskronin/internal/service"
-	"taskronin/internal/testutil"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/service"
+	"github.com/linsomniac/taskronin/internal/testutil"
 )
 
 func TestTRI19(t *testing.T) {

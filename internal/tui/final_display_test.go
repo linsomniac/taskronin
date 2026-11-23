@@ -12,7 +12,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/api"
 )
 
 func TestFinalHeaderWarningsAt80(t *testing.T) {

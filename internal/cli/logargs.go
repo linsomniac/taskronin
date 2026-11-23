@@ -3,7 +3,7 @@ package cli
 import (
 	"strings"
 
-	"taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/domain"
 )
 
 // parseLogArgs keeps quoted numeric-leading text distinct from a task ID.

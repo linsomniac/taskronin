@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/domain"
 )
 
 // Effect is a user-visible consequence reconstructed from persisted events.

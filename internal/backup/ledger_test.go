@@ -17,7 +17,7 @@ import (
 	"sync"
 	"testing"
 
-	"taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/domain"
 )
 
 func TestPRG08(t *testing.T) {

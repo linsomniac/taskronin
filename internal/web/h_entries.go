@@ -6,9 +6,9 @@ import (
 	"net/url"
 	"strings"
 
-	"taskronin/internal/datespec"
-	"taskronin/internal/domain"
-	"taskronin/internal/service"
+	"github.com/linsomniac/taskronin/internal/datespec"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/service"
 )
 
 func entryTaskID(form url.Values) (sql.Null[domain.TaskID], error) {

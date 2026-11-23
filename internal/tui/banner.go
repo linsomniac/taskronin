@@ -8,10 +8,10 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"taskronin/internal/api"
-	"taskronin/internal/client"
-	"taskronin/internal/domain"
-	"taskronin/internal/textsafe"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/client"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/textsafe"
 )
 
 // AIDEV-NOTE: View adds the status prefix from the kind so mutation labels

@@ -9,10 +9,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"taskronin/internal/api"
-	"taskronin/internal/client"
-	"taskronin/internal/config"
-	"taskronin/internal/datespec"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/client"
+	"github.com/linsomniac/taskronin/internal/config"
+	"github.com/linsomniac/taskronin/internal/datespec"
 )
 
 type env struct {

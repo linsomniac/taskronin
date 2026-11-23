@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/domain"
 )
 
 const (

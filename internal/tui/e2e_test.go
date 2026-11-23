@@ -6,9 +6,9 @@ import (
 
 	"github.com/charmbracelet/x/exp/teatest/v2"
 
-	"taskronin/internal/api"
-	"taskronin/internal/client"
-	"taskronin/internal/testutil"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/client"
+	"github.com/linsomniac/taskronin/internal/testutil"
 )
 
 func e2eModel(t *testing.T, c *client.Client, opts ...func(*Config)) *teatest.TestModel {

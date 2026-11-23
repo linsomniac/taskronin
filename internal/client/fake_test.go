@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"taskronin/internal/api"
-	"taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/domain"
 )
 
 const testGeneration = "0123456789abcdef"

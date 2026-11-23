@@ -7,12 +7,12 @@ import (
 	"strings"
 	"testing"
 
-	"taskronin/internal/api"
-	"taskronin/internal/client"
-	"taskronin/internal/config"
-	"taskronin/internal/domain"
-	"taskronin/internal/offline"
-	"taskronin/internal/testutil"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/client"
+	"github.com/linsomniac/taskronin/internal/config"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/offline"
+	"github.com/linsomniac/taskronin/internal/testutil"
 )
 
 // passwdEnv builds an offline Env over a StartServer instance's data.

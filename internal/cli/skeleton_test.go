@@ -15,12 +15,12 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"taskronin/internal/api"
-	"taskronin/internal/buildinfo"
-	"taskronin/internal/civil"
-	"taskronin/internal/clock"
-	"taskronin/internal/config"
-	"taskronin/internal/testutil"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/buildinfo"
+	"github.com/linsomniac/taskronin/internal/civil"
+	"github.com/linsomniac/taskronin/internal/clock"
+	"github.com/linsomniac/taskronin/internal/config"
+	"github.com/linsomniac/taskronin/internal/testutil"
 )
 
 func TestVersionWithoutServer(t *testing.T) {

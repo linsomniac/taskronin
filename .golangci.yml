@@ -81,4 +81,4 @@ formatters:
   settings:
     goimports:
       local-prefixes:
-        - taskronin
+        - github.com/linsomniac/taskronin

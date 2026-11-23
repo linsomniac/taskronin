@@ -3,9 +3,9 @@ package server
 import (
 	"net/http"
 
-	"taskronin/internal/api"
-	"taskronin/internal/domain"
-	"taskronin/internal/service"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/service"
 )
 
 func (s *Server) setFocus(w http.ResponseWriter, r *http.Request) {

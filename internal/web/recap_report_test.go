@@ -13,11 +13,11 @@ import (
 
 	"golang.org/x/net/html"
 
-	"taskronin/internal/civil"
-	"taskronin/internal/domain"
-	"taskronin/internal/service"
-	"taskronin/internal/testutil"
-	"taskronin/internal/web"
+	"github.com/linsomniac/taskronin/internal/civil"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/service"
+	"github.com/linsomniac/taskronin/internal/testutil"
+	"github.com/linsomniac/taskronin/internal/web"
 )
 
 func TestRecapPage(t *testing.T) {

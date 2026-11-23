@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 
-	"taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/domain"
 )
 
 const eventColumns = `events.id, events.op_id, events.entity, events.entity_id, events.task_id,

@@ -6,7 +6,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
-	"taskronin/internal/fsutil"
+	"github.com/linsomniac/taskronin/internal/fsutil"
 )
 
 // WriteServer atomically writes server.toml with mode 0600. The parent directory

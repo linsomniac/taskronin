@@ -1,4 +1,4 @@
-module taskronin
+module github.com/linsomniac/taskronin
 
 go 1.26.0
 

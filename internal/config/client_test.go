@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"taskronin/internal/config"
+	"github.com/linsomniac/taskronin/internal/config"
 )
 
 func TestLoadClientDefaults(t *testing.T) {

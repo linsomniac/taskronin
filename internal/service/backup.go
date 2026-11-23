@@ -7,10 +7,10 @@ import (
 	"strconv"
 	"time"
 
-	"taskronin/internal/backup"
-	"taskronin/internal/civil"
-	"taskronin/internal/domain"
-	"taskronin/internal/store"
+	"github.com/linsomniac/taskronin/internal/backup"
+	"github.com/linsomniac/taskronin/internal/civil"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/store"
 )
 
 // BackupStatusView describes the configured snapshots and the latest backup health.

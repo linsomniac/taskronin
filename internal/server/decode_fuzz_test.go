@@ -5,8 +5,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"taskronin/internal/api"
-	"taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/domain"
 )
 
 func FuzzDecodeRequests(f *testing.F) {

@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strings"
 
-	"taskronin/internal/service"
+	"github.com/linsomniac/taskronin/internal/service"
 )
 
 type searchPage struct {

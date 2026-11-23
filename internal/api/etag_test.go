@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/domain"
 )
 
 func TestETag(t *testing.T) {

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"taskronin/internal/civil"
+	"github.com/linsomniac/taskronin/internal/civil"
 )
 
 var ref = Ref{Today: civil.MustDate("2026-10-28"), WeekStart: time.Monday}

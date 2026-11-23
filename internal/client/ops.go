@@ -4,7 +4,7 @@ import (
 	"context"
 	"net/http"
 
-	"taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/api"
 )
 
 // SetFocus sets or clears today's focus without an entity precondition.

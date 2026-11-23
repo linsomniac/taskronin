@@ -8,9 +8,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"taskronin/internal/api"
-	"taskronin/internal/client"
-	"taskronin/internal/editor"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/client"
+	"github.com/linsomniac/taskronin/internal/editor"
 )
 
 func init() { register(editCommand) }

@@ -6,9 +6,9 @@ import (
 	"errors"
 	"time"
 
-	"taskronin/internal/civil"
-	"taskronin/internal/domain"
-	"taskronin/internal/store"
+	"github.com/linsomniac/taskronin/internal/civil"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/store"
 )
 
 // OpSummary describes a persisted operation and its user-visible consequences.

@@ -7,8 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"taskronin/internal/api"
-	"taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/domain"
 )
 
 func init() { register(settingsCommand) }

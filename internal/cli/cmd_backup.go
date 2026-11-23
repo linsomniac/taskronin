@@ -9,12 +9,12 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"taskronin/internal/api"
-	"taskronin/internal/client"
-	"taskronin/internal/config"
-	"taskronin/internal/fsutil"
-	"taskronin/internal/offline"
-	"taskronin/internal/textsafe"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/client"
+	"github.com/linsomniac/taskronin/internal/config"
+	"github.com/linsomniac/taskronin/internal/fsutil"
+	"github.com/linsomniac/taskronin/internal/offline"
+	"github.com/linsomniac/taskronin/internal/textsafe"
 )
 
 func init() { register(backupCommand) }

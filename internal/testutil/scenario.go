@@ -8,11 +8,11 @@ import (
 	"strings"
 	"testing"
 
-	"taskronin/internal/civil"
-	"taskronin/internal/clock"
-	"taskronin/internal/domain"
-	"taskronin/internal/service"
-	"taskronin/internal/store"
+	"github.com/linsomniac/taskronin/internal/civil"
+	"github.com/linsomniac/taskronin/internal/clock"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/service"
+	"github.com/linsomniac/taskronin/internal/store"
 )
 
 // Scenario holds a service fixture and the actor for fluent catalog operations.

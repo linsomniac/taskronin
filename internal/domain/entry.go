@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"time"
 
-	"taskronin/internal/civil"
+	"github.com/linsomniac/taskronin/internal/civil"
 )
 
 // LogEntry records work or completion, optionally linked to a task.

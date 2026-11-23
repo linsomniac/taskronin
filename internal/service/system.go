@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 
-	"taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/domain"
 )
 
 // RecordSystemOp records an offline restore or import without reconciling historical state.

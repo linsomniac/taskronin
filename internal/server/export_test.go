@@ -7,9 +7,9 @@ import (
 	"net/http"
 	"time"
 
-	"taskronin/internal/civil"
-	"taskronin/internal/clock"
-	"taskronin/internal/service"
+	"github.com/linsomniac/taskronin/internal/civil"
+	"github.com/linsomniac/taskronin/internal/clock"
+	"github.com/linsomniac/taskronin/internal/service"
 )
 
 var (

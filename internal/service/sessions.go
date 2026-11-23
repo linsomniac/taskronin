@@ -6,9 +6,9 @@ import (
 	"errors"
 	"time"
 
-	"taskronin/internal/auth"
-	"taskronin/internal/domain"
-	"taskronin/internal/store"
+	"github.com/linsomniac/taskronin/internal/auth"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/store"
 )
 
 // LoginIn supplies the password, password-gate key and session to replace.

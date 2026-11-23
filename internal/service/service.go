@@ -9,12 +9,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"taskronin/internal/auth"
-	"taskronin/internal/backup"
-	"taskronin/internal/civil"
-	"taskronin/internal/clock"
-	"taskronin/internal/domain"
-	"taskronin/internal/store"
+	"github.com/linsomniac/taskronin/internal/auth"
+	"github.com/linsomniac/taskronin/internal/backup"
+	"github.com/linsomniac/taskronin/internal/civil"
+	"github.com/linsomniac/taskronin/internal/clock"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/store"
 )
 
 // Options supplies the service's dependencies and policy settings.

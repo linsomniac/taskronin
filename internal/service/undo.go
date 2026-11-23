@@ -3,8 +3,8 @@ package service
 import (
 	"context"
 
-	"taskronin/internal/domain"
-	"taskronin/internal/store"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/store"
 )
 
 type undoRowKey struct {

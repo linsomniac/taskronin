@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/domain"
 )
 
 // Stack identifies an actor's undo or redo stack.

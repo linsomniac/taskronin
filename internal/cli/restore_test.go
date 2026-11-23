@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"taskronin/internal/client"
+	"github.com/linsomniac/taskronin/internal/client"
 )
 
 func TestRestoreCLI(t *testing.T) {

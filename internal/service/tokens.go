@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"taskronin/internal/auth"
-	"taskronin/internal/civil"
-	"taskronin/internal/domain"
-	"taskronin/internal/store"
-	"taskronin/internal/textsafe"
+	"github.com/linsomniac/taskronin/internal/auth"
+	"github.com/linsomniac/taskronin/internal/civil"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/store"
+	"github.com/linsomniac/taskronin/internal/textsafe"
 )
 
 // CreateTokenIn describes a named non-owner token and its limits.

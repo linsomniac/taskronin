@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/api"
 )
 
 // AddTask captures a task with optional owner placement.

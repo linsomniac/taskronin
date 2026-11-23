@@ -6,8 +6,8 @@ import (
 	"net/url"
 	"strconv"
 
-	"taskronin/internal/api"
-	"taskronin/internal/civil"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/civil"
 )
 
 // Health checks the server's unversioned health endpoint.

@@ -7,9 +7,9 @@ import (
 	"strconv"
 	"time"
 
-	"taskronin/internal/civil"
-	"taskronin/internal/domain"
-	"taskronin/internal/store"
+	"github.com/linsomniac/taskronin/internal/civil"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/store"
 )
 
 // AIChanges contains review progress and a page of token or retention-lowering operations.

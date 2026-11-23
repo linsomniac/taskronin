@@ -11,17 +11,17 @@ import (
 	"sync"
 	"time"
 
-	"taskronin/internal/api"
-	"taskronin/internal/backup"
-	"taskronin/internal/civil"
-	"taskronin/internal/clock"
-	"taskronin/internal/config"
-	"taskronin/internal/fsutil"
-	"taskronin/internal/lock"
-	"taskronin/internal/service"
-	"taskronin/internal/store"
-	"taskronin/internal/systemd"
-	"taskronin/internal/textsafe"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/backup"
+	"github.com/linsomniac/taskronin/internal/civil"
+	"github.com/linsomniac/taskronin/internal/clock"
+	"github.com/linsomniac/taskronin/internal/config"
+	"github.com/linsomniac/taskronin/internal/fsutil"
+	"github.com/linsomniac/taskronin/internal/lock"
+	"github.com/linsomniac/taskronin/internal/service"
+	"github.com/linsomniac/taskronin/internal/store"
+	"github.com/linsomniac/taskronin/internal/systemd"
+	"github.com/linsomniac/taskronin/internal/textsafe"
 )
 
 // Deps supplies the server's environment and optional readiness callback.

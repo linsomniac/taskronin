@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"time"
 
-	"taskronin/internal/civil"
+	"github.com/linsomniac/taskronin/internal/civil"
 )
 
 // maxTokenExpiry bounds a relative expiry so n*unit cannot overflow time.Duration.

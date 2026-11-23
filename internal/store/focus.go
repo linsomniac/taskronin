@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 
-	"taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/domain"
 )
 
 func scanFocus(row rowScanner) (domain.Focus, error) {

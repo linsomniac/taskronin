@@ -7,7 +7,7 @@ import (
 	"io/fs"
 	"os"
 
-	"taskronin/internal/store"
+	"github.com/linsomniac/taskronin/internal/store"
 )
 
 // Verify checks a snapshot or staged copy with SQLite and both FTS indexes,

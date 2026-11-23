@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/api"
 )
 
 // AddEntry logs work against an explicit task or as a standalone entry.

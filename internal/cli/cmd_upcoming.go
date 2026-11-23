@@ -7,7 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/api"
 )
 
 func init() { register(upcomingCommand) }

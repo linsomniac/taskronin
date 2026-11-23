@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"taskronin/internal/offline"
+	"github.com/linsomniac/taskronin/internal/offline"
 )
 
 func TestScrubCheckResult(t *testing.T) {

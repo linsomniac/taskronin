@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"time"
 
-	"taskronin/internal/civil"
+	"github.com/linsomniac/taskronin/internal/civil"
 )
 
 // Moment is a due or deferral date with an optional minute (0..1439).

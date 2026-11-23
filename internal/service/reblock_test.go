@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"taskronin/internal/domain"
-	"taskronin/internal/service"
-	"taskronin/internal/store"
-	"taskronin/internal/testutil"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/service"
+	"github.com/linsomniac/taskronin/internal/store"
+	"github.com/linsomniac/taskronin/internal/testutil"
 )
 
 func scheduledToday(t *testing.T, created string) (*testutil.Scenario, domain.TaskID, domain.BlockID) {

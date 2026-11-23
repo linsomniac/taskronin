@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 
-	"taskronin/internal/backup"
-	"taskronin/internal/domain"
-	"taskronin/internal/fsutil"
+	"github.com/linsomniac/taskronin/internal/backup"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/fsutil"
 )
 
 // Backup replays purge intents, confirms WAL truncation and takes a manual backup.

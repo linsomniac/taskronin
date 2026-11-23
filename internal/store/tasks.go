@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"time"
 
-	"taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/domain"
 )
 
 const taskColumns = `id, title, notes, status, rank, last_placed_at, last_placed_seq,

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"taskronin/internal/config"
+	"github.com/linsomniac/taskronin/internal/config"
 )
 
 func TestDefaultPathsXDG(t *testing.T) {

@@ -10,11 +10,11 @@ import (
 	"strings"
 	"testing"
 
-	"taskronin/internal/backup"
-	"taskronin/internal/domain"
-	"taskronin/internal/service"
-	"taskronin/internal/store"
-	"taskronin/internal/testutil"
+	"github.com/linsomniac/taskronin/internal/backup"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/service"
+	"github.com/linsomniac/taskronin/internal/store"
+	"github.com/linsomniac/taskronin/internal/testutil"
 )
 
 func purgeScenario(t *testing.T) (*testutil.Scenario, *backup.Ledger) {

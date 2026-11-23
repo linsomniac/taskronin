@@ -5,9 +5,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"taskronin/internal/config"
-	"taskronin/internal/fsutil"
-	"taskronin/internal/server"
+	"github.com/linsomniac/taskronin/internal/config"
+	"github.com/linsomniac/taskronin/internal/fsutil"
+	"github.com/linsomniac/taskronin/internal/server"
 )
 
 func init() { register(serveCommand) }

@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"taskronin/internal/civil"
+	"github.com/linsomniac/taskronin/internal/civil"
 )
 
 func TestParseScopes(t *testing.T) {

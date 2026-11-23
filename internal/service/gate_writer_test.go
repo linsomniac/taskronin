@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"taskronin/internal/service"
-	"taskronin/internal/testutil"
+	"github.com/linsomniac/taskronin/internal/service"
+	"github.com/linsomniac/taskronin/internal/testutil"
 )
 
 // exhaustGate burns the per-key burst so the next verification waits on the fake clock.

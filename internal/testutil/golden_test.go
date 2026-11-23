@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"taskronin/internal/testutil"
+	"github.com/linsomniac/taskronin/internal/testutil"
 )
 
 func TestGolden(t *testing.T) {

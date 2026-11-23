@@ -8,8 +8,8 @@ import (
 
 	"golang.org/x/time/rate"
 
-	"taskronin/internal/clock"
-	"taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/clock"
+	"github.com/linsomniac/taskronin/internal/domain"
 )
 
 type keyLimiter struct {

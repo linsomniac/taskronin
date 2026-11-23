@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"unicode/utf8"
 
-	"taskronin/internal/api"
-	"taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/domain"
 )
 
 // decodeBody canonicalizes keyed requests after strict decoding. Redacted

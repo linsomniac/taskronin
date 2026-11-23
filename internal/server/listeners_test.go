@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"taskronin/internal/clock"
+	"github.com/linsomniac/taskronin/internal/clock"
 )
 
 func TestListenAPICreates(t *testing.T) {

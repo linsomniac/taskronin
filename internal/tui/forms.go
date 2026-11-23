@@ -11,10 +11,10 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
-	"taskronin/internal/api"
-	"taskronin/internal/client"
-	"taskronin/internal/domain"
-	"taskronin/internal/textsafe"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/client"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/textsafe"
 )
 
 // sendFunc captures a resolved request; an empty key lets the client mint one.

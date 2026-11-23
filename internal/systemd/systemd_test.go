@@ -15,10 +15,10 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"taskronin/internal/clock"
-	"taskronin/internal/fsutil"
-	"taskronin/internal/systemd"
-	"taskronin/internal/testutil"
+	"github.com/linsomniac/taskronin/internal/clock"
+	"github.com/linsomniac/taskronin/internal/fsutil"
+	"github.com/linsomniac/taskronin/internal/systemd"
+	"github.com/linsomniac/taskronin/internal/testutil"
 )
 
 func TestListenersNotActivated(t *testing.T) {

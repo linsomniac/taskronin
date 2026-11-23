@@ -20,9 +20,9 @@ import (
 
 	"golang.org/x/net/html"
 
-	"taskronin/internal/domain"
-	"taskronin/internal/testutil"
-	"taskronin/internal/web"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/testutil"
+	"github.com/linsomniac/taskronin/internal/web"
 )
 
 func TestStatusForEveryCode(t *testing.T) {

@@ -15,10 +15,10 @@ import (
 	"strings"
 	"time"
 
-	"taskronin/internal/civil"
-	"taskronin/internal/domain"
-	"taskronin/internal/markdown"
-	"taskronin/internal/textsafe"
+	"github.com/linsomniac/taskronin/internal/civil"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/markdown"
+	"github.com/linsomniac/taskronin/internal/textsafe"
 )
 
 type page struct {

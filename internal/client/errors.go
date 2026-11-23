@@ -4,8 +4,8 @@ import (
 	"errors"
 	"fmt"
 
-	"taskronin/internal/api"
-	"taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/domain"
 )
 
 // Failure classes used by the CLI and pending-request recovery.

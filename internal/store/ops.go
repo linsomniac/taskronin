@@ -6,7 +6,7 @@ import (
 	"errors"
 	"time"
 
-	"taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/domain"
 )
 
 const opColumns = `ops.seq, ops.op_id, ops.kind, ops.actor, ops.channel, ops.at,

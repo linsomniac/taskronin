@@ -5,10 +5,10 @@ import (
 	"net/http"
 	"net/url"
 
-	"taskronin/internal/civil"
-	"taskronin/internal/datespec"
-	"taskronin/internal/domain"
-	"taskronin/internal/service"
+	"github.com/linsomniac/taskronin/internal/civil"
+	"github.com/linsomniac/taskronin/internal/datespec"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/service"
 )
 
 type App = app

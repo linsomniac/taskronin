@@ -5,10 +5,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"taskronin/internal/civil"
-	"taskronin/internal/client"
-	"taskronin/internal/datespec"
-	"taskronin/internal/report"
+	"github.com/linsomniac/taskronin/internal/civil"
+	"github.com/linsomniac/taskronin/internal/client"
+	"github.com/linsomniac/taskronin/internal/datespec"
+	"github.com/linsomniac/taskronin/internal/report"
 )
 
 type reportFlags struct {

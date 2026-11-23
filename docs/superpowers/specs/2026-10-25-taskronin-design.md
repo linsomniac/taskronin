@@ -863,3 +863,7 @@ sets; explicit undo/redo stacks; owner token socket-only under
 2. Install: `make install` to ~/.local/bin + systemd `--user` units written by `tkr init` (no Nix packaging).
 3. Checkpoint: pause after Plans A + B (core, server, CLI, MCP) for Sean to try it before the TUI and web are built.
 4. Design, architecture, behavior catalog and plans approved; implementation may start.
+
+Update 2026-11-22: items 1 and 2 are superseded. The module is
+`github.com/linsomniac/taskronin`, and Taskronin ships Debian packages,
+tarballs and a Nix flake. See `2026-11-22-packaging-design.md` §2.

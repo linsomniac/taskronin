@@ -5,9 +5,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"taskronin/internal/config"
-	"taskronin/internal/fsutil"
-	"taskronin/internal/offline"
+	"github.com/linsomniac/taskronin/internal/config"
+	"github.com/linsomniac/taskronin/internal/fsutil"
+	"github.com/linsomniac/taskronin/internal/offline"
 )
 
 func init() { register(scrubCommand) }

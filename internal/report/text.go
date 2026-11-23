@@ -7,9 +7,9 @@ import (
 	"strconv"
 	"strings"
 
-	"taskronin/internal/api"
-	"taskronin/internal/civil"
-	"taskronin/internal/textsafe"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/civil"
+	"github.com/linsomniac/taskronin/internal/textsafe"
 )
 
 // Text writes a plain-text work report to w.

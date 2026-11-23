@@ -5,10 +5,10 @@ import (
 	"slices"
 	"testing"
 
-	"taskronin/internal/domain"
-	"taskronin/internal/service"
-	"taskronin/internal/store"
-	"taskronin/internal/testutil"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/service"
+	"github.com/linsomniac/taskronin/internal/store"
+	"github.com/linsomniac/taskronin/internal/testutil"
 )
 
 func revertRefusal(t *testing.T, s *testutil.Scenario, target domain.OpID, code domain.Code) *domain.Error {

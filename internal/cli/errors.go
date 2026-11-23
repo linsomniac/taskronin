@@ -14,12 +14,12 @@ import (
 	"syscall"
 	"time"
 
-	"taskronin/internal/api"
-	"taskronin/internal/client"
-	"taskronin/internal/config"
-	"taskronin/internal/datespec"
-	"taskronin/internal/domain"
-	"taskronin/internal/textsafe"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/client"
+	"github.com/linsomniac/taskronin/internal/config"
+	"github.com/linsomniac/taskronin/internal/datespec"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/textsafe"
 )
 
 // AIDEV-NOTE: Never return humanDetail from Error(); --json depends on detail.

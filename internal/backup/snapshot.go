@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"taskronin/internal/clock"
-	"taskronin/internal/fsutil"
+	"github.com/linsomniac/taskronin/internal/clock"
+	"github.com/linsomniac/taskronin/internal/fsutil"
 )
 
 // Kind identifies why a snapshot was taken.

@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/domain"
 )
 
 // OpBudget bounds an ordinary operation, including writer admission and views.

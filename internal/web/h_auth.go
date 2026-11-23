@@ -5,7 +5,7 @@ import (
 	"net/netip"
 	"time"
 
-	"taskronin/internal/service"
+	"github.com/linsomniac/taskronin/internal/service"
 )
 
 func (a *app) loginPage(w http.ResponseWriter, r *http.Request) {

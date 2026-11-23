@@ -8,8 +8,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"taskronin/internal/fsutil"
-	"taskronin/internal/textsafe"
+	"github.com/linsomniac/taskronin/internal/fsutil"
+	"github.com/linsomniac/taskronin/internal/textsafe"
 )
 
 func init() { register(exportCommand) }

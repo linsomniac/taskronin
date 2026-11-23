@@ -4,8 +4,8 @@ import (
 	"context"
 	"database/sql"
 
-	"taskronin/internal/civil"
-	"taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/civil"
+	"github.com/linsomniac/taskronin/internal/domain"
 )
 
 // FTSHit is a live task or entry matching a full-text query.

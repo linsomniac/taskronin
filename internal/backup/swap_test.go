@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"taskronin/internal/backup"
+	"github.com/linsomniac/taskronin/internal/backup"
 )
 
 var errSwapCrash = errors.New("simulated swap crash")

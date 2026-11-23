@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/domain"
 )
 
 func TestReplaceTokens(t *testing.T) {

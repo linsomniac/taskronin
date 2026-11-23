@@ -7,8 +7,8 @@ import (
 	"io"
 	"time"
 
-	"taskronin/internal/domain"
-	"taskronin/internal/store"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/store"
 )
 
 // Export streams a portable JSON export from one reader transaction for an administrator.

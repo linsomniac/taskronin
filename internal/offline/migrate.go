@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
-	"taskronin/internal/backup"
-	"taskronin/internal/fsutil"
+	"github.com/linsomniac/taskronin/internal/backup"
+	"github.com/linsomniac/taskronin/internal/fsutil"
 )
 
 // Migrate reports schema status or migrates and completes live purge recovery.

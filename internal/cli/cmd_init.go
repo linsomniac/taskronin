@@ -10,10 +10,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"taskronin/internal/domain"
-	"taskronin/internal/fsutil"
-	"taskronin/internal/offline"
-	"taskronin/internal/textsafe"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/fsutil"
+	"github.com/linsomniac/taskronin/internal/offline"
+	"github.com/linsomniac/taskronin/internal/textsafe"
 )
 
 func init() { register(initCommand) }

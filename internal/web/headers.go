@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/domain"
 )
 
 func hostAllowlist(listen string) (map[string]bool, error) {

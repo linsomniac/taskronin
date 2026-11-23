@@ -3,7 +3,7 @@ package api
 import (
 	"log/slog"
 
-	"taskronin/internal/civil"
+	"github.com/linsomniac/taskronin/internal/civil"
 )
 
 // AddTaskRequest supplies a new task and optional placement.

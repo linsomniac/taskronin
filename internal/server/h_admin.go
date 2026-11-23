@@ -6,10 +6,10 @@ import (
 	"strconv"
 	"time"
 
-	"taskronin/internal/api"
-	"taskronin/internal/backup"
-	"taskronin/internal/domain"
-	"taskronin/internal/service"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/backup"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/service"
 )
 
 func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request) {

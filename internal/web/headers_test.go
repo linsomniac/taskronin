@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"taskronin/internal/testutil"
-	"taskronin/internal/web"
+	"github.com/linsomniac/taskronin/internal/testutil"
+	"github.com/linsomniac/taskronin/internal/web"
 )
 
 func newHandler(t *testing.T, listen string) http.Handler {

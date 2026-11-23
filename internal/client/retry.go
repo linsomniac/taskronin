@@ -11,8 +11,8 @@ import (
 	"strconv"
 	"time"
 
-	"taskronin/internal/api"
-	"taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/domain"
 )
 
 type callKind uint8

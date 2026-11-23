@@ -1,8 +1,8 @@
 package mcpserver
 
 import (
-	"taskronin/internal/api"
-	"taskronin/internal/civil"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/civil"
 )
 
 // Input structs for the MCP tools (A§10). The json tags are the wire names;

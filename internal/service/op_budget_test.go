@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"taskronin/internal/domain"
-	"taskronin/internal/store"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/store"
 )
 
 func TestFinalKeyedBudgetBeforeCommit(t *testing.T) {

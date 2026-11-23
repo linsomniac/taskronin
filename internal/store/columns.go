@@ -7,7 +7,7 @@ import (
 	"slices"
 	"strings"
 
-	"taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/domain"
 )
 
 // ApplyColumns restores allowed event-payload columns verbatim in one UPDATE.

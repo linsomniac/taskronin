@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"taskronin/internal/api"
-	"taskronin/internal/config"
-	"taskronin/internal/testutil"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/config"
+	"github.com/linsomniac/taskronin/internal/testutil"
 )
 
 func TestDAT13_Ranges(t *testing.T) {

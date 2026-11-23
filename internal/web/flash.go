@@ -10,8 +10,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"taskronin/internal/domain"
-	"taskronin/internal/service"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/service"
 )
 
 const flashCookie = "tr_flash"

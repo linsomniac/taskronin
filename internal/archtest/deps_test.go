@@ -256,14 +256,14 @@ func parseFileImports(dir, file string) []string {
 }
 
 func TestCheckerRejectsForbiddenEdges(t *testing.T) {
-	got := checkPackages("taskronin", []listedPackage{
-		{ImportPath: "taskronin/internal/domain", Imports: []string{"time", "taskronin/internal/store"}},
-		{ImportPath: "taskronin/internal/store", Imports: []string{"github.com/mattn/go-sqlite3"}},
-		{ImportPath: "taskronin/internal/civil", Imports: []string{"time", "database/sql/driver"}},
+	got := checkPackages("github.com/linsomniac/taskronin", []listedPackage{
+		{ImportPath: "github.com/linsomniac/taskronin/internal/domain", Imports: []string{"time", "github.com/linsomniac/taskronin/internal/store"}},
+		{ImportPath: "github.com/linsomniac/taskronin/internal/store", Imports: []string{"github.com/mattn/go-sqlite3"}},
+		{ImportPath: "github.com/linsomniac/taskronin/internal/civil", Imports: []string{"time", "database/sql/driver"}},
 	}, nil)
 	want := []string{
-		"taskronin/internal/domain imports taskronin/internal/store (not allowed by A§1.3)",
-		"taskronin/internal/store imports github.com/mattn/go-sqlite3 (not allowed by A§1.3)",
+		"github.com/linsomniac/taskronin/internal/domain imports github.com/linsomniac/taskronin/internal/store (not allowed by A§1.3)",
+		"github.com/linsomniac/taskronin/internal/store imports github.com/mattn/go-sqlite3 (not allowed by A§1.3)",
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("violations = %q, want %q", got, want)
@@ -271,17 +271,17 @@ func TestCheckerRejectsForbiddenEdges(t *testing.T) {
 }
 
 func TestCheckerAcceptsAllowedEdges(t *testing.T) {
-	got := checkPackages("taskronin", []listedPackage{
-		{ImportPath: "taskronin/internal/store", Imports: []string{
-			"taskronin/internal/domain", "modernc.org/sqlite", "modernc.org/sqlite/lib", "database/sql",
+	got := checkPackages("github.com/linsomniac/taskronin", []listedPackage{
+		{ImportPath: "github.com/linsomniac/taskronin/internal/store", Imports: []string{
+			"github.com/linsomniac/taskronin/internal/domain", "modernc.org/sqlite", "modernc.org/sqlite/lib", "database/sql",
 		}},
-		{ImportPath: "taskronin/cmd/tkr", Imports: []string{"taskronin/internal/cli", "os"}},
+		{ImportPath: "github.com/linsomniac/taskronin/cmd/tkr", Imports: []string{"github.com/linsomniac/taskronin/internal/cli", "os"}},
 	}, nil)
 	if len(got) != 0 {
 		t.Fatalf("unexpected violations: %q", got)
 	}
-	got = checkPackages("taskronin", []listedPackage{
-		{ImportPath: "taskronin/cmd/tkr", Imports: []string{"taskronin/internal/server"}},
+	got = checkPackages("github.com/linsomniac/taskronin", []listedPackage{
+		{ImportPath: "github.com/linsomniac/taskronin/cmd/tkr", Imports: []string{"github.com/linsomniac/taskronin/internal/server"}},
 	}, nil)
 	if len(got) != 1 {
 		t.Fatalf("cmd/tkr importing server: violations = %q", got)
@@ -290,28 +290,28 @@ func TestCheckerAcceptsAllowedEdges(t *testing.T) {
 
 func TestCheckerCLIFileExceptions(t *testing.T) {
 	files := map[string][]string{
-		"cmd_add.go":   {"taskronin/internal/server"},
-		"cmd_serve.go": {"taskronin/internal/server"},
-		"cmd_purge.go": {"taskronin/internal/offline"},
+		"cmd_add.go":   {"github.com/linsomniac/taskronin/internal/server"},
+		"cmd_serve.go": {"github.com/linsomniac/taskronin/internal/server"},
+		"cmd_purge.go": {"github.com/linsomniac/taskronin/internal/offline"},
 	}
 	stub := func(_, file string) []string { return files[file] }
 	pkgs := []listedPackage{{
-		ImportPath: "taskronin/internal/cli",
+		ImportPath: "github.com/linsomniac/taskronin/internal/cli",
 		Dir:        "unused",
 		GoFiles:    []string{"cmd_add.go", "cmd_serve.go", "cmd_purge.go"},
 	}}
-	got := checkPackages("taskronin", pkgs, stub)
-	want := []string{"taskronin/internal/cli/cmd_add.go imports taskronin/internal/server (not allowed by A§1.3)"}
+	got := checkPackages("github.com/linsomniac/taskronin", pkgs, stub)
+	want := []string{"github.com/linsomniac/taskronin/internal/cli/cmd_add.go imports github.com/linsomniac/taskronin/internal/server (not allowed by A§1.3)"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("violations = %q, want %q", got, want)
 	}
 }
 
 func TestCheckerUnknownPackage(t *testing.T) {
-	got := checkPackages("taskronin", []listedPackage{
-		{ImportPath: "taskronin/internal/bogus", Imports: []string{"time"}},
+	got := checkPackages("github.com/linsomniac/taskronin", []listedPackage{
+		{ImportPath: "github.com/linsomniac/taskronin/internal/bogus", Imports: []string{"time"}},
 	}, nil)
-	want := []string{"taskronin/internal/bogus is not in the A§1.3 table"}
+	want := []string{"github.com/linsomniac/taskronin/internal/bogus is not in the A§1.3 table"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("violations = %q, want %q", got, want)
 	}

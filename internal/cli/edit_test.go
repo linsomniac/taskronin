@@ -11,10 +11,10 @@ import (
 	"syscall"
 	"testing"
 
-	"taskronin/internal/api"
-	"taskronin/internal/client"
-	"taskronin/internal/config"
-	"taskronin/internal/testutil"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/client"
+	"github.com/linsomniac/taskronin/internal/config"
+	"github.com/linsomniac/taskronin/internal/testutil"
 )
 
 func editFixture(t *testing.T) (*testutil.Server, sysDeps, *api.Task) {

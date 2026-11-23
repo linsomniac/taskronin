@@ -7,10 +7,10 @@ import (
 	"errors"
 	"time"
 
-	"taskronin/internal/civil"
-	"taskronin/internal/domain"
-	"taskronin/internal/store"
-	"taskronin/internal/textsafe"
+	"github.com/linsomniac/taskronin/internal/civil"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/store"
+	"github.com/linsomniac/taskronin/internal/textsafe"
 )
 
 // CompleteIn supplies a task completion, optional retitle and completion log text.

@@ -5,8 +5,8 @@ import (
 	"database/sql"
 	"time"
 
-	"taskronin/internal/civil"
-	"taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/civil"
+	"github.com/linsomniac/taskronin/internal/domain"
 )
 
 const interruptionColumns = `id, at, date, from_task_id, from_block_id, to_task_id, op_id, deleted_at`

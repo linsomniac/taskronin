@@ -8,8 +8,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"taskronin/internal/client"
-	"taskronin/internal/mcpserver"
+	"github.com/linsomniac/taskronin/internal/client"
+	"github.com/linsomniac/taskronin/internal/mcpserver"
 )
 
 func init() { register(mcpCommand) }

@@ -6,9 +6,9 @@ import (
 	"slices"
 	"strings"
 
-	"taskronin/internal/api"
-	"taskronin/internal/domain"
-	"taskronin/internal/textsafe"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/textsafe"
 )
 
 // AIDEV-NOTE: opHeadline closures render the same tokens for effect matching

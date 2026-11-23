@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"taskronin/internal/config"
+	"github.com/linsomniac/taskronin/internal/config"
 )
 
 func configPaths(t *testing.T) config.Paths {

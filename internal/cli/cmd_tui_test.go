@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"taskronin/internal/api"
-	"taskronin/internal/testutil"
+	"github.com/linsomniac/taskronin/internal/api"
+	"github.com/linsomniac/taskronin/internal/testutil"
 )
 
 func TestTUIHookInstalled(t *testing.T) {

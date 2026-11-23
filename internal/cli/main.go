@@ -11,9 +11,9 @@ import (
 
 	"golang.org/x/term"
 
-	"taskronin/internal/config"
-	"taskronin/internal/domain"
-	"taskronin/internal/textsafe"
+	"github.com/linsomniac/taskronin/internal/config"
+	"github.com/linsomniac/taskronin/internal/domain"
+	"github.com/linsomniac/taskronin/internal/textsafe"
 )
 
 type sysDeps struct {

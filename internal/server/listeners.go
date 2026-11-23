@@ -10,9 +10,9 @@ import (
 	"syscall"
 	"time"
 
-	"taskronin/internal/config"
-	"taskronin/internal/fsutil"
-	"taskronin/internal/systemd"
+	"github.com/linsomniac/taskronin/internal/config"
+	"github.com/linsomniac/taskronin/internal/fsutil"
+	"github.com/linsomniac/taskronin/internal/systemd"
 )
 
 // listenAPI uses the systemd Unix stream listener named api or binds a private Unix socket.

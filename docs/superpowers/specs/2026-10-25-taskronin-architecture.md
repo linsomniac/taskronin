@@ -17,7 +17,7 @@ one `op_id` (D§3). "Today"/"now" always mean the server's configured zone.
 ### 1.1 Module, toolchain, dependencies
 
 ```
-module taskronin            // round-2 Q1; see "Renaming" below
+module github.com/linsomniac/taskronin   // renamed 2026-11-22 (packaging design P§2.3)
 
 go 1.26.0
 toolchain go1.27.4
@@ -3353,7 +3353,7 @@ formatters:
   settings:
     goimports:
       local-prefixes:
-        - taskronin
+        - github.com/linsomniac/taskronin
 ```
 Layering (§1.3) is enforced by `internal/archtest`, not depguard.
 
@@ -3614,4 +3614,6 @@ Final round: agy no CRITICAL/HIGH; Codex 1 HIGH + 1 MEDIUM.
 *Recommendation:* if the repo will be hosted, use its import path now
 (e.g. `github.com/<you>/taskronin`); if it will stay private on this machine,
 keep `taskronin` — it never needs `go get`.
+*Update 2026-11-22:* the repository is now public, and the module was renamed to
+`github.com/linsomniac/taskronin` (packaging design P§2.3).
 
