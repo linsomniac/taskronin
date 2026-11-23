@@ -51,6 +51,12 @@ two scoped re-reviews). Reference project: `linsomniac/ipsak`.
   exists (as in apt-cacher-ultra). `0.1.0.md` was written by Claude.
 - R-I13: stricter attestation flags are not shown in the README; it points
   at `gh attestation verify --help`.
+- R-I14: the ARM test job runs without the race detector, and the amd64 race
+  runs use `GOFLAGS=-p=2`. The first two CI runs on GitHub failed only in the
+  ARM race job: once on a two-second test wait (fixed in the tests), then with
+  "writer is busy" in two password tests, because Argon2 under `-race` on
+  that runner exceeds the service's fixed 15-second operation budget. Race
+  detection does not depend on the architecture and stays on amd64.
 
 ## Review outcomes
 
@@ -78,5 +84,9 @@ together with the Minor findings carried from the tasks.
   from the build information would fix that.
 - The release run tests amd64 only. An arm64 smoke job in `release.yml`
   would remove the reliance on CI being green for the tagged commit.
+- Password tests under the race detector run close to the 15-second
+  operation budget on shared runners (R-I14). A cheaper Argon2 setting for
+  tests, or a budget the tests can raise for password operations, would
+  remove the remaining risk of a false failure on amd64.
 - The source tarball and the repository include `description`,
   `initial_prompt` and `docs/superpowers`; they hold no secrets.

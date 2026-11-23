@@ -17,6 +17,11 @@ jobs:
     name: Build
     timeout-minutes: 60
     runs-on: ubuntu-latest
+    # AIDEV-NOTE: Argon2 under the race detector is slow. Two packages at a time
+    # keeps password operations inside the service's 15-second operation budget on
+    # a 4-core runner.
+    env:
+      GOFLAGS: -p=2
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

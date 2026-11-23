@@ -17,6 +17,11 @@ jobs:
     name: Check
     timeout-minutes: 60
     runs-on: ubuntu-latest
+    # AIDEV-NOTE: Argon2 under the race detector is slow. Two packages at a time
+    # keeps password operations inside the service's 15-second operation budget on
+    # a 4-core runner.
+    env:
+      GOFLAGS: -p=2
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -42,7 +47,11 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go vet ./...
-      - run: go test -race -count=1 -timeout=30m ./...
+      # AIDEV-NOTE: no -race here. The race detector runs on amd64 in the check
+      # job and finds races whatever the architecture; this job proves the suite
+      # passes on arm64. Under -race on this runner Argon2 pushed password
+      # operations past the service's 15-second operation budget.
+      - run: go test -count=1 -timeout=30m ./...
 
   packages:
     name: Packages (${{ matrix.os }})

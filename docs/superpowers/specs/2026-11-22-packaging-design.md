@@ -277,10 +277,17 @@ build with the pinned toolchain.
 | Job | Runner | Does |
 |---|---|---|
 | `check` | `ubuntu-latest` | installs golangci-lint (action, `install-only: true`), runs `make check` |
-| `test-arm64` | `ubuntu-24.04-arm` | `go vet ./...` and `go test -race -count=1 -timeout=30m ./...` |
+| `test-arm64` | `ubuntu-24.04-arm` | `go vet ./...` and `go test -count=1 -timeout=30m ./...` (no `-race`, see below) |
 | `packages` | matrix: `ubuntu-latest`, `ubuntu-24.04-arm` | `goreleaser check`; `goreleaser release --snapshot --clean`; `make package-smoke` |
 | `nix` | `ubuntu-latest` | enables KVM, installs Nix, runs `nix flake check --print-build-logs` |
 | `nix-arm64` | `ubuntu-24.04-arm` | installs Nix, `nix build .#taskronin`, runs `./result/bin/tkr version` (no VM test: the ARM runners have no KVM) |
+
+The race detector runs only on amd64. It finds races whatever the
+architecture, and under `-race` on the ARM runners Argon2 pushed password
+operations past the service's 15-second operation budget, so the suite failed
+there for reasons unrelated to the code (first two CI runs, 2026-11-23). The
+amd64 race runs (`check`, and the release `build` job) set `GOFLAGS=-p=2` to
+keep more headroom under the same budget.
 
 `scripts/package-smoke.sh` runs in a `debian:stable` container (not `-slim`,
 which discards `/usr/share/doc`) with `dist/` mounted read-only. As root it
