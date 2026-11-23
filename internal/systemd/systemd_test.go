@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -336,6 +337,12 @@ func TestUnitsVerify(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, analyze, "--user", "verify", paths[0], paths[1])
+	// AIDEV-NOTE: runners may have no session runtime directory, and a
+	// developer's user unit drop-ins can change the units being verified.
+	cmd.Env = slices.DeleteFunc(os.Environ(), func(entry string) bool {
+		return strings.HasPrefix(entry, "XDG_") || strings.HasPrefix(entry, "SYSTEMD_UNIT_PATH=")
+	})
+	cmd.Env = append(cmd.Env, "HOME="+dir, "XDG_RUNTIME_DIR="+dir)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("systemd-analyze --user verify: %v\n%s", err, out)
 	}
