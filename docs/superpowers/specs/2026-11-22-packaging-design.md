@@ -138,7 +138,8 @@ module linked into `./cmd/tkr` for linux/amd64 or linux/arm64 with
 `build/THIRD_PARTY_LICENSES.txt` equals the committed file. `make third-party`
 copies the regenerated file over the committed one after a dependency change.
 
-The script must be deterministic (`LC_ALL=C` sort, no timestamps) and must
+The script must be deterministic (`LC_ALL=C` for the whole script, so glob
+and sort order do not depend on the shell or locale; no timestamps) and must
 not hide a failed command inside a pipeline: every `go list` runs as its own
 checked command writing to a file.
 
@@ -187,6 +188,15 @@ A profile entry that fails the rule is skipped.
 lexical prefix test on `/nix/store/`; it does not consult `NIX_STORE_DIR`.
 
 `nix run` succeeds when the same build is also installed in a profile.
+When one build is in two profiles the earlier entry wins; after moving `tkr`
+between profiles, `tkr init --units-only` rewrites the units. A `tkr` kept
+somewhere the list does not cover (another profile manager, a hand-made
+link) is refused; the documented way out is a standard profile or a copy
+outside the store. An explicit override flag is **open for Sean**.
+
+On a single-user Nix install `/nix/var/nix/profiles/default` belongs to the
+account that installed Nix, as does the whole store, so that entry adds no
+new trust.
 After an upgrade the running server keeps the old binary (Nix does not
 collect a running program) until the service restarts; then it runs the new
 one. This matches the Debian package's behaviour.
@@ -290,16 +300,26 @@ Two jobs. Nothing is public until the last step of the second.
 checkout with full history; refuse a tag that is not
 `vMAJOR.MINOR.PATCH` with an optional `-prerelease` suffix; Go with no
 module cache; golangci-lint; `make check`;
-`goreleaser release --clean --skip=publish`; `make package-smoke`; upload
-the six P§4 files and GoReleaser's `dist/CHANGELOG.md` as one workflow
-artifact.
+`goreleaser release --clean --skip=publish` with
+`GORELEASER_CURRENT_TAG` set to the pushed tag; `make package-smoke`; fail
+unless the six P§4 files exist under the names the pushed tag implies;
+choose the release notes; upload the six files and the notes as one
+workflow artifact.
+
+GoReleaser picks its version from git, and when two tags sit on one commit
+(`v0.2.0-rc1` and `v0.2.0`) it can pick the other one. The explicit tag and
+the name check make the build match the tag that was pushed.
+
+Release notes are `docs/release-notes/<version>.md` when that file exists
+(as in apt-cacher-ultra), otherwise GoReleaser's list of commit subjects
+since the previous tag.
 
 **`publish`** (`needs: build`; `contents: write`, `id-token: write`,
 `attestations: write`; it checks out nothing and runs no project code):
 download the artifact; `sha256sum -c checksums.txt`; `actions/attest` with
 `subject-checksums`; then `gh release create "$TAG" --verify-tag` with the
-six files, the changelog plus a verification footer as notes, and
-`--prerelease` when the tag has a suffix.
+six files passed by their exact names, the notes plus a verification footer,
+and `--prerelease` when the tag has a suffix.
 
 A failed run is re-run from the Actions page; it publishes nothing partial.
 
@@ -330,7 +350,8 @@ checkout path are fixed in the tests, not skipped.
   migrates on start. The Development section links this document.
 - `docs/releasing.md`: how to cut a release (CI green on the commit, dry run
   with `make snapshot` and `make package-smoke`, tag, push the tag, what
-  appears), that a version is never reused, how to re-run a failed release,
+  appears), optional hand-written notes in `docs/release-notes/<version>.md`,
+  that a version is never reused, how to re-run a failed release,
   how to update `vendorHash` and `THIRD_PARTY_LICENSES.txt` after a
   dependency change, how to update `flake.lock`, and a recommendation to
   protect `v*` tags with a repository ruleset.
